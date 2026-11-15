@@ -15,6 +15,7 @@
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderAsAdmin } from './helpers/render.jsx';
+import { nameStartsWithPrinted } from './helpers/accessibleName.js';
 import AlertList from '../src/components/AlertList.jsx';
 import RecentAlerts from '../src/components/RecentAlerts.jsx';
 import EventLog from '../src/components/EventLog.jsx';
@@ -234,23 +235,36 @@ describe('RecordingsCard', () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
     vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+    // The short label shows a weekday only for a recording under 7 days old; pin "now" two days after X so it stays that way.
+    // Only Date is faked, so waitFor and userEvent keep working.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-02T00:00:00Z'));
     return renderAsAdmin(<RecordingsCard childId="kid-1" />, { settings: { timezone } });
   };
+  afterEach(() => { vi.useRealTimers(); });
+
+  // The card is one row now; its thumbnails open from it.
+  const open = async (user) => { await user.click(await screen.findByRole('button', { name: /^Recordings/ })); };
 
   test('★ the entry\'s time is HOME time with the label', async () => {
-    const { container } = mount(LA);
-    await screen.findByText('Recordings');
+    const { container, user } = mount(LA);
+    await open(user);
     await waitFor(() => expect(container.querySelector('.rec-strip__item')).not.toBeNull());
-    expect(container.querySelector('.rec-strip__item').textContent).toContain('Sun, 30 Aug, 7:00 pm GMT-7');
+    const tile = container.querySelector('.rec-strip__item');
+    expect(tile.textContent).toContain('Sun 7:00 pm GMT-7');
+    expect(tile).toHaveAccessibleName(/Sun, 30 Aug, 7:00 pm GMT-7/);
+    // ★ Label in name (WCAG 2.5.3): the name opens with the chip, zone label included. Fails on the old "<camera> · Sun, 30 Aug…".
+    expect(nameStartsWithPrinted(tile)).toBe(true);
   });
 
   test('★ no label when the device is at home', async () => {
-    const { container } = mount(DEVICE);
-    await screen.findByText('Recordings');
+    const { container, user } = mount(DEVICE);
+    await open(user);
     await waitFor(() => expect(container.querySelector('.rec-strip__item')).not.toBeNull());
     const text = container.querySelector('.rec-strip__item').textContent;
-    expect(text).toContain('Mon, 31 Aug, 2:00 pm');
+    expect(text).toContain('Mon 2:00 pm');
     expect(text).not.toMatch(/GMT|NZST|NZDT/);
+    expect(container.querySelector('.rec-strip__item')).toHaveAccessibleName(/Mon, 31 Aug, 2:00 pm/);
   });
 });
 
@@ -264,7 +278,7 @@ describe('TimelapseCard — a night is a calendar date, not an instant', () => {
     // reads '2026-03-08' as 00:00 UTC and prints the evening before in Los Angeles. The next case is the
     // one that fails on the old formatter.
     renderAsAdmin(<TimelapseCard childId="kid-1" />, { settings: { timezone: LA } });
-    expect(await screen.findByRole('button', { name: 'Play Sun, 8 Mar timelapse' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Sun, 8 Mar · 42s, play timelapse' })).toBeInTheDocument();
   });
 
   test('★★ a night whose local midnight does not exist on this device still prints its own date', async () => {
@@ -282,7 +296,7 @@ describe('TimelapseCard — a night is a calendar date, not an instant', () => {
       vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
       vi.spyOn(api, 'get').mockResolvedValue([{ id: 't-1', night_date: '2011-12-30', duration_s: 42 }]);
       renderAsAdmin(<TimelapseCard childId="kid-1" />, { settings: { timezone: LA } });
-      expect(await screen.findByRole('button', { name: 'Play Fri, 30 Dec timelapse' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Fri, 30 Dec · 42s, play timelapse' })).toBeInTheDocument();
     } finally {
       process.env.TZ = pinned;
     }

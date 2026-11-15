@@ -63,6 +63,20 @@ const videosPlaying = (page) =>
     },
     null,
     { timeout: 45_000 }
+  ).then(() =>
+    // Found when refreshing for 0.48.0: the picture was taken while the tile still said "No signal". WebRTC cannot reach the
+    // throwaway container (only the HTTP port is published), so each tile fails its first WebRTC attempt (~2 s) and then
+    // falls back to HLS, which is what actually plays. The hidden HLS <video> already has a frame during that window, so the
+    // check above passes early. A player sets its <video> to opacity 1 only once its own state is 'live' (WhepPlayer and
+    // HlsPlayer both), so wait for every video to be shown, and for no overlay text, rather than for "a frame exists".
+    page.waitForFunction(
+      () => {
+        const v = [...document.querySelectorAll('video.whep-video')];
+        return v.length > 0 && v.every((el) => getComputedStyle(el).opacity === '1') && !/No signal|Connecting/i.test(document.body.innerText);
+      },
+      null,
+      { timeout: 45_000 }
+    )
   );
 
 // 1. First-run admin setup, on an empty install. The password field shows dots, which is the point.
@@ -101,12 +115,15 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
 
   // The night detail page: the numbers behind the overview card.
   await go(`/children/${AVERY}/sleep`);
-  await page.getByText('NIGHT TIMELINE').waitFor();
+  // The timeline card's title is exactly "Timeline" (it was "NIGHT TIMELINE" before UI refresh PR G); an exact match, so no
+  // longer text containing the word (a night summary phrase, say) can satisfy it early.
+  await page.getByText('Timeline', { exact: true }).waitFor();
   await shot('sleep-mobile');
 
   // The morning review: opened the way a person gets there, from the prompt on the child page.
   await go(`/children/${AVERY}`);
-  await page.getByText('Was last night right?').click();
+  // The question now sits inside the night card; "Not quite" opens the review screen, which is what this shot shows.
+  await page.getByRole('button', { name: 'Not quite' }).click();
   await page.getByRole('button', { name: 'That’s right' }).waitFor();
   await shot('review-mobile');
 
@@ -129,7 +146,7 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
 
   // The add-camera form, filled with example values and not saved.
   await go('/cameras');
-  await page.getByRole('button', { name: '+ Add camera' }).click();
+  await page.getByRole('button', { name: 'Add camera', exact: true }).click();
   // Since #945 the Add camera screen starts with a search for cameras on the network and keeps the full form behind the
   // "Add a camera manually" card. A fresh seeded container finds no camera, so open the manual card, which is what a
   // person with a camera the search cannot see does.
@@ -138,6 +155,9 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
   await page.getByLabel('Camera IP address').fill('192.168.1.50');
   await page.getByLabel('RTSP port').fill('554');
   await page.getByLabel('Stream path', { exact: true }).fill('/Streaming/Channels/101');
+  // Filling the last field scrolls the page down, which left the "Unsaved changes" banner cut off under the sticky header
+  // in the 0.48.0 refresh. Back to the top so the picture starts at the top of the form.
+  await page.evaluate(() => window.scrollTo(0, 0));
   await shot('add-camera-mobile');
   await context.close();
 }

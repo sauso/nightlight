@@ -218,23 +218,34 @@ function requestIsFresh(headers, etag, lastModified) {
   return true;
 }
 
-// The Range header against `size`, by the rules res.sendFile used (the `range-parser` package under `send`, which this mirrors so
+// The Range header against `size`, by the rules res.sendFile uses (the `range-parser` package under `send`, which this mirrors so
 // that a browser's <video> seeks exactly as before; backend/test/media-files.test.js compares the two request by request):
-//   null           serve the whole file: no Range, not `bytes=`, or several separate ranges (send serves only one)
-//   'unsatisfiable' answer 416: a `bytes=` header none of whose ranges can be met (also a malformed one, as send does)
+//   null           serve the whole file: no Range, not `bytes=`, a malformed one, or several separate ranges (send serves one only)
+//   'unsatisfiable' answer 416: a well-formed `bytes=` header none of whose ranges can be met
 //   { start, end }  answer 206 with these bytes (inclusive)
+//
+// ⚠️ MALFORMED MEANS IGNORED SINCE THE EXPRESS 5 MOVE. range-parser 1.2.1 (under Express 4's send 0.19) treated a header like
+// `bytes=abc` as unsatisfiable and answered 416; range-parser 1.3.0 (under Express 5's send 1.x) reports it as malformed and
+// send then serves the whole file with a 200. RFC 9110 14.2 lets a server ignore an invalid Range field, and a player whose
+// header is garbled still plays. The positions are now digits only after trimming (`5x`, `1e3`, `--5`, `+5` are malformed
+// where parseInt used to read a number out of them), and ONE malformed range anywhere in the list makes the whole header ignored.
 const BYTES_RANGE_RE = /^ *bytes=/;
+const DIGITS_RE = /^\d+$/;
 function parseRange(header, size) {
   if (!BYTES_RANGE_RE.test(header)) return null;
   const ranges = [];
   for (const part of header.slice(header.indexOf('=') + 1).split(',')) {
-    const [a, b] = part.split('-');
-    let start = parseInt(a, 10);
-    let end = parseInt(b, 10);
-    if (Number.isNaN(start)) { start = size - end; end = size - 1; } // -nnn: the last nnn bytes
-    else if (Number.isNaN(end)) end = size - 1; // nnn-
+    const dash = part.indexOf('-');
+    if (dash === -1) return null; // no `-` at all: malformed
+    const startStr = part.slice(0, dash).trim();
+    const endStr = part.slice(dash + 1).trim();
+    let start = DIGITS_RE.test(startStr) ? Number(startStr) : NaN;
+    let end = DIGITS_RE.test(endStr) ? Number(endStr) : NaN;
+    if (startStr.length === 0) { start = size - end; end = size - 1; } // -nnn: the last nnn bytes
+    else if (endStr.length === 0) end = size - 1; // nnn-
     if (end > size - 1) end = size - 1;
-    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start < 0) continue; // invalid or unsatisfiable
+    if (Number.isNaN(start) || Number.isNaN(end)) return null; // malformed (not digits)
+    if (start > end || start < 0) continue; // unsatisfiable
     ranges.push({ start, end });
   }
   if (ranges.length < 1) return 'unsatisfiable';

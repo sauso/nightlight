@@ -4,15 +4,23 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import MoreMenu from '../components/MoreMenu.jsx';
+import ModalActions from '../components/ModalActions.jsx';
+import { Ban, Check, Trash2 } from 'lucide-react';
 import AvatarEditor from '../components/AvatarEditor.jsx';
 import Modal from '../components/Modal.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import { loadDraft, clearDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
+import { CHILD_COLORS, childColorId } from '../lib/childColors.js';
 
-const COLORS = ['#f4c56a', '#7FBFA3', '#8A9FE0', '#E0A5C9', '#E0B27F', '#7c83db'];
+// The colour a new child starts with, and what a child whose record carries no colour field at all is shown as. The STORED
+// value stays the picker's own hex (lib/childColors.js): the server and the database are unchanged; only how it is drawn became
+// theme-aware. A child can also have NO colour, stored as '' (owner, 2026-11-15, "No colour" in the picker): '' is a real value
+// here and must never be replaced by this default, on load or when a draft is restored.
+const DEFAULT_COLOR = CHILD_COLORS[0].stored;
 
 // Add / edit a child on its own routed screen, reached from the Children tab (or a child's detail
 // via its avatar). Both roles can open it, but what a caregiver may do here is narrower (owner decision
@@ -29,13 +37,15 @@ const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo'];
 // moment it is picked on an existing child (persistPhoto), and as a data: URL it is too big to be worth
 // keeping in storage for the new-child case. A photo chosen for a not-yet-created child is lost on reload.
 // No secret fields exist on this form; the allow-list is still explicit so a future one is not stored by default.
-const DRAFT_FIELDS = ['name', 'birthday', 'color', 'track_sleep', 'sleep_window_start', 'sleep_window_end', 'primary_camera_id', 'sleep_report_enabled', 'sleep_report_show_name', 'hold_alerts_until_asleep'];
+const DRAFT_FIELDS = ['name', 'birthday', 'color', 'track_sleep', 'sleep_window_start', 'sleep_window_end', 'primary_camera_id', 'sleep_report_enabled', 'sleep_report_show_name', 'hold_alerts_until_asleep', 'show_sleep_score'];
 
 const NEW_CHILD = {
-  name: '', birthday: '', color: COLORS[0], photo: null,
+  name: '', birthday: '', color: DEFAULT_COLOR, photo: null,
   track_sleep: true, sleep_window_start: '19:00', sleep_window_end: '07:00', primary_camera_id: '',
   // Both on, as the server defaults them (#397, #398): the nightly report is sent, and it names the child.
   sleep_report_enabled: true, sleep_report_show_name: true, hold_alerts_until_asleep: false,
+  // On, as the server defaults it (sleep score plan, phase 2).
+  show_sleep_score: true,
 };
 
 export default function ChildSettings() {
@@ -80,7 +90,7 @@ export default function ChildSettings() {
     if (isNew || initedRef.current || !kid) return;
     initedRef.current = true;
     const loaded = {
-      name: kid.name, birthday: kid.birthday || '', color: kid.color || COLORS[0], photo: kid.photo || null,
+      name: kid.name, birthday: kid.birthday || '', color: typeof kid.color === 'string' ? kid.color : DEFAULT_COLOR, photo: kid.photo || null,
       track_sleep: kid.track_sleep == null ? true : !!kid.track_sleep,
       sleep_window_start: kid.sleep_window_start || '19:00',
       sleep_window_end: kid.sleep_window_end || '07:00',
@@ -89,6 +99,8 @@ export default function ChildSettings() {
       sleep_report_enabled: kid.sleep_report_enabled !== 0 && kid.sleep_report_enabled !== false,
       sleep_report_show_name: kid.sleep_report_show_name !== 0 && kid.sleep_report_show_name !== false,
       hold_alerts_until_asleep: kid.hold_alerts_until_asleep === 1 || kid.hold_alerts_until_asleep === true,
+      // `!== 0` like the report switches: a server from before the column sends nothing, and that means on.
+      show_sleep_score: kid.show_sleep_score !== 0 && kid.show_sleep_score !== false,
     };
     const draft = loadDraft(draftKey, DRAFT_FIELDS);
     setBaseline(loaded);
@@ -104,6 +116,9 @@ export default function ChildSettings() {
     setForm(baseline);
     setRestored(false);
   }
+
+  // True when the colour is drawn as none (see the picker's comment): '' or any value that is not a hex we map.
+  const noColour = childColorId(form.color) === null;
 
   // The sleep camera picker (#655). Its options are EVERY camera assigned to this child, in tile order
   // (GET /cameras order), turned-off ones included and marked, because an admin may choose a camera that is
@@ -207,7 +222,17 @@ export default function ChildSettings() {
 
   return (
     <>
-      <AppHeader title={isNew ? 'Add child' : (kid?.name || 'Child')} back={back} />
+      <AppHeader title={isNew ? 'Add child' : (kid?.name || 'Child')} back={back}
+        // Offered only once the child has loaded (same condition that swaps "Loading…" for the form).
+        // Remove used to sit inside the form, which does not exist while loading; in the header it was
+        // reachable then, so an admin could confirm and send a DELETE for a child the page had not
+        // shown yet (PR #1088 review).
+        actions={!isNew && isAdmin && kid ? <MoreMenu label="More options for this child" menuLabel="Child">
+          <button type="button" role="menuitem" className="more-menu__item dev-card__delete"
+            onClick={() => { setRemoveError(''); setRemoving(true); }}>
+            <Trash2 size={16} aria-hidden="true" />Remove child
+          </button>
+        </MoreMenu> : null} />
       <main className="app-main">
         {isNew && !isAdmin ? (
           // No form at all: the server refuses a caregiver's add, so a form here would only let someone
@@ -220,178 +245,218 @@ export default function ChildSettings() {
             {error && <div className="error-banner">{error}</div>}
             {unsaved && <UnsavedNotice restored={restored} onDiscard={discardDraft} />}
 
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-              <AvatarEditor name={form.name || 'Child'} src={form.photo} color={form.color} size={88} onChange={onPhoto} />
-              {form.photo && (
-                <button type="button" className="icon-btn" onClick={removePhoto}>
-                  Remove
-                </button>
-              )}
-              {photoStatus && (
-                <div className="camera-tile__sub" style={{ color: 'var(--accent-text)' }}>
-                  {photoStatus === 'saving' ? 'Saving photo…' : 'Photo saved ✓'}
-                </div>
-              )}
-            </div>
-
-            <div className="field">
-              <label htmlFor="child-name">Name</label>
-              <input id="child-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required placeholder="e.g. Alex" />
-            </div>
-
-            <div className="field">
-              <label htmlFor="child-bday">Birthday (optional)</label>
-              <input id="child-bday" type="date" value={form.birthday} onChange={(e) => setForm({ ...form, birthday: e.target.value })} />
-            </div>
-
-            <div className="field">
-              <label>Colour</label>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {COLORS.map((c) => (
-                  <button key={c} type="button" aria-label={`Colour ${c}`}
-                    onClick={() => setForm({ ...form, color: c })}
-                    style={{
-                      width: 34, height: 34, borderRadius: '50%', background: c, cursor: 'pointer',
-                      border: form.color === c ? '3px solid var(--text-primary)' : '3px solid transparent',
-                    }} />
-                ))}
-              </div>
-              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                Used for the child's initials when no photo is set.
-              </div>
-            </div>
-
-            <div className="field">
-              <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>Track sleep</span>
-                <Switch checked={form.track_sleep} disabled={!isAdmin}
-                  onChange={(e) => setForm({ ...form, track_sleep: e.target.checked })} />
-              </label>
-              {!isAdmin && (
-                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                  Only an admin can change sleep tracking, the bedtime window and the sleep camera.
-                </div>
-              )}
-              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                Estimate this child's nightly sleep from their cameras' movement &amp; sound. Wake-ups are
-                also recorded (without alerting you)
-                {isAdmin ? (
-                  <> — length and retention are under <Link to="/settings/recording">Settings › Camera and Recording › Recording</Link>.</>
-                ) : (
-                  <> — an admin can change their length and retention.</>
+            <div className="card">
+              <h2 className="card-heading">Profile</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+                <AvatarEditor name={form.name || 'Child'} src={form.photo} color={form.color} size={88} onChange={onPhoto} />
+                {form.photo && (
+                  <button type="button" className="icon-btn" onClick={removePhoto}>
+                    Remove
+                  </button>
+                )}
+                {photoStatus && (
+                  <div className="camera-tile__sub" style={{ color: 'var(--accent-text)' }}>
+                    {photoStatus === 'saving' ? 'Saving photo…' : 'Photo saved ✓'}
+                  </div>
                 )}
               </div>
-              {form.track_sleep && (
-                <>
-                  <div style={{ marginTop: 12 }}>
-                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>Hold alerts until asleep</span>
-                      <Switch checked={form.hold_alerts_until_asleep} disabled={!isAdmin}
-                        onChange={(e) => setForm({ ...form, hold_alerts_until_asleep: e.target.checked })} />
-                    </label>
-                    <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                      Hold this child's motion and sound alerts until sleep is detected. Outside the sleep window,
-                      the hold has no time limit; an evening crying spell or daytime nap may be silent. Inside the
-                      window, alerts resume after 45 minutes from the first held alert even without detected sleep.
-                      Held alerts are not sent later. Camera-offline alerts are never held. Not a safety device. Off by default.
-                      {!isAdmin && ' Only an admin can change this setting.'}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-                    <div style={{ flex: 1 }}>
-                      <label htmlFor="child-bed">Bedtime</label>
-                      <input id="child-bed" type="time" value={form.sleep_window_start} disabled={!isAdmin}
-                        onChange={(e) => setForm({ ...form, sleep_window_start: e.target.value })} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label htmlFor="child-wake">Wake time</label>
-                      <input id="child-wake" type="time" value={form.sleep_window_end} disabled={!isAdmin}
-                        onChange={(e) => setForm({ ...form, sleep_window_end: e.target.value })} />
-                    </div>
-                  </div>
+
+              <div className="field">
+                <label htmlFor="child-name">Name</label>
+                <input id="child-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required placeholder="e.g. Alex" />
+              </div>
+
+              <div className="field">
+                <label htmlFor="child-bday">Birthday (optional)</label>
+                <input id="child-bday" type="date" value={form.birthday} onChange={(e) => setForm({ ...form, birthday: e.target.value })} />
+              </div>
+
+              <div className="field">
+                <label id="child-colour-label">Colour</label>
+                {/* The swatches show the same theme-aware shades the avatar and the cards are drawn in. The one marked is the
+                    one the stored colour MEANS (childColorId: a legacy or custom hex marks its nearest swatch), and merely
+                    opening and saving never rewrites `form.color`: it only changes when a swatch is pressed, and then to
+                    that swatch's own stored hex. Each is a 44px button named by its hue; the selected one also carries a
+                    check and a heavier outline, so the colour is never the only signal. The first button, "No colour", stores ''
+                    (the child then has a plain photo and the brand-colour initials disc); it is marked by a slashed circle,
+                    not by colour, and the slashed circle stays in BOTH states (chosen or not) so the mark that says "none" is
+                    never hidden: the choice is shown by the same heavier outline the swatches use, with no check.
+                    It is pressed whenever no swatch is (`childColorId` is null): that is '' AND a stored value that is not a
+                    hex we map (a legacy row), which is drawn as no colour everywhere, so the picker must say so too. The stored
+                    value is still not rewritten until a button is pressed. */}
+                <div role="group" aria-labelledby="child-colour-label" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <button type="button" aria-label="No colour" aria-pressed={noColour}
+                    onClick={() => setForm({ ...form, color: '' })}
+                    style={{
+                      width: 44, height: 44, padding: 0, background: 'none', border: 'none', cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                    <span aria-hidden="true" style={{
+                      width: 34, height: 34, borderRadius: '50%', boxSizing: 'border-box', border: '2px solid var(--text-secondary)',
+                      color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: noColour ? '0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--text-primary)' : 'none',
+                    }}>
+                      <Ban size={18} strokeWidth={2.5} />
+                    </span>
+                  </button>
+                  {CHILD_COLORS.map((c) => {
+                    const selected = childColorId(form.color) === c.id;
+                    return (
+                      <button key={c.id} type="button" aria-label={c.name} aria-pressed={selected}
+                        onClick={() => setForm({ ...form, color: c.stored })}
+                        style={{
+                          width: 44, height: 44, padding: 0, background: 'none', border: 'none', cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                        <span aria-hidden="true" style={{
+                          width: 34, height: 34, borderRadius: '50%', background: `var(--child-${c.id})`, color: `var(--child-${c.id}-on)`,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          boxShadow: selected ? '0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--text-primary)' : 'none',
+                        }}>
+                          {selected && <Check size={18} strokeWidth={3} />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                  The ring around this child's photo, and the colour of their initials when no photo is set. "No colour" leaves the photo plain.
+                </div>
+              </div>
+            </div>
+            {/* UI consistency (PR-C): who the child is (Profile) apart from how their nights are tracked (Sleep), each a titled
+                card like the settings screens elsewhere. "Profile" and "Sleep" are new words; no field moved between them and
+                nothing about saving changed (still one form, one Save). */}
+            <div className="card">
+              <h2 className="card-heading">Sleep</h2>
+              <div className="field">
+                <SwitchRow label="Track sleep" checked={form.track_sleep} disabled={!isAdmin}
+                  onChange={(e) => setForm({ ...form, track_sleep: e.target.checked })} />
+                {!isAdmin && (
                   <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                    The overnight window looked at for this child (it can run past midnight).
+                    Only an admin can change sleep tracking, the bedtime window and the sleep camera.
                   </div>
-                  {showCameraPicker && (
+                )}
+                <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                  Estimate this child's nightly sleep from their cameras' movement &amp; sound. Wake-ups are
+                  also recorded (without alerting you)
+                  {isAdmin ? (
+                    <> — length and retention are under <Link to="/settings/recording">Settings › Camera and recording › Recording</Link>.</>
+                  ) : (
+                    <> — an admin can change their length and retention.</>
+                  )}
+                </div>
+                {form.track_sleep && (
+                  <>
                     <div style={{ marginTop: 12 }}>
-                      <label htmlFor="child-sleep-camera">Camera used for this child's sleep</label>
-                      <select id="child-sleep-camera" value={form.primary_camera_id} disabled={!isAdmin}
-                        onChange={(e) => setForm({ ...form, primary_camera_id: e.target.value })}>
-                        <option value="">Automatic (first enabled camera in tile order)</option>
-                        {assignedCams.map((c) => (
-                          <option key={c.id} value={c.id}>{c.disabled ? `${c.name} (turned off)` : c.name}</option>
-                        ))}
-                        {missingPrimary && (
-                          <option value={missingPrimary}>
-                            {(cameras || []).find((c) => c.id === missingPrimary)?.name || 'A removed camera'} (unavailable)
-                          </option>
-                        )}
-                      </select>
-                      {/* What the SERVER says the night is measured from now (child.primary_camera, resolved by
-                          the same function scoring uses), never re-derived here: the stored choice can be turned
-                          off or gone, and then the automatic rule applies. */}
+                      <SwitchRow label="Hold alerts until asleep" checked={form.hold_alerts_until_asleep} disabled={!isAdmin}
+                        onChange={(e) => setForm({ ...form, hold_alerts_until_asleep: e.target.checked })} />
                       <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                        {kid?.primary_camera ? (
-                          <>Currently measured from <strong>{kid.primary_camera.name}</strong>.</>
-                        ) : (
-                          <>No camera of this child is turned on, so nothing is measured right now.</>
-                        )}
-                        {storedPrimary && kid?.primary_camera?.id !== storedPrimary && (
-                          <> The chosen camera is turned off or no longer assigned, so the automatic choice is used until it is back.</>
-                        )}
-                        {/* Same facts as README "What a change affects". NOT "saved summaries keep their numbers":
-                            last night's summary is re-scored for ~3h after the wake time, and a review correction
-                            or an admin's Recompute re-scores a night (#655 review). */}
-                        {' '}A change applies whenever a night is next worked out. A night's detail page always
-                        uses the new camera. A saved summary stays as saved, except that last night's can still
-                        be updated for a few hours after the wake time, and a review correction or a Recompute
-                        works a night out again.
+                        Hold this child's motion and sound alerts until sleep is detected. Outside the sleep window,
+                        the hold has no time limit; an evening crying spell or daytime nap may be silent. Inside the
+                        window, alerts resume after 45 minutes from the first held alert even without detected sleep.
+                        Held alerts are not sent later. Camera-offline alerts are never held. Not a safety device. Off by default.
+                        {!isAdmin && ' Only an admin can change this setting.'}
                       </div>
                     </div>
-                  )}
-                  {/* The nightly report (#397, #398). Both are admin-only like the rest of this block, and both are
-                      per child: what leaves the house is decided for each child on their own. The second switch is
-                      meaningless while the first is off, so it is disabled then rather than hidden. */}
-                  <div style={{ marginTop: 16 }}>
-                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>Send this child's sleep report</span>
-                      <Switch checked={form.sleep_report_enabled} disabled={!isAdmin}
-                        onChange={(e) => setForm({ ...form, sleep_report_enabled: e.target.checked })} />
-                    </label>
-                    <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                      Each morning, a notification such as "asleep 8h12, 2 wakes, up 06:47" goes to every
-                      notification service that is turned on in Settings. On by default.
+                    <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+                      <div style={{ flex: 1 }}>
+                        <label htmlFor="child-bed">Bedtime</label>
+                        <input id="child-bed" type="time" value={form.sleep_window_start} disabled={!isAdmin}
+                          onChange={(e) => setForm({ ...form, sleep_window_start: e.target.value })} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label htmlFor="child-wake">Wake time</label>
+                        <input id="child-wake" type="time" value={form.sleep_window_end} disabled={!isAdmin}
+                          onChange={(e) => setForm({ ...form, sleep_window_end: e.target.value })} />
+                      </div>
                     </div>
-                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
-                      <span>Show this child's name in the report</span>
-                      <Switch checked={form.sleep_report_show_name} disabled={!isAdmin || !form.sleep_report_enabled}
-                        onChange={(e) => setForm({ ...form, sleep_report_show_name: e.target.checked })} />
-                    </label>
                     <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                      Off says "a child" instead, in the title and in the text. The notification still passes
-                      through the service you use (Google, Pushover, ntfy or Gotify). On by default.
+                      The overnight window looked at for this child (it can run past midnight).
                     </div>
-                    {!isAdmin && (
-                      <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                        Only an admin can change what the sleep report sends.
+                    {showCameraPicker && (
+                      <div style={{ marginTop: 12 }}>
+                        <label htmlFor="child-sleep-camera">Camera used for this child's sleep</label>
+                        <select id="child-sleep-camera" value={form.primary_camera_id} disabled={!isAdmin}
+                          onChange={(e) => setForm({ ...form, primary_camera_id: e.target.value })}>
+                          <option value="">Automatic (first enabled camera in tile order)</option>
+                          {assignedCams.map((c) => (
+                            <option key={c.id} value={c.id}>{c.disabled ? `${c.name} (turned off)` : c.name}</option>
+                          ))}
+                          {missingPrimary && (
+                            <option value={missingPrimary}>
+                              {(cameras || []).find((c) => c.id === missingPrimary)?.name || 'A removed camera'} (unavailable)
+                            </option>
+                          )}
+                        </select>
+                        {/* What the SERVER says the night is measured from now (child.primary_camera, resolved by
+                            the same function scoring uses), never re-derived here: the stored choice can be turned
+                            off or gone, and then the automatic rule applies. */}
+                        <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                          {kid?.primary_camera ? (
+                            <>Currently measured from <strong>{kid.primary_camera.name}</strong>.</>
+                          ) : (
+                            <>No camera of this child is turned on, so nothing is measured right now.</>
+                          )}
+                          {storedPrimary && kid?.primary_camera?.id !== storedPrimary && (
+                            <> The chosen camera is turned off or no longer assigned, so the automatic choice is used until it is back.</>
+                          )}
+                          {/* Same facts as README "What a change affects". NOT "saved summaries keep their numbers":
+                              last night's summary is re-scored for ~3h after the wake time, and a review correction
+                              or an admin's Recompute re-scores a night (#655 review). */}
+                          {' '}A change applies whenever a night is next worked out. A night's detail page always
+                          uses the new camera. A saved summary stays as saved, except that last night's can still
+                          be updated for a few hours after the wake time, and a review correction or a Recompute
+                          works a night out again.
+                        </div>
                       </div>
                     )}
-                  </div>
-                </>
-              )}
+                    {/* The sleep score (sleep score plan, phase 2). Per child and admin-only like its neighbours. It
+                        only hides the score: while it is off the server leaves the score out of this child's nights,
+                        and the nights themselves, the report and the baseline are untouched. */}
+                    <div style={{ marginTop: 16 }}>
+                      <SwitchRow label="Show sleep score" checked={form.show_sleep_score} disabled={!isAdmin}
+                        onChange={(e) => setForm({ ...form, show_sleep_score: e.target.checked })} />
+                      <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                        A score from 0 to 100 for each night, on this child's card and sleep page. Off hides it for
+                        everyone; the nights are still tracked the same way. On by default.
+                        {!isAdmin && ' Only an admin can change this setting.'}
+                      </div>
+                    </div>
+                    {/* The nightly report (#397, #398). Both are admin-only like the rest of this block, and both are
+                        per child: what leaves the house is decided for each child on their own. The second switch is
+                        meaningless while the first is off, so it is disabled then rather than hidden. */}
+                    <div style={{ marginTop: 16 }}>
+                      <SwitchRow label="Send this child's sleep report" checked={form.sleep_report_enabled} disabled={!isAdmin}
+                        onChange={(e) => setForm({ ...form, sleep_report_enabled: e.target.checked })} />
+                      <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                        Each morning, a notification such as "asleep 8h12, 2 wakes, up 06:47" goes to every
+                        notification service that is turned on in Settings. On by default.
+                      </div>
+                      <SwitchRow label="Show this child's name in the report" checked={form.sleep_report_show_name}
+                        disabled={!isAdmin || !form.sleep_report_enabled}
+                        onChange={(e) => setForm({ ...form, sleep_report_show_name: e.target.checked })} />
+                      <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                        Off says "a child" instead, in the title and in the text. The notification still passes
+                        through the service you use (Google, Pushover, ntfy or Gotify). On by default.
+                      </div>
+                      {!isAdmin && (
+                        <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                          Only an admin can change what the sleep report sends.
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
-            <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 8 }}>
-              {busy ? 'Saving…' : isNew ? 'Add child' : 'Save changes'}
-            </button>
-            {/* Admin-only: DELETE /api/children/:id has always been requireAdmin, so offering it to a
-                caregiver only ever led to a refusal. */}
-            {!isNew && isAdmin && (
-              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => { setRemoveError(''); setRemoving(true); }}>
-                Remove child
+            <div className="form-actions">
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {busy ? 'Saving…' : isNew ? 'Add child' : 'Save changes'}
               </button>
-            )}
+            </div>
           </form>
         )}
       </main>
@@ -418,12 +483,12 @@ export default function ChildSettings() {
             camera, so they are kept until their retention removes them (or the camera is removed). This can't be
             undone. <strong>Are you sure?</strong>
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>
             <button className="btn btn-danger" type="button" onClick={confirmRemove} disabled={removeBusy}>
               {removeBusy ? 'Removing…' : 'Remove'}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
     </>

@@ -51,12 +51,15 @@ describe('the push hub', () => {
   // Scope every badge assertion to its own row. A badge asserted globally passes when it is hanging
   // off the WRONG provider, which would tell someone Pushover is on when it is actually ntfy — worse
   // than showing no badge at all. (Same trap the MQTT badge hit in settingsHub.test.jsx.)
-  const row = async (label) => within((await screen.findByText(label)).closest('.list-row'));
+  const row = async (label) => within((await screen.findByText(label)).closest('.nav-row'));
 
   test('offers every provider', async () => {
     mockStatus(ALL_OFF);
     renderAsAdmin(<SettingsPush />);
-    for (const p of PROVIDERS) expect(await screen.findByText(p)).toBeTruthy();
+    for (const p of PROVIDERS) {
+      const label = await screen.findByText(p);
+      expect(label.closest('.nav-row')).toBeTruthy();
+    }
   });
 
   test('★ the badge says On for enabled, Off for configured-but-disabled, and Not set up for untouched',
@@ -178,7 +181,7 @@ describe('the push hub', () => {
       // for anyone not using a pointer — an accessibility failure that renders perfectly.
       mockStatus(ALL_OFF);
       const { user } = mountHub();
-      const first = (await screen.findByText('Pushover')).closest('.list-row');
+      const first = (await screen.findByText('Pushover')).closest('.nav-row');
       // Two tabs, not one: the header's own back button is the first thing in the order. Asserting
       // where focus LANDS is what makes this a reachability test — `tabIndex={0}` is the only reason
       // a div is in the tab order at all, and without it focus would simply skip every provider.
@@ -195,11 +198,11 @@ describe('the push hub', () => {
       mockStatus(ALL_OFF);
       const { user } = mountHub();
       const firebase = await screen.findByText('Firebase');
-      const target = firebase.closest('.list-row');
+      const target = firebase.closest('.nav-row');
       target.focus();
       const before = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
       target.dispatchEvent(before);
-      expect(before.defaultPrevented, 'Space must be prevented or the page scrolls').toBe(true);
+      expect(target.tagName, 'native buttons handle Space without a custom key handler').toBe('BUTTON');
       await user.keyboard(' ');
       expect(await screen.findByText('at /settings/integrations/notifications/firebase')).toBeTruthy();
     });
@@ -334,6 +337,11 @@ describe('Pushover settings', () => {
   test('sending a test reports success', async () => {
     const { user } = renderAsAdmin(<SettingsPushPushover />);
     await screen.findByDisplayValue('nachos-phone'); // config landed (#570)
+    expect(screen.getByRole('heading', { name: 'Connection', level: 2 }).closest('.card')).toBeTruthy();
+    const actions = document.querySelector('.form-actions');
+    expect([...actions.querySelectorAll('button')].map((button) => button.textContent)).toEqual([
+      'Save changes', 'Send test with saved settings',
+    ]);
     await user.click(screen.getByRole('button', { name: /Send test/i }));
     await waitFor(() => expect(postSpy).toHaveBeenCalledWith('/pushover/test'));
     expect(await screen.findByText(/Test sent/i)).toBeTruthy();

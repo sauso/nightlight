@@ -1,10 +1,9 @@
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronRight, Cctv } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
-import { ageLabel } from '../lib/age.js';
 import AppHeader from '../components/AppHeader.jsx';
-import Avatar from '../components/Avatar.jsx';
+import ChildListCard from '../components/ChildListCard.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import { loadState } from '../lib/loadState.js';
 
@@ -35,20 +34,9 @@ export default function Children() {
         )}
         {kids.map((kid) => {
           const n = camCount(kid.id);
-          const age = ageLabel(kid.birthday);
           const open = () => navigate(`/children/${kid.id}`);
           return (
-            <button key={kid.id} className="child-card" onClick={open}>
-              <Avatar name={kid.name} src={kid.photo} color={kid.color} size={64} />
-              <span className="child-card__id">
-                <span className="child-card__name">{kid.name}</span>
-                <span className="child-card__meta">
-                  <Cctv size={13} aria-hidden="true" />
-                  {n} camera{n === 1 ? '' : 's'}{age ? ` · ${age}` : ''}
-                </span>
-              </span>
-              <ChevronRight size={20} className="child-card__chev" aria-hidden="true" />
-            </button>
+            <ChildListCard key={kid.id} child={kid} cameraCount={n} onOpen={open} />
           );
         })}
         {state === 'empty' && (

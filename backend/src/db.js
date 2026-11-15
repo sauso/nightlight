@@ -275,6 +275,8 @@ db.exec(`
     wake_unconfirmed_at TEXT,
     wake_at_sensor TEXT,
     sensor_rejects INTEGER,
+    stir_minutes INTEGER,
+    summary_facts TEXT,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (child_id, night_date)
   );
@@ -389,6 +391,31 @@ db.exec(`
     platform TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- #1094: one-time invites. An admin creates a caregiver account WITHOUT a password and gets a link that
+  -- carries a random token; the caregiver opens it and chooses their own password (routes/auth.js,
+  -- /invite/check and /invite/redeem). Only sha256(token), as hex, is stored: the token itself is 256 random
+  -- bits, so a fast hash is enough (nothing to brute-force), and the lookup is by equality on token_hash.
+  -- Times are UTC TEXT 'YYYY-MM-DD HH:MM:SS', the same shape as datetime('now') and users/sessions, so they
+  -- compare as text and come back in the API like every other time here. expires_at = created_at + 7 days;
+  -- used_at is set once, by the redeem that wins (NULL = not used). The account owns its invites: removing
+  -- it removes them (CASCADE). created_by is the admin's user id, informational only (no FK, so removing
+  -- that admin leaves the row alone). Purged daily once used or expired more than 30 days ago
+  -- (middleware/auth.js, purgeOldInvites).
+  -- placeholder_hash: the account's password_hash when this invite was made (the unknowable placeholder).
+  -- A link only ever replaces exactly that hash, so a password set some other way since (an admin, or an
+  -- OLDER version of the app, which knows nothing of invites) is never overwritten by a link (plan review M4).
+  CREATE TABLE IF NOT EXISTS user_invites (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    placeholder_hash TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    used_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_invites_user ON user_invites(user_id);
 `);
 
 // Migrations: columns added after the initial release, for databases created before them.
@@ -422,6 +449,15 @@ if (!usersColumns.includes('mfa_last_step')) {
 // Optional caregiver/admin avatar photo — same browser-resized base64 data-URL as children.photo.
 if (!usersColumns.includes('photo')) {
   db.exec('ALTER TABLE users ADD COLUMN photo TEXT');
+}
+// #1094: has this account chosen (or been given) a password? 0 = an invited caregiver who has not opened their
+// invite yet: their password_hash is a bcrypt hash of 32 random bytes nobody knows, and no sign-in path accepts
+// them (/login, /login/mfa and every session check require 1). DEFAULT 1, so every account that existed before
+// this column keeps working exactly as before. An older build ignores the column: if it sets a password for a
+// pending account, the account stays 0 here until an admin sets the password again from this version
+// (docs/caregivers.md says so).
+if (!usersColumns.includes('password_set')) {
+  db.exec('ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1');
 }
 
 // Optional child avatar photo — a browser-resized (~256px square) base64 data-URL, stored inline
@@ -1074,6 +1110,23 @@ if (!sleepNightsColumns.includes('sensor_rejects')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN sensor_rejects INTEGER');
 }
 
+// The night's stored facts (sleep score plan, phase 1a; sleepAnalysis.js, "THE NIGHT'S STORED FACTS"). `stir_minutes`
+// is how many minutes of the sleep span had in-bed movement outside a counted wake; `summary_facts` a small versioned
+// JSON text ({ v, climate: { temp_min, temp_max }, sleep: { wakes, room_activity_wakes } }). Both come from the
+// per-minute samples, which are deleted after 30 days, and that is why they are stored: a later sleep score and night
+// summary need them for older nights. Both NULL on every row stored before these columns, and there is NO backfill:
+// the samples behind an old night may already be gone, and a figure worked out from part of a night would be worse
+// than none. A reader must take NULL as "not known", never as zero stirring. Written by upsertNight with the other
+// computed columns; nothing reads them for an onset, a wake, a figure, a push or an alert. Also in the CREATE TABLE
+// above for fresh installs; these are the upgrade path, one guard per column so neither can be skipped because the
+// other exists.
+if (!sleepNightsColumns.includes('stir_minutes')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN stir_minutes INTEGER');
+}
+if (!sleepNightsColumns.includes('summary_facts')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN summary_facts TEXT');
+}
+
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're
 // still up as the alert schedule kicks in. Epoch millis; NULL/past = not muted. inActiveWindow() reads
 // it fresh each check so a snooze set from the UI takes effect without restarting the detector leg.
@@ -1171,6 +1224,13 @@ if (!childrenColumns.includes('sleep_report_show_name')) {
 }
 if (!childrenColumns.includes('hold_alerts_until_asleep')) {
   db.exec('ALTER TABLE children ADD COLUMN hold_alerts_until_asleep INTEGER NOT NULL DEFAULT 0');
+}
+// "Show sleep score" (sleep score plan, phase 2), per child. DEFAULT 1: the score is shown unless an admin turns it
+// off, on a new install and for every child that existed before the column did (alert-hold-migration.test.js).
+// While it is 0 the sleep routes leave `score` out of every night they return for that child
+// (lib/sleepScoreAttach.js); nothing else reads it. An older build ignores the column and returns the score again.
+if (!childrenColumns.includes('show_sleep_score')) {
+  db.exec('ALTER TABLE children ADD COLUMN show_sleep_score INTEGER NOT NULL DEFAULT 1');
 }
 
 // #941: classify before this boot seeds settings. Existing rows (including a restored backup or an

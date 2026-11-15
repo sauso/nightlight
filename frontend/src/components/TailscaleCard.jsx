@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import qrcode from 'qrcode-generator';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useDemoStatus } from '../lib/demoStatus.js';
 import { useTailscale } from '../lib/useTailscale.js';
@@ -8,6 +7,8 @@ import { probeLowLatency } from '../lib/webrtcProbe.js';
 import { copyText } from '../lib/copyText.js';
 import LoadFailed from './LoadFailed.jsx';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
+import QrCode from './QrCode.jsx';
 
 const NETWORK_DOCS = 'https://github.com/sauso/nightlight/blob/main/docs/networking.md';
 
@@ -31,26 +32,6 @@ function httpsLink(value) {
 function secureAddress(name) {
   return typeof name === 'string' && /^(?:[a-z0-9-]+\.)+ts\.net$/.test(name)
     ? `https://${name}/` : null;
-}
-
-function QrCode({ value, label }) {
-  const qr = qrcode(0, 'M');
-  qr.addData(value);
-  qr.make();
-  const count = qr.getModuleCount();
-  const cells = [];
-  for (let row = 0; row < count; row += 1) {
-    for (let column = 0; column < count; column += 1) {
-      if (qr.isDark(row, column)) cells.push(<rect key={`${row}-${column}`} x={column + 4} y={row + 4} width="1" height="1" />);
-    }
-  }
-  return <figure className="tailscale-qr">
-    <svg role="img" aria-label={label} viewBox={`0 0 ${count + 8} ${count + 8}`} xmlns="http://www.w3.org/2000/svg">
-      <rect width={count + 8} height={count + 8} className="tailscale-qr__background" />
-      <g className="tailscale-qr__modules">{cells}</g>
-    </svg>
-    <figcaption>{label}</figcaption>
-  </figure>;
 }
 
 export default function TailscaleCard({ compact = false, publicHostSet = false, onReady }) {
@@ -200,7 +181,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
       </> : <><p>Waiting for your secure address…</p>{button('Retry', load)}</>}
       <h3>Add someone</h3>
       <ol><li>Install Tailscale on their phone or computer.</li><li>Invite them to your Tailscale network, or share this device with them from the Tailscale admin console.</li><li>Open the address above and sign in with their Nightlight account.</li></ol>
-      <p>Joining Tailscale doesn't replace a Nightlight account. Add caregivers in Settings → Caregivers.</p>
+      <p>Joining Tailscale doesn't replace a Nightlight account. Add caregivers in Settings → Users.</p>
       {/* Codex review of #978 (verified): pending=false is also what the server says before it has found the address, so it is not proof of ready. Claim nothing until there is an update to report. */}
       {view.video_address_pending && <p role="status">Low latency video: updating. Viewers reconnect once.</p>}
       {view.video_address_pending && button('Apply now', () => act('apply-video-address'))}
@@ -216,7 +197,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
     {compact && <span className="status-badge status-badge--highlight">Recommended</span>}
     {error && view && !confirm && <div className="error-banner" role="alert">{error} {button('Retry', load, false)}</div>}
     {content}
-    {view && <details className="tailscale-advanced"><summary>Advanced</summary>
+    {view && <details className="tailscale-advanced"><summary className="disclosure-row">Advanced</summary>
       <form onSubmit={rename}><div className="field"><label htmlFor="tailscale-rename">Rename this device</label>
         <input id="tailscale-rename" value={name} maxLength={63} onChange={(event) => setName(event.target.value)} disabled={disabled || !view.enabled} /></div>
         <button type="submit" className="btn btn-secondary" disabled={disabled || !view.enabled || !NAME.test(name) || name === currentName}>Save</button></form>
@@ -232,9 +213,12 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
           : confirm === 'serve-disable' ? 'The secure address will stop working until you turn it on again.'
             : 'Viewers will lose this Tailscale connection. Watching at home still works.'}</p>
       {originIsTailnet && <p>You are viewing this page through Tailscale, so it will stop loading until Tailscale is set up again. Open Nightlight from your home network to do that.</p>}
-      <div className="tailscale-actions"><button className="btn btn-secondary" type="button" onClick={() => setConfirm(null)}>Cancel</button>
+      <ModalActions>
+        <button className="btn btn-secondary" type="button" onClick={() => setConfirm(null)}>Cancel</button>
         <button className="btn btn-danger" type="button" disabled={disabled} onClick={async () => { const done = confirm === 'disable' ? await setEnabled(false) : await act(confirm); if (done) setConfirm(null); }}>
-          {confirm === 'reset' ? 'Reset identity' : confirm === 'logout' ? 'Log out' : confirm === 'serve-disable' ? 'Turn off address' : 'Turn off'}</button></div>
+          {confirm === 'reset' ? 'Reset identity' : confirm === 'logout' ? 'Log out' : confirm === 'serve-disable' ? 'Turn off address' : 'Turn off'}
+        </button>
+      </ModalActions>
     </Modal>}
   </section>;
 }

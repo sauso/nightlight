@@ -1,7 +1,7 @@
 // The pure rules behind the ESPHome settings page and its hub row (lib/esphomeUi.js).
 import { describe, test, expect } from 'vitest';
 import {
-  validRetention, stateBadge, encryptionNote, hubBadge, relativeAge, exportRange, exportLongestDays,
+  validRetention, stateBadge, stateDot, encryptionNote, hubBadge, relativeAge, exportRange, exportLongestDays,
   EXPORT_BUDGET_BYTES, EXPORT_MAX_DAYS,
 } from '../src/lib/esphomeUi.js';
 
@@ -27,6 +27,18 @@ describe('stateBadge', () => {
     expect(stateBadge(dev('paused')).text).toBe('paused');
     expect(stateBadge({ enabled: true }).text).toBe('Unknown');
   });
+});
+
+test('stateDot maps connection activity and keeps off or unknown neutral', () => {
+  const dot = (state, enabled = true) => stateDot({ enabled, status: { state } });
+  expect(dot('connected')).toBe('live');
+  expect(dot('connecting')).toBe('connecting');
+  expect(dot('disconnected')).toBe('offline');
+  expect(dot('failed')).toBe('offline');
+  expect(dot('disabled')).toBe('off');
+  expect(dot('connected', false)).toBe('off');
+  expect(dot('paused')).toBe('off');
+  expect(stateDot({ enabled: true })).toBe('off');
 });
 
 describe('encryptionNote: the warning is only for a CONNECTED plaintext session', () => {

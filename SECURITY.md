@@ -105,7 +105,7 @@ with a "privacy check" error and nothing is sent; please report it.
 > phone gets **no push alerts**, a live view or background audio that is playing stops (within about 15
 > seconds in Low latency mode, at its next request in Compatibility mode), and nothing on the phone says
 > so until someone opens the app and sees the sign-in screen. Signing in again restores everything. The
-> session lists (Account, and Settings → Caregivers for an admin) show when each device was last active,
+> session lists (Account, and Settings → Users for an admin) show when each device was last active,
 > **not** when it signed in or when it will be signed out, so if you rely on a phone's alerts, sign in
 > on it again at a time of day that suits you, before its lifetime runs out. Pushover, ntfy and Gotify
 > are not tied to a sign-in and are not affected.
@@ -135,12 +135,29 @@ the longer lifetime. Nor does raising it bring a signed-out device back; that de
   enforcing (no inline scripts, no `eval`) to make that hard, and a stolen token is only as good as its
   session: it is checked against the server on **every** request, so ending the session (below) ends it.
 - **Every sign-in can be ended from the server, at once:** sign out (on that device, or that device's
-  **Sign out** in your Account's session list), an admin signing out any device (Settings → Caregivers),
+  **Sign out** in your Account's session list), an admin signing out any device (Settings → Users),
   removing the account, or changing your password (signs out your other devices). Changing someone's role
   takes effect at their next request without signing them out.
 - **The 12-hour media token ends with its sign-in.** Video, snapshot, clip and talk URLs carry a separate
   short-lived token (never the sign-in token). Since #562 it stops working when its sign-in ends, even if
   its own 12 hours have not run out; before, it could outlive the sign-in by up to 12 hours.
+
+## Caregiver invite links
+
+An admin can create a caregiver's account without a password and send a one-time link instead (#1094). **The link
+is a credential:** whoever opens it first can choose that account's password and sign in as that caregiver. That
+means watching and listening to the cameras and talking through them, recording, changing children's names and
+photos, answering the morning review, and the rest of what a caregiver can do
+([docs/caregivers.md](docs/caregivers.md#what-caregivers-and-admins-can-do)). It is never an admin account: invites
+make caregivers only, and an account waiting on its invite cannot be made an admin until it has a password. The link
+works once, for 7 days. Send it only to the person it is for.
+
+What protects it: the token is 256 random bits and only its sha256 is stored, so a copy of the database holds no usable
+link; it is shown once, to the admin who made it, and is in no list, API answer or log line. Every unusable link gets
+the same answer. Until it is used, the account cannot sign in by any route. Known limits: anyone who sees the link (a
+shared chat, a screenshot of the QR code) holds it until it is used or cancelled, and restoring a backup can make a used
+or cancelled link work again until its 7 days are up, so cancel unexpected invites after a restore
+([details](docs/caregivers.md#after-restoring-a-backup-or-going-back-to-an-older-version)).
 
 ## If you suspect a credential was exposed
 
@@ -151,6 +168,8 @@ manual:
   edit camera).
 - **Admin/caregiver account password**: sign in and change it (Account → Change password), or
   have an admin reset another account's.
+- **A caregiver invite link** that went to the wrong place: an admin cancels the invite or makes a new one (the old
+  link stops working at once). If it was already used by someone else, remove that account.
 - **JWT signing secret** (`private/.jwt_secret` in the data volume): deleting it and restarting the
   container generates a new one and signs everyone out, forcing a fresh login everywhere.
 - **Notification-provider tokens** (Pushover, Firebase, Gotify, ntfy): regenerate/revoke the

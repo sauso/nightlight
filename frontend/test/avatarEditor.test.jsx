@@ -1,4 +1,5 @@
-// The tappable avatar with a camera badge (owner, 2026-11-05), used on the child's settings and on your own account.
+// The tappable avatar with a camera badge (owner, 2026-11-05; the badge became the round disc 2026-11-15, its colours are pinned in
+// paletteTokens.test.jsx), used on the child's settings, your own account, the caregiver form and the setup screens.
 //
 // The component is only the picker: what happens with the file stays with each page. So these tests cover the component's
 // own contract (name, change event, initials fallback) AND, on both pages, that picking a photo still reaches the same save
@@ -9,6 +10,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAs, ADMIN } from './helpers/render.jsx';
 import AvatarEditor from '../src/components/AvatarEditor.jsx';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 import ChildSettings from '../src/pages/ChildSettings.jsx';
 import Account from '../src/pages/Account.jsx';
 import UserSettings from '../src/pages/UserSettings.jsx';
@@ -45,9 +47,38 @@ describe('AvatarEditor', () => {
     expect(onChange.mock.calls[0][0].target.files[0].name).toBe('face.png');
   });
 
+  // A child's colour is the ring around the PHOTO (owner, 2026-11-15). The ring is a box-shadow outside the avatar's box, so the
+  // label, the camera badge and the invisible file input (which all size themselves to the avatar) are unchanged by it.
+  test('★ a photo with a colour is ringed in the themed token; the badge and the file input are still there, unchanged', () => {
+    const { container } = mount({ src: 'data:image/png;base64,AAA', color: '#8A9FE0' });
+    const img = container.querySelector('img');
+    expect(img.hasAttribute('data-child-ring')).toBe(true);
+    expect(img.getAttribute('style')).toContain('var(--child-blue)');
+    expect(img.getAttribute('style')).not.toContain('-night');
+    expect(ringSpreadPx(img), 'the ring has a visible width').toBeGreaterThan(0);
+    expect(container.querySelector('.avatar-editor__badge')).not.toBeNull();
+    expect(screen.getByLabelText('Change photo').type).toBe('file');
+    expect(container.querySelector('.avatar-editor').style.width).toBe('88px');
+  });
+
+  test.each([[undefined], [null], ['']])('★ a photo with no colour (%j) is plain: no ring', (color) => {
+    const { container } = mount({ src: 'data:image/png;base64,AAA', color });
+    expect(container.querySelector('[data-child-ring]')).toBeNull();
+    expect(container.querySelector('img').getAttribute('style')).not.toContain('box-shadow');
+  });
+
+  test('no photo: the colour fills the initials disc and nothing is ringed', () => {
+    const { container } = mount({ color: '#8A9FE0' });
+    expect(container.querySelector('[data-child-ring]')).toBeNull();
+    expect(container.querySelector('.avatar-editor span').getAttribute('style')).toContain('var(--child-blue)');
+  });
+
   test('the camera badge is decoration: hidden from assistive technology, and the picker is only images', () => {
     const { container } = mount();
-    expect(container.querySelector('.avatar-editor__badge').getAttribute('aria-hidden')).toBe('true');
+    const badge = container.querySelector('.avatar-editor__badge');
+    expect(badge.getAttribute('aria-hidden')).toBe('true');
+    expect(badge.querySelector('svg'), 'the camera glyph is inside the badge').not.toBeNull();
+    expect(badge.style.width, 'the badge scales with the avatar').toBe('30px'); // round(88 * 0.34)
     expect(screen.getByLabelText('Add photo').getAttribute('accept')).toBe('image/*');
   });
 });

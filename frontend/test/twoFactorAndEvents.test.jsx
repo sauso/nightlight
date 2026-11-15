@@ -399,7 +399,7 @@ describe('EventLog', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
       expect(api.get.mock.calls.length).toBeGreaterThan(1);
 
-      await user.click(screen.getByRole('checkbox'));
+      await user.click(screen.getByRole('switch', { name: 'Auto-refresh' }));
       const settled = api.get.mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
       expect(api.get).toHaveBeenCalledTimes(settled);

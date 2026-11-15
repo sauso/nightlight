@@ -282,6 +282,9 @@ const OVERLAY_FIELDS = [
   // #917: applyCorrection nulls the sensor shadow on a corrected night (and asNobodyInBed on a flagged one). Added with
   // the golden re-written: the diff was these two keys, null in every row and overlay (this fixture has no ESPHome rows).
   'wake_at_sensor', 'sensor_rejects',
+  // #1041: applyCorrection adds `wake_given: true` when the review carries a wake time. Added to the golden by hand:
+  // the diff was this one key, on the one night here whose review has a wake ("ok, corrected").
+  'wake_given',
 ];
 // Only keys the object HAS: a key the overlay newly adds (an `algo_status` on an uncorrected night) shows up.
 const pickOverlay = (o) => Object.fromEntries(OVERLAY_FIELDS.filter((k) => k in o).map((k) => [k, o[k]]));

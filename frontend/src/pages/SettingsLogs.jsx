@@ -16,17 +16,17 @@ export default function SettingsLogs() {
         <DiagnosticsCard title="Report a problem" />
 
         <div className="card">
-          <div className="card-title">Recent alerts</div>
+          <h2 className="card-heading">Recent alerts</h2>
           <RecentAlerts />
         </div>
 
         <div className="card">
-          <div className="card-title">Camera history</div>
+          <h2 className="card-heading">Camera history</h2>
           <EventLog />
         </div>
 
         <div className="card">
-          <div className="card-title">Recent logs</div>
+          <h2 className="card-heading">Recent logs</h2>
           <LogViewer />
         </div>
       </main>

@@ -20,6 +20,8 @@ import { describe, test, expect, vi, afterEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import LiveMonitor from '../src/components/LiveMonitor.jsx';
+import CameraTile from '../src/components/CameraTile.jsx';
+import { Route, Routes, useLocation } from 'react-router-dom';
 import { api } from '../src/lib/api.js';
 import { setTheme } from '../src/lib/theme.js';
 
@@ -134,6 +136,179 @@ describe('what a tile is labelled with', () => {
     // whole grid down — every camera — over one stale assignment.
     mount({ cameras: [{ id: 'c9', name: 'Hallway', mediamtx_path: 'p9', child_id: 'gone' }], kids: KIDS });
     expect(screen.getByText('Hallway')).toBeTruthy();
+  });
+});
+
+describe('Live tile strip and sheet (#1076)', () => {
+  test.each([
+    ['live', false, false, 'Online', 'breathing--live'],
+    ['connecting', false, false, 'Connecting', 'breathing--connecting'],
+    ['offline', false, false, 'Offline', 'breathing--offline'],
+    ['connecting', true, false, 'Status unknown', 'breathing--connecting'],
+    // The level the tile was last told is OFFLINE but the status check itself timed out: unknown must win, so the
+    // dot is the connecting one and never the red offline one (a row with level 'connecting' cannot tell the two apart).
+    ['offline', true, false, 'Status unknown', 'breathing--connecting'],
+    ['offline', false, true, 'Disabled', 'dot--neutral'],
+  ])('cameraState renders %s / unknown %s / disabled %s as %s', (statusLevel, statusUnknown, disabled, word, dot) => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'state', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);
+    const strip = container.querySelector('.camera-tile__meta');
+    // Strip: the status dot is NOT in the strip any more (it moved onto the video, next to the mic: owner, 2026-11-15;
+    // see the next test), and the word is only visually hidden text after the name, part of the row's accessible text
+    // ("Camera, Online"). Fails on the old code, which rendered the dot in the name row before the name.
+    const row = within(strip).getByText('Camera').closest('.camera-tile__title');
+    expect(row).not.toBeNull();
+    expect(strip.querySelector('.camera-tile__dot')).toBeNull();
+    expect(strip.querySelector(`.${dot}`)).toBeNull();
+    // The hidden word must be its own element with the visually-hidden class (a class check, not a CSS value), and its
+    // text EXACTLY ", <word>": without this, the "word is not printed" assertion below would also pass if the word were
+    // dropped altogether.
+    const sr = row.querySelector('.camera-tile__sr');
+    expect(sr).not.toBeNull();
+    expect(sr.classList.contains('camera-tile__sr')).toBe(true);
+    expect(sr.textContent).toBe(`, ${word}`);
+    expect(row).toHaveTextContent(`Camera, ${word}`);
+    // Nothing prints the word in the strip any more: no status line above the name, no visible word.
+    expect(strip.querySelector('.camera-tile__state')).toBeNull();
+    expect(within(strip).queryByText(word)).toBeNull();
+    expect(within(strip).getByText('A child')).toBeInTheDocument();
+  });
+
+  // The dot now sits ON the video (owner, 2026-11-15: "move it to next to the mic in the image"): inside the video
+  // wrapper, never in the strip. Each state keeps its dot; "Status unknown" stays the connecting dot even when the
+  // level it was last told is offline.
+  test.each([
+    ['live', false, false, 'breathing--live'],
+    ['connecting', false, false, 'breathing--connecting'],
+    ['offline', false, false, 'breathing--offline'],
+    ['connecting', true, false, 'breathing--connecting'],
+    ['offline', true, false, 'breathing--connecting'],
+    ['offline', false, true, 'dot--neutral'],
+  ])('the status dot is on the video for %s / unknown %s / disabled %s as %s', (statusLevel, statusUnknown, disabled, dot) => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'vd', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);
+    const wrap = container.querySelector('.camera-tile__video-wrap');
+    const dots = wrap.querySelectorAll('.camera-tile__video-dot');
+    expect(dots).toHaveLength(1);
+    expect(dots[0].querySelector(`.${dot}`)).toBeInTheDocument();
+    // A decorative mark: hidden from assistive tech (the word is the accessible carrier), and not a control.
+    expect(dots[0]).toHaveAttribute('aria-hidden', 'true');
+    expect(dots[0].closest('button, a')).toBeNull();
+    expect(dots[0].matches('button, a, [tabindex]')).toBe(false);
+    expect(dots[0].querySelector('button, a, [tabindex]')).toBeNull();
+    // Unknown must never show the red offline dot, wherever the dot is drawn.
+    if (statusUnknown) expect(wrap.querySelector('.breathing--offline')).toBeNull();
+    // Exactly one dot per tile in the tile itself (the sheet is closed): none left in the strip.
+    expect(container.querySelectorAll('.camera-tile__dot')).toHaveLength(1);
+  });
+
+  // With a mic button the dot sits just after it; without one it takes the corner. The modifier is the hook the CSS
+  // positions on, so it must track `talk_configured` exactly (a modifier always on would push the dot past a mic that
+  // is not there; never on would put it under the mic button).
+  test.each([
+    [true, true],
+    [false, false],
+    [undefined, false],
+  ])('the video dot is placed after the mic only when talk_configured is %s', (talk, afterMic) => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'vdm', name: 'Camera', statusLevel: 'live', talk_configured: talk }} childName="A child" />);
+    const dot = container.querySelector('.camera-tile__video-dot');
+    expect(dot.classList.contains('camera-tile__video-dot--after-mic')).toBe(afterMic);
+    expect(!!container.querySelector('.talk-btn')).toBe(afterMic);
+  });
+
+  // The dot is not part of the talk button: the button's red "talking" state (and its 44px tap area) must not move or
+  // swallow the dot, and the dot must not inherit the button's click. Fails on the old code (no dot on the video);
+  // kept afterwards so nobody nests the dot inside the button.
+  test('the video dot is a sibling of the mic button, not inside it', () => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'vds', name: 'Camera', statusLevel: 'live', talk_configured: true }} childName="A child" />);
+    const talk = container.querySelector('.talk-btn');
+    const dot = container.querySelector('.camera-tile__video-dot');
+    expect(talk.contains(dot)).toBe(false);
+    expect(dot.parentElement).toBe(talk.parentElement);
+  });
+
+  // The word the strip no longer prints is printed (visibly, not in a visually hidden element) in the camera's
+  // sheet with the same dot, so colour is never the only signal.
+  test.each([
+    ['live', false, false, 'Online', 'breathing--live'],
+    ['connecting', false, false, 'Connecting', 'breathing--connecting'],
+    ['offline', false, false, 'Offline', 'breathing--offline'],
+    ['connecting', true, false, 'Status unknown', 'breathing--connecting'],
+    ['offline', true, false, 'Status unknown', 'breathing--connecting'],
+    ['offline', false, true, 'Disabled', 'dot--neutral'],
+  ])('the camera sheet prints the status dot and word for %s / unknown %s / disabled %s as %s', async (statusLevel, statusUnknown, disabled, word, dot) => {
+    const { user } = renderAsAdmin(<CameraTile camera={{ id: 'sheet', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);
+    await user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    const sheet = document.querySelector('.tile-menu');
+    const state = sheet.querySelector('.tile-menu__state');
+    expect(state).toHaveTextContent(word);
+    expect(within(sheet).getByText(word)).toBeVisible();
+    expect(within(sheet).getByText(word).closest('.camera-tile__sr')).toBeNull();
+    expect(state.querySelector(`.${dot}`)).toBeInTheDocument();
+    expect(state.querySelector('.camera-tile__dot')).toHaveAttribute('aria-hidden', 'true');
+    // The sheet's dot is the in-flow one, not the absolutely placed on-video one. (Guard: also true on the old code;
+    // kept so a shared dot component cannot leak the on-video placement class into the sheet.)
+    expect(state.querySelector('.camera-tile__video-dot')).toBeNull();
+    // The state line sits right under the camera name in the sheet header.
+    expect(sheet.querySelector('.tile-menu__title').nextElementSibling).toBe(state);
+  });
+
+  test('temperature and humidity are separate icon chips beside a wrapping name and the drag handle', () => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'readings', name: 'A long camera name', mqtt: { temperature: 21.5, humidity: 48 } }}
+      childName="A child" dragHandleProps={{}} />);
+    const strip = container.querySelector('.camera-tile__meta');
+    expect(strip.querySelector('.camera-tile__name')).toHaveTextContent('A long camera name');
+    expect(within(strip).getByRole('button', { name: 'Reorder A long camera name' })).toBeInTheDocument();
+    const chips = strip.querySelectorAll('.camera-tile__reading');
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toHaveTextContent('21.5°C');
+    expect(chips[1]).toHaveTextContent('48%');
+    expect(chips[0].querySelector('svg')).toBeInTheDocument();
+    expect(chips[1].querySelector('svg')).toBeInTheDocument();
+  });
+
+  test('segmented buttons keep pressed state and change their selections', async () => {
+    const { user, container } = mount({ cameras: [{ ...CAMS[0], has_sub: true }] });
+    await user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    for (const groupName of ['Connection mode', 'Stream quality']) {
+      expect(screen.getByRole('group', { name: groupName })).toHaveClass('seg-track');
+    }
+    const mode = screen.getByRole('group', { name: 'Connection mode' });
+    await user.click(within(mode).getByRole('button', { name: 'Compatibility' }));
+    expect(within(mode).getByRole('button', { name: 'Compatibility' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(mode).getByRole('button', { name: 'Low latency' })).toHaveAttribute('aria-pressed', 'false');
+    const quality = screen.getByRole('group', { name: 'Stream quality' });
+    await user.click(within(quality).getByRole('button', { name: 'Low' }));
+    expect(within(quality).getByRole('button', { name: 'Low' })).toHaveAttribute('aria-pressed', 'true');
+    expect(container.querySelector('.tile-menu__actions')).toBeInTheDocument();
+  });
+
+  test('Stop and Camera settings are rows with unchanged actions; caregiver has no settings row', async () => {
+    const { user, unmount } = mount({ cameras: [CAMS[0]] });
+    await user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    const stop = screen.getByRole('button', { name: 'Stop', exact: true });
+    expect(stop).toHaveClass('tile-menu__action');
+    expect(within(document.querySelector('.tile-menu')).getByRole('button', { name: 'Camera settings', exact: true })).toHaveClass('tile-menu__action');
+    await user.click(stop);
+    expect(screen.getByText('Camera stopped')).toBeInTheDocument();
+    unmount();
+    localStorage.removeItem('nightlight_stopped_c1');
+    const carer = renderAsCaregiver(<LiveMonitor />, { cameras: [{ ...CAMS[0], id: 'c-care' }], kids: KIDS });
+    await carer.user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    expect(within(document.querySelector('.tile-menu')).queryByRole('button', { name: 'Camera settings', exact: true })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Stop', exact: true })).toHaveClass('tile-menu__action');
+  });
+
+  test('Camera settings row still opens this camera with Live as its back destination', async () => {
+    function Destination() {
+      const location = useLocation();
+      return <div>Camera route {location.pathname}, back {location.state?.from?.to}</div>;
+    }
+    const { user } = renderAsAdmin(<Routes>
+      <Route path="/" element={<LiveMonitor />} />
+      <Route path="/cameras/:id" element={<Destination />} />
+    </Routes>, { cameras: [CAMS[0]], kids: KIDS });
+    await user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    await user.click(within(document.querySelector('.tile-menu')).getByRole('button', { name: 'Camera settings' }));
+    expect(screen.getByText('Camera route /cameras/c1, back /')).toBeInTheDocument();
   });
 });
 

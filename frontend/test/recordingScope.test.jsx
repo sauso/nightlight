@@ -11,6 +11,7 @@
 //      request. Tested through the real guard, not by assuming it.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import CameraSettings from '../src/pages/CameraSettings.jsx';
@@ -94,7 +95,7 @@ describe('describeSetup: configuration, from the camera’s own fields', () => {
 
     const off = rowOf(setupOf({}, { wake_clips_enabled: 0 }), 'wake');
     expect(off).toMatchObject({ value: 'Not eligible', on: false });
-    expect(off.note).toMatch(/Record wake-ups without alerting.+off in Settings → Camera and Recording → Recording/);
+    expect(off.note).toMatch(/Record wake-ups without alerting.+off in Settings → Camera and recording → Recording/);
 
     const none = rowOf(setupOf({ child_id: null }), 'wake');
     expect(none.on).toBe(false);
@@ -106,7 +107,7 @@ describe('describeSetup: configuration, from the camera’s own fields', () => {
 
     // All reasons at once, not just the first.
     const all = rowOf(setupOf({ child_id: null }, { wake_clips_enabled: 0 }), 'wake').note;
-    expect(all).toMatch(/off in Settings → Camera and Recording → Recording; no child is assigned/);
+    expect(all).toMatch(/off in Settings → Camera and recording → Recording; no child is assigned/);
   });
 
   test('a setting that has not arrived yet is the server’s default (on), not "off"', () => {
@@ -121,7 +122,7 @@ describe('describeSetup: configuration, from the camera’s own fields', () => {
     expect(rowOf(setupOf({}, { ondemand_enabled: 1 }), 'manual').value).toBe('On');
     const off = rowOf(setupOf({}, { ondemand_enabled: 0 }), 'manual');
     expect(off).toMatchObject({ value: 'Off', on: false });
-    expect(off.note).toMatch(/Show a Record button on each camera.+Settings → Camera and Recording → Recording/);
+    expect(off.note).toMatch(/Show a Record button on each camera.+Settings → Camera and recording → Recording/);
   });
 });
 
@@ -246,7 +247,15 @@ const mount = ({ cam = CAM, settings = {}, as = renderAsAdmin, guarded = false }
     { cameras: [cam], kids: KIDS, settings, route: `/cameras/${cam.id}` }
   );
 };
-const panel = async () => within(await screen.findByRole('region', { name: 'Recording and alerts' }));
+// #1076: the panel sits behind the Advanced row, closed until someone opens it. Opening it is part of "looking at the panel".
+const openAdvanced = async () => {
+  const row = await screen.findByRole('button', { name: /^Advanced/ });
+  if (row.getAttribute('aria-expanded') === 'false') await userEvent.click(row);
+};
+const panel = async () => {
+  await openAdvanced();
+  return within(await screen.findByRole('region', { name: 'Recording and alerts' }));
+};
 const readinessCalls = () => getSpy.mock.calls.filter(([p]) => String(p).includes('recording-readiness'));
 
 beforeEach(() => {
@@ -329,7 +338,7 @@ describe('the panel, as an admin', () => {
     expect(await p.findByText(/Not eligible: no child is assigned to this camera/)).toBeTruthy();
   });
 
-  test('a wake-up setting turned off in Settings → Camera and Recording → Recording is reflected', async () => {
+  test('a wake-up setting turned off in Settings → Camera and recording → Recording is reflected', async () => {
     mount({ settings: { wake_clips_enabled: 0 } });
     const p = await panel();
     expect(await p.findByText(/“Record wake-ups without alerting” is off/)).toBeTruthy();
@@ -365,7 +374,16 @@ describe('the panel, as an admin', () => {
 describe('role: the page is admin-only, so the panel and its request are too', () => {
   test('an admin gets the panel through the real guard', async () => {
     mount({ guarded: true });
-    expect(await screen.findByRole('region', { name: 'Recording and alerts' })).toBeTruthy();
+    await panel();
+    await waitFor(() => expect(readinessCalls()).toHaveLength(1));
+  });
+
+  test('#1076: the panel is behind Advanced, so while Advanced is closed there is no panel and no readiness request', async () => {
+    mount();
+    await screen.findByRole('button', { name: /^Advanced/ });
+    expect(screen.queryByRole('region', { name: 'Recording and alerts' })).toBeNull();
+    expect(readinessCalls()).toHaveLength(0);
+    await panel(); // opens Advanced
     await waitFor(() => expect(readinessCalls()).toHaveLength(1));
   });
 

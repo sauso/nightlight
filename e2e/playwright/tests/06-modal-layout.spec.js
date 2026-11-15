@@ -14,7 +14,8 @@ const { ensureSyntheticCamera } = require('./helpers');
 
 async function openConfirmModal(page) {
   await page.goto('/#/cameras');
-  await page.getByRole('button', { name: 'Remove' }).first().click();
+  await page.getByRole('button', { name: /More for/ }).first().click();
+  await page.getByRole('menuitem', { name: 'Remove camera' }).click();
   await expect(page.locator('.modal-card')).toBeVisible();
 }
 

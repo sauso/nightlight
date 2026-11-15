@@ -13,7 +13,9 @@ import { useLater } from '../lib/useLater.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
+import { cameraState } from '../lib/cameraStatus.js';
 import RecordIcon from './icons/RecordIcon.jsx';
+import ModalActions from './ModalActions.jsx';
 
 // The tile's quick motion/sound/schedule toggles write to the same /detection endpoint the full
 // DetectionSettings screens do, and since #444 both go through the same per-camera save queue
@@ -60,6 +62,19 @@ export function readingParts(mqtt, tempUnit) {
 export function fmtElapsed(sec) {
   const s = Math.max(0, Math.round(sec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// The status dot, shown on the video (next to the mic button, top-left) and in the camera sheet. It is decorative to
+// assistive tech (aria-hidden): the same state is always spelled out as a word (visually hidden after the name in the
+// strip, printed in the sheet), so the dot is never the only carrier. The wrapper is a fixed 14px box so the neutral
+// dot (8px, no ring) and the breathing dot (14px) occupy the same footprint. The dot components themselves are
+// unchanged. `className` adds the on-video placement classes; the sheet passes none.
+function TileStatusDot({ dot, className = '' }) {
+  return (
+    <span className={`camera-tile__dot${className ? ` ${className}` : ''}`} aria-hidden="true">
+      {dot === 'neutral' ? <span className="dot--neutral" /> : <BreathingDot status={dot} />}
+    </span>
+  );
 }
 
 export default function CameraTile({ camera, childName, dragHandleProps, refreshNonce = 0, onRecordingSaved, frameTestId, onFrames }) {
@@ -698,6 +713,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   }
   // Stop any active hold-loop if the tile unmounts mid-press.
   useEffect(() => () => { ptzHoldingRef.current = false; }, []);
+  const tileState = cameraState(camera);
 
   return (
     <div className="camera-tile">
@@ -776,19 +792,28 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             >
               <div className="tile-menu__grabber" aria-hidden="true" />
               <div className="tile-menu__title">{camera.name}</div>
+              {/* The status word is no longer printed in the tile strip (the dot is on the video and the word is
+                  visually hidden), so the sheet is where a sighted user can always read it: colour must never be
+                  the only signal. Same dot and word as the strip, from the same cameraState(). */}
+              <div className="tile-menu__state">
+                <TileStatusDot dot={tileState.dot} />
+                <span>{tileState.word}</span>
+              </div>
 
               <div className="tile-menu__label">Connection mode</div>
-              <div className="segmented" role="group" aria-label="Connection mode" style={{ marginBottom: 12 }}>
+              <div className="seg-track" role="group" aria-label="Connection mode" style={{ marginBottom: 12 }}>
                 <button
                   type="button"
-                  className={`segmented__btn${mode === 'live' ? ' segmented__btn--active' : ''}`}
+                  className={`seg-track__btn${mode === 'live' ? ' seg-track__btn--active' : ''}`}
+                  aria-pressed={mode === 'live'}
                   onClick={() => selectMode('live')}
                 >
                   Low latency
                 </button>
                 <button
                   type="button"
-                  className={`segmented__btn${mode === 'compat' ? ' segmented__btn--active' : ''}`}
+                  className={`seg-track__btn${mode === 'compat' ? ' seg-track__btn--active' : ''}`}
+                  aria-pressed={mode === 'compat'}
                   onClick={() => selectMode('compat')}
                 >
                   Compatibility
@@ -798,17 +823,19 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               {camera.has_sub && (
                 <>
                   <div className="tile-menu__label">Quality</div>
-                  <div className="segmented" role="group" aria-label="Stream quality" style={{ marginBottom: 12 }}>
+                  <div className="seg-track" role="group" aria-label="Stream quality" style={{ marginBottom: 12 }}>
                     <button
                       type="button"
-                      className={`segmented__btn${quality === 'high' ? ' segmented__btn--active' : ''}`}
+                      className={`seg-track__btn${quality === 'high' ? ' seg-track__btn--active' : ''}`}
+                      aria-pressed={quality === 'high'}
                       onClick={() => setQuality('high')}
                     >
                       High
                     </button>
                     <button
                       type="button"
-                      className={`segmented__btn${quality === 'low' ? ' segmented__btn--active' : ''}`}
+                      className={`seg-track__btn${quality === 'low' ? ' seg-track__btn--active' : ''}`}
+                      aria-pressed={quality === 'low'}
                       onClick={() => setQuality('low')}
                     >
                       Low
@@ -890,19 +917,18 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <div className="tile-menu__actions">
                 <button
                   type="button"
-                  className="btn btn-danger"
-                  style={{ flex: 1 }}
+                  className="tile-menu__action tile-menu__action--stop"
                   onClick={() => { setStopped(!stopped); closeMenu(); }}
                 >
-                  {stopped ? <Play size={16} /> : <Square size={16} />}
+                  {stopped ? <Play size={18} aria-hidden="true" /> : <Square size={18} aria-hidden="true" />}
                   {stopped ? 'Start' : 'Stop'}
                 </button>
                 {isAdmin && (
-                  <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={openCameraSettings}>
-                    <Settings size={16} />
+                  <button type="button" className="tile-menu__action" onClick={openCameraSettings}>
+                    <Settings size={18} aria-hidden="true" />
                     Camera settings
                   </button>
                 )}
@@ -915,15 +941,15 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                       ? 'Power-cycle the camera? It goes fully offline for everyone for about 30–60 seconds while it reboots.'
                       : 'Restart the stream? It reloads the feed for everyone.'}
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setConfirmAction(null)}>
+                  <ModalActions>
+                    <button type="button" className="btn btn-secondary" onClick={() => setConfirmAction(null)}>
                       Cancel
                     </button>
-                    <button type="button" className="btn btn-danger" style={{ flex: 1 }}
+                    <button type="button" className="btn btn-danger"
                       onClick={confirmAction === 'reboot' ? rebootCameraNow : restartStreamNow}>
                       {confirmAction === 'reboot' ? 'Restart camera' : 'Restart stream'}
                     </button>
-                  </div>
+                  </ModalActions>
                 </div>
               ) : (
                 <>
@@ -1025,6 +1051,14 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <Mic size={16} />
           </button>
         )}
+        {/* The status dot lives on the video, top-left, vertically centred on the 30px control row (owner, 2026-11-15:
+            it read oddly next to the child's name). With a mic button it sits just right of it (--after-mic); with
+            none it takes the corner. Not interactive (pointer-events:none in CSS), so it never swallows a tap meant
+            for the video or a button. Same dot and states as the camera sheet, from the same cameraState(). */}
+        <TileStatusDot
+          dot={tileState.dot}
+          className={`camera-tile__video-dot${camera.talk_configured ? ' camera-tile__video-dot--after-mic' : ''}`}
+        />
         {/* On-demand recording. Because the server is always buffering, this also captures the
             seconds BEFORE the tap — so you can hit it just after the moment. Recording shows a
             pulsing red dot and the elapsed time; it auto-stops at the configured cap. */}
@@ -1075,8 +1109,15 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               <GripVertical size={16} />
             </button>
           )}
-          <div>
-            <div className="camera-tile__name">{camera.name}</div>
+          <div className="camera-tile__identity">
+            {/* The name, then the child. The status dot is no longer here (it moved onto the video, next to the mic).
+                The word ("Online", "Offline", ...) is not printed here either: it follows the name as visually
+                hidden text so a screen reader still reads "Camera, Online", and the camera's sheet prints it for
+                everyone else (owner decision, Live card option C). */}
+            <div className="camera-tile__title">
+              <div className="camera-tile__name">{camera.name}</div>
+              <span className="camera-tile__sr">, {tileState.word}</span>
+            </div>
             <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
           </div>
         </div>
@@ -1093,7 +1134,6 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               {text}
             </span>
           ))}
-          <BreathingDot status={camera.statusLevel || 'connecting'} />
         </div>
       </div>
     </div>

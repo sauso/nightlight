@@ -3,6 +3,7 @@ import { Zap, AudioLines, Play, Trash2, Lock } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
+import ModalActions from '../components/ModalActions.jsx';
 import ClipDatePicker from '../components/ClipDatePicker.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import { loadState } from '../lib/loadState.js';
@@ -11,7 +12,7 @@ import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import WakeClipPlayerModal from '../components/WakeClipPlayerModal.jsx';
 import { ProtectedBadge } from '../components/ClipProtection.jsx';
 
-// Admin Clip Management: browse every recorded clip, filter by day, and bulk-select + delete. Deleting
+// Admin Clip management: browse every recorded clip, filter by day, and bulk-select + delete. Deleting
 // removes the video only — the alert and its snapshot stay. Reachable from Settings (admin).
 const TYPE = {
   motion: { label: 'Motion', Icon: Zap },
@@ -177,7 +178,7 @@ export default function ClipManagement() {
 
   return (
     <>
-      <AppHeader title="Clip Management" back={{ to: '/settings/camera-recording', label: 'Camera and Recording' }} />
+      <AppHeader title="Clip management" back={{ to: '/settings/camera-recording', label: 'Camera settings' }} />
       <main className="app-main" style={{ paddingBottom: selCount ? 84 : undefined }}>
         {listState === 'error' && <LoadFailed what="clips" error={error} onRetry={load} />}
         {listState === 'stale' && <LoadFailed what="clips" error={error} onRetry={load} stale />}
@@ -187,7 +188,7 @@ export default function ClipManagement() {
         {actionNote && <div className="camera-tile__sub" role="status">{actionNote}</div>}
 
         {protectedItems.length > 0 && <div className="card tight">
-          <div className="card-title">Protected</div>
+          <h2 className="card-heading">Protected</h2>
           {protectedItems.map(({ kind, clip }) => {
             const isWake = kind === 'wake';
             const when = parseUtc(clip.created_at);
@@ -300,12 +301,12 @@ export default function ClipManagement() {
             Delete <strong>{selCount} clip{selCount === 1 ? '' : 's'}</strong>? This removes the video files; the
             alerts and their snapshots stay. It can’t be undone.
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
             <button className="btn btn-danger" type="button" onClick={deleteSelected} disabled={busy}>
               {busy ? 'Deleting…' : `Delete ${selCount}`}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
     </>

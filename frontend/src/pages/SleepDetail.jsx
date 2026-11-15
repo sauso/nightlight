@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
+import { Calendar, SlidersHorizontal, ChevronDown, Moon, DoorOpen, Sunrise, Thermometer, Sparkles, Zap, AudioLines, Play, Video, HeartPulse, Wind } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import MoreMenu from '../components/MoreMenu.jsx';
+import SleepNightStrip from '../components/SleepNightStrip.jsx';
 import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
 import WakeClipPlayerModal from '../components/WakeClipPlayerModal.jsx';
@@ -13,8 +15,14 @@ import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
+import SleepScoreCard from '../components/SleepScoreCard.jsx';
+import NightPendingRing from '../components/NightPendingRing.jsx';
+import { scoreOf, sheetScoreOf, bandOf } from '../lib/sleepScoreText.js';
 import { showsInBed } from '../lib/inBed.js';
-import { nightDetailPath, describeSettings } from '../lib/nightView.js';
+import { addDays, nightDetailPath, describeSettings } from '../lib/nightView.js';
+import { timelineDrawingSegments } from '../lib/timelineDrawing.js';
+import { splitMorningWake } from '../lib/nightWakes.js';
+import { markerLeft, tickLabelAlign } from '../lib/timelineEdges.js';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -29,18 +37,26 @@ import { nightDetailPath, describeSettings } from '../lib/nightView.js';
 
 const HISTORY_DAYS = 30; // how far back the underlying activity_samples are retained
 
-export function addDays(dateStr, n) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + n);
-  return dt.toISOString().slice(0, 10);
-}
+// Moved to lib/nightView.js (the night strip needs it too, and the strip is imported by this page); still exported from here.
+export { addDays };
 
 export function fmtDur(min) {
   if (min == null) return '';
   const h = Math.floor(min / 60);
   const m = min % 60;
   return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// Does the detector doubt this night's wake? `wake_unconfirmed` (a fresh night) or `wake_unconfirmed_at` (a stored one) names an
+// EARLIER exit the app set aside as far earlier than this child usually gets up (#700); the wake it kept is then the app's
+// best guess, so the page does not print it as "Up for the day" (the score treats it the same way, "the time up is not certain").
+// ⚠️ ...UNLESS A PARENT HAS GIVEN THE WAKE. A review that carries a wake time sets `wake_given` on the night (sleepReviews.js
+// applyCorrection, #1041) and leaves the detector's note in place, so the flags alone would hide the parent's own confirmed
+// time for good: the score already counts it as confirmed (`sleepScore.js`: wake_given || no doubt), and so does this.
+// Found by checking the Codex review's suspicion against the server's shape (sleep-early-exit-lead.test.js T13: a real later
+// wake_at beside a wake_unconfirmed for the earlier exit); the doubted-but-ungiven case is deliberate and unchanged.
+function wakeDoubted(night) {
+  return Boolean(night.wake_unconfirmed || night.wake_unconfirmed_at) && night.wake_given !== true;
 }
 
 // Colours for the timeline segments — tuned to read on both themes (defined against tokens in CSS).
@@ -60,8 +76,15 @@ export default function SleepDetail() {
   const kid = kids.find((k) => k.id === id);
 
   const [searchParams] = useSearchParams();
-  const [maxDate, setMaxDate] = useState(null); // latest browsable night (last completed)
-  const [date, setDate] = useState(null); // selected night's local start date
+  // The latest browsable night (last completed) and the selected night's local start date, KEPT WITH THE CHILD THEY WERE WORKED OUT
+  // FOR. This page stays mounted when the route moves to another child, and /sleep/live has to answer before either is known
+  // again: held in plain state, the new child spent that time with the PREVIOUS child's newest night and selected date (the
+  // strip drew the new child's rows against the old night, review of PR #1061). Read through `id`, they are null until the new
+  // child's own answer lands.
+  const [pos, setPos] = useState({ childId: null, maxDate: null, date: null });
+  const maxDate = pos.childId === id ? pos.maxDate : null;
+  const date = pos.childId === id ? pos.date : null;
+  const setDate = (d) => setPos((p) => ({ ...p, childId: id, date: d }));
   const [night, setNight] = useState(undefined); // undefined = loading (or failed: see nightError)
   // The failure of the night request, kept apart from `night` (#375). A failed request used to become
   // `null`, the very value the server's "nothing recorded" answer produces, so an outage read as "No sleep
@@ -119,14 +142,12 @@ export default function SleepDetail() {
         const nd = r?.night?.night_date || fallback;
         if (!alive) return;
         const max = nd > fallback ? nd : fallback;
-        setMaxDate(max);
         // Clamp: the picker will not go past `max`, so neither may a hand-typed or stale URL.
-        setDate(wanted && wanted <= max ? wanted : nd);
+        setPos({ childId: id, maxDate: max, date: wanted && wanted <= max ? wanted : nd });
       })
       .catch(() => {
         if (!alive) return;
-        setMaxDate(fallback);
-        setDate(wanted && wanted <= fallback ? wanted : fallback);
+        setPos({ childId: id, maxDate: fallback, date: wanted && wanted <= fallback ? wanted : fallback });
       });
     return () => { alive = false; };
   }, [id, todayLocal, searchParams]);
@@ -203,59 +224,93 @@ export default function SleepDetail() {
     return () => { alive = false; };
   }, [id, date, searchParams]);
 
+  // The calendar button's floor and ceiling. The previous / next arrows that used to enforce the same range are gone
+  // (UI refresh PR E): the strip reaches the newest seven nights and this picker everything else in range, so no night
+  // the arrows could reach is out of reach.
   const minDate = maxDate ? addDays(maxDate, -(HISTORY_DAYS - 1)) : null;
-  const canPrev = date && minDate && date > minDate;
-  const canNext = date && maxDate && date < maxDate;
+
+  // The "⋯" menu (UI refresh PR E): what is in it, and whether there is any menu at all. "Show with today's settings" is
+  // known from the night; "Recompute this night" is reported by RecomputeNight itself (admin-only, and on a night today's
+  // settings cannot score it depends on its own read), so the page asks it and shows no "⋯" while neither is on offer.
+  const settingsSwitch = settingsSwitchOf(night);
+  const [recomputeAvailable, setRecomputeAvailable] = useState(false);
+  const [menuSlot, setMenuSlot] = useState(null); // the element inside the open menu that Recompute's item is portaled into
+  const hasMenu = !!settingsSwitch || recomputeAvailable;
+  // Bumped when a Recompute saves, so the strip re-reads: its bar for a re-scored night would otherwise go on showing the old score.
+  const [stripVersion, setStripVersion] = useState(0);
+  // The line under the header follows the night on screen: its band, neutral for no score and for an early estimate
+  // ('early' is neutral by construction, bandOf). Decorative; the score and its word are on the night card.
+  const band = bandOf(scoreOf(night)) || 'none';
 
   const fmtTime = (utc) => {
     if (!utc) return '';
     const d = new Date(String(utc).replace(' ', 'T') + 'Z');
     return new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(d);
   };
-  const fmtDateLong = (dstr) => {
-    if (!dstr) return '';
-    const d = new Date(dstr + 'T00:00:00');
-    return new Intl.DateTimeFormat([], { weekday: 'long', day: 'numeric', month: 'short' }).format(d);
-  };
+  // "Mon, Nov 9": the date string alone, formatted at noon UTC in UTC so no zone can move the day (see SleepNightStrip).
+  const fmtNightTitle = (dstr) => (dstr
+    ? new Intl.DateTimeFormat([], { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${dstr}T12:00:00Z`))
+    : '');
 
   const back = { to: `/children/${id}`, label: kid?.name || 'Child' };
 
+  const menu = hasMenu ? (
+    <MoreMenu label="More options for this night" menuLabel="This night" onSlot={setMenuSlot}>
+      {settingsSwitch && (
+        <button type="button" role="menuitem" className="more-menu__item" onClick={() => chooseSettingsView(settingsSwitch.to)}>
+          <SlidersHorizontal size={16} aria-hidden="true" /> {settingsSwitch.label}
+        </button>
+      )}
+    </MoreMenu>
+  ) : null;
+
   return (
     <>
-      <AppHeader title="Sleep" back={back} />
+      <AppHeader title="Sleep" back={back} bandLine={band} actions={menu} />
       <main className="app-main">
-        {/* Date navigator */}
-        <div className="sleep-nav">
-          <button type="button" className="sleep-nav__arrow" disabled={!canPrev}
-            onClick={() => canPrev && setDate(addDays(date, -1))} aria-label="Previous night">
-            <ChevronLeft size={20} />
-          </button>
-          <label className="sleep-nav__date">
-            <span className="sleep-nav__date-label">
-              {date ? fmtDateLong(date) : '…'}
-              {night?.in_progress && <span className="sleep-live-badge">so far</span>}
-            </span>
-            <span className="sleep-nav__date-sub">night of</span>
-            {date && (
-              <input type="date" className="sleep-nav__date-input" value={date} min={minDate || undefined} max={maxDate || undefined}
-                onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="Pick a night" />
-            )}
-          </label>
-          <button type="button" className="sleep-nav__arrow" disabled={!canNext}
-            onClick={() => canNext && setDate(addDays(date, 1))} aria-label="Next night">
-            <ChevronRight size={20} />
-          </button>
+        {/* "Night of …" and the calendar button. The native date input sits invisibly over the button, so a tap opens the
+            platform's own picker (min / max keep the history window the arrows used to enforce). Clicking it also asks
+            the browser to open the picker, because on desktop Chrome a click on the middle of a date input only
+            focuses a field of it. */}
+        <div className="sleep-title">
+          <h2 className="sleep-title__text">
+            Night of {date ? fmtNightTitle(date) : '…'}
+            {night?.in_progress && <span className="sleep-live-badge">so far</span>}
+          </h2>
+          {date && (
+            <label className="sleep-title__cal">
+              <Calendar size={20} aria-hidden="true" />
+              <input type="date" className="sleep-title__cal-input" value={date} min={minDate || undefined} max={maxDate || undefined}
+                onChange={(e) => e.target.value && setDate(e.target.value)}
+                onClick={(e) => { try { e.currentTarget.showPicker?.(); } catch { /* not allowed here: the native control still works */ } }}
+                aria-label="Pick a night" />
+            </label>
+          )}
         </div>
 
-        {receipt && (
+        <SleepNightStrip childId={id} maxDate={maxDate} minDate={minDate} selected={date} onSelect={setDate} version={stripVersion} />
+
+        {/* Recompute (admin-only) lives in the "⋯" menu. Mounted once, here, for every status but `off` and for a night
+            that has been answered (null / loading: nothing to recompute): it was in each status's card before, which is the
+            same set. It shows nothing itself (the menu item is portaled into `menuSlot`, and its read-failure message and
+            dialog render here), and `key` makes a new night start with a clean slate, as the card did when it remounted. */}
+        {night && night.status !== 'off' && (
+          <RecomputeNight key={`${id}|${date}`} childId={id} date={date} night={night} fmtTime={fmtTime}
+            onRecomputed={(n) => { setNight(n); setStripVersion((v) => v + 1); }}
+            onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }}
+            settingsView={settingsView} onSettingsViewChange={chooseSettingsView}
+            menuSlot={menuSlot} onAvailable={setRecomputeAvailable} />
+        )}
+
+        {/* On an `ok` night the receipt sits inside the night card (NightBody); other statuses keep it here. */}
+        {receipt && night?.status !== 'ok' && (
           <ReviewReceipt onsetAt={receipt.true_onset_at} wakeAt={receipt.true_wake_at} inBedAt={receipt.true_in_bed_at}
             nobodyInBed={!!receipt.nobody_in_bed}
             fmtTime={fmtTime} onOpen={() => navigate(`/children/${id}/review/${date}`)} />
         )}
 
         <NightBody night={night} error={nightError} onRetry={() => setNightRetry((n) => n + 1)} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
-          childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }}
-          settingsView={settingsView} onSettingsView={chooseSettingsView}
+          childId={id} date={date} receipt={receipt} onReview={() => navigate(`/children/${id}/review/${date}`)}
           onAlertProtectionChange={(clipId, value) => setNight((prev) => prev && ({ ...prev,
             alerts: (prev.alerts || []).map((clip) => clip.id === clipId ? { ...clip, protected: value } : clip),
           }))}
@@ -266,8 +321,9 @@ export default function SleepDetail() {
         <SleepInsights childId={id} tempUnit={settings.temp_unit} childName={kid?.name} />
 
         <div className="sleep-detail__est">
-          <Moon size={13} aria-hidden="true" /> Estimated from movement &amp; sound over the night window — a
-          sleep-pattern guide, not a medical measurement.
+          {/* The score is part of the same estimate, so the line says so whenever a score is on the page. */}
+          <Moon size={13} aria-hidden="true" /> Estimated from movement &amp; sound over the night
+          window{sheetScoreOf(night) ? ', the sleep score included' : ''} — a sleep-pattern guide, not a medical measurement.
         </div>
       </main>
     </>
@@ -290,14 +346,28 @@ function NightBody({ night, error, onRetry, ...rest }) {
   // shape, so it coming and going does not remount NightContent either. It sits ABOVE NightContent, whose
   // statuses each return early, so it is there for every status that can carry it (plan D4/R3). For a saved
   // camera that no longer exists, the line takes the place of the no-data card's text (NightContent, below).
-  // #813: keep it in this slot even when the deleted-camera night changes to today's view, so its button
-  // remains the same focused element across the switch.
+  // #813: keep it in this slot even when the deleted-camera night changes to today's view, so the card does not
+  // remount across the switch. (The switch itself is in the "⋯" menu since UI refresh PR E.)
   return (
     <>
       {error && <LoadFailed what="this night" error={error} onRetry={onRetry} stale />}
-      {night?.scoring_view && (
-        <SettingsViewLine night={night} onSettingsView={rest.onSettingsView} />
-      )}
+      {night?.scoring_view && <SettingsViewLine night={night} />}
+      {/* The night card sits under the date navigator and above the night for EVERY status: a night whose
+          timeline has aged out reads `no_data` and can still carry its saved score. Always rendered in this
+          slot (it returns nothing when there is nothing to say), so NightContent's position never changes and
+          it keeps its state. It is handed the night on screen, so it follows a switch to today's settings.
+          The review receipt and button keep their old conditions (the receipt for any answered night, the button
+          only for a finished one); only their position moves, into the night card of an `ok` night. Other
+          statuses keep their old routes (receipt above the date navigator, button in NightContent's early
+          returns). A saved score on no_data still renders. */}
+      <SleepScoreCard night={night} reviewAction={night?.status === 'ok' && (rest.receipt || !night.in_progress)
+        ? <>
+            {rest.receipt && <ReviewReceipt onsetAt={rest.receipt.true_onset_at} wakeAt={rest.receipt.true_wake_at}
+              inBedAt={rest.receipt.true_in_bed_at} nobodyInBed={!!rest.receipt.nobody_in_bed}
+              fmtTime={rest.fmtTime} onOpen={rest.onReview} embedded />}
+            {!night.in_progress && <ReviewNightButton childId={rest.childId} date={rest.date} corrected={night.corrected} />}
+          </>
+        : null} />
       <NightContent night={night} {...rest} />
     </>
   );
@@ -316,7 +386,11 @@ const savedCameraGone = (night) => night?.scoring?.problem === 'camera_deleted';
 // ⚠️ What the line names are the SETTINGS, from the server's two contexts, with the camera's LIVE name (a deleted one
 // reads "a camera that no longer exists"). The timezone it names is the one the night was saved in, while every
 // time on the page is shown in today's (the app setting): a stated limit (docs/sleep-tracking.md).
-function SettingsViewLine({ night, onSettingsView }) {
+//
+// UI refresh PR E: THE SWITCH ITSELF MOVED TO THE "⋯" MENU (`settingsSwitchOf` below is the one definition of it, used by
+// the menu), so this card is the explanation only and ends by saying where the switch went. Without that sentence a person
+// reading "Showing today's settings" would look for a button that is no longer under it.
+function SettingsViewLine({ night }) {
   if (!night?.scoring_view || night.status === 'off') return null;
   const v = night.scoring_view;
   const showingSaved = v.applied === 'stored';
@@ -335,15 +409,22 @@ function SettingsViewLine({ night, onSettingsView }) {
   return (
     <div className="card sleep-settings-view">
       <div className="sleep-settings-view__text">{text}</div>
-      <button type="button" className="btn btn-secondary btn-sm sleep-settings-view__switch"
-        onClick={() => onSettingsView?.(showingSaved ? 'current' : 'auto')}>
-        {showingSaved ? 'Show with today’s settings' : 'Show with the settings this night was saved with'}
-      </button>
+      {/* Its own element, so the explanation above stays one sentence that tests and readers can quote. */}
+      <div className="sleep-settings-view__text">Switch views in the ⋯ menu at the top.</div>
     </div>
   );
 }
 
-function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved, settingsView, onSettingsView, onAlertProtectionChange, onWakeProtectionChange }) {
+// The page's settings-view switch, for the "⋯" menu: which view it goes to and what it says. null when there is nothing to
+// switch between (the same test as the line above: the server sent `scoring_view`, and sleep tracking is not off).
+function settingsSwitchOf(night) {
+  if (!night?.scoring_view || night.status === 'off') return null;
+  return night.scoring_view.applied === 'stored'
+    ? { to: 'current', label: 'Show with today’s settings' }
+    : { to: 'auto', label: 'Show with the settings this night was saved with' };
+}
+
+function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProtectionChange, onWakeProtectionChange }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
@@ -351,9 +432,6 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
   // The saved bed-transition frame open in the viewer (or null), kept as the frame itself and not an index so it
   // also survives the 2-minute refresh (#907).
   const [frameFor, setFrameFor] = useState(null);
-  // #361 PR 4a: the page's settings view travels into every Recompute below, so its re-reads keep (or, after a
-  // save, reset) the view the page is in.
-  const viewProps = { settingsView, onSettingsViewChange: onSettingsView };
   if (night && night.status === 'off') {
     return (
       <div className="card">
@@ -363,27 +441,20 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
       </div>
     );
   }
-  // #361 PR 3 (plan R1): Recompute on a night TODAY's settings cannot score. The night the feature exists for (its
-  // camera turned off, moved or demoted since it was saved) reads exactly like this, and the control used to be
-  // unreachable here. RecomputeNight decides for itself whether to show anything: only for an admin, only after
-  // its own read finds usable saved settings that differ from today's on an unlocked night, and then it offers
-  // only the stored-settings re-score. Otherwise it renders nothing and these cards look as they always did. Not
-  // for a null night (nothing to compare) or `off` (tracking is off: nothing is scored either way).
   if (!night || night.status === 'no_data') {
-    // #813: the deleted-camera explanation is the stable settings line above this content. Its replay
-    // has no generic no-data explanation; only an offered Recompute control belongs below the line.
-    if (savedCameraGone(night) && night.scoring_view) {
-      return <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
-        onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} standaloneCard {...viewProps} />;
-    }
+    // #813: the deleted-camera explanation is the stable settings line above this content, and a replay that
+    // names a deleted camera has no generic no-data explanation: nothing is drawn here (the "⋯" menu's Recompute,
+    // when offered, is the only thing left to do with such a night).
+    if (savedCameraGone(night) && night.scoring_view) return null;
+    // The dashed moon ring (UI refresh PR H, the approved "no data" state) says "nothing here" by shape; the words under it are
+    // unchanged, and the Recompute entry stays in the "⋯" menu (the design's "Go to last night" button is not built: see the PR).
     return (
-      <div className="card">
-        <div className="camera-tile__sub" style={{ padding: 14 }}>
+      <div className="card sleep-empty">
+        <NightPendingRing surface="card" />
+        <div className="camera-tile__sub">
           No sleep data for this night — either it predates tracking, or the cameras weren’t running motion/sound
           detection with enough coverage.
         </div>
-        {night && <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
-          onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />}
       </div>
     );
   }
@@ -391,8 +462,6 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
     return (
       <div className="card">
         <div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div>
-        <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
-          onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />
       </div>
     );
   }
@@ -429,28 +498,18 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
           </div>
         )}
-        {/* #521: Recompute used to be unreachable here, because this branch returns before the `ok`-night
-            render below where it lives. An admin who tuned a threshold had no way to ask "does the detector
-            still call this night empty?" short of un-flagging the night first. It is the SAME component as on
-            an `ok` night, so every guard comes with it and none is re-implemented: admin-only, the dialog
-            previews the saved row against this one before anything is written (the second press applies),
-            and the server's allowDowngrade / locked refusals still decide what can be stored. A flagged night
-            is a corrected night, so it normally opens on "locked" (nothing to recompute until the correction
-            is removed). On no_data / no_sleep it is offered only for the stored-settings re-score (#361 PR 3,
-            see those branches above): with today's settings those are a coverage or scoring question, not a
-            "did the detector change its mind" one. */}
-        <div style={{ padding: '0 14px 14px' }}>
-          <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
-            onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />
-        </div>
+        {/* Recompute on an `empty` night (#521) is in the page's "⋯" menu like every other status: see where
+            SleepDetail mounts RecomputeNight. */}
       </div>
     );
   }
 
+  // UI consistency (PR-C): the in-progress, still-asleep value sits under the label "Asleep" (below), so it says only
+  // "<time>, ongoing"; it used to read "asleep since <time> (ongoing)" and repeat the word right under its own label.
   const range = night.in_progress
     ? night.wake_at
       ? `${fmtTime(night.onset_at)} – awake since ${fmtTime(night.wake_at)}`
-      : `asleep since ${fmtTime(night.onset_at)} (ongoing)`
+      : `${fmtTime(night.onset_at)}, ongoing`
     : night.wake_at
       ? `${fmtTime(night.onset_at)} – ${fmtTime(night.wake_at)}`
       : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
@@ -459,18 +518,26 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
   const hasChildOut = visits.some((v) => v.type === 'child_out');
   const hasRoom = visits.some((v) => v.type !== 'child_out');
   const hasGap = (night.segments || []).some((s) => s.state === 'gap');
+  const states = new Set((night.segments || []).map((s) => s.state));
+  const transitionTypes = new Set((night.transitions || []).map((t) => t.type));
   const alerts = night.alerts || [];
   const wakeClips = night.wakeClips || [];
   // #907. Absent on a server from before the field existed (and on a night with no camera): no buttons, no error.
   const frames = night.transition_frames || [];
   // Coverage is measured against elapsed time so far for a live night, not the full window.
   const covEnd = night.in_progress && night.as_of ? night.as_of : night.window_end;
-  const covPct = Math.round((night.coverage_minutes / Math.max(1, Math.round((utcMs(covEnd) - utcMs(night.window_start)) / 60000))) * 100);
+  const covWindowMin = Math.max(1, Math.round((utcMs(covEnd) - utcMs(night.window_start)) / 60000));
+  // Shown whenever ANY minute was not covered, judged on the raw minutes: 719 of 720 rounds to 100%, and a line that vanishes for
+  // a night with a gap would hide exactly what it is for. A partial night is never printed as 100% (capped at 99).
+  const partialCoverage = night.coverage_minutes < covWindowMin;
+  const covPct = Math.min(99, Math.round((night.coverage_minutes / covWindowMin) * 100));
 
   return (
     <>
-      <div className="card sleep-detail__summary">
-        <div className="sleep-detail__big">{fmtDurBig(night.asleep_minutes)}<span> asleep{night.in_progress ? ' so far' : ''}</span></div>
+      {/* A night whose card has no sheet (no score, or still in progress with a stale one) keeps its facts here.
+          A scored night gets these same facts in the sheet (sheetScoreOf is the card's own test); the tools below
+          remain reachable on the page. */}
+      {!sheetScoreOf(night) && <div className="card sleep-detail__summary">
         <div className="sleep-detail__stats">
           {/* "In bed" first, so the two times read in the order they happened. Only when the put-down
               is a real minute or more before sleep — see showsInBed for why that check is one-way. */}
@@ -478,8 +545,10 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
           <Stat label={night.in_progress ? 'Asleep' : 'Asleep from → to'} value={range} />
           <Stat label="Wake-ups" value={String(night.wake_count ?? 0)} />
           <Stat label="Longest stretch" value={fmtDurAbbr(night.longest_stretch_minutes)} />
-          <Stat label="Coverage" value={`${covPct}%`} />
+          {partialCoverage && <Stat label="Coverage" value={`${covPct}%`} />}
         </div>
+      </div>}
+      <div className="sleep-detail__tools">
         <RefinedTimes night={night} fmtTime={fmtTime} />
         {night.analysis_camera_name && (
           <div className="sleep-detail__source">
@@ -487,63 +556,31 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
           </div>
         )}
         <FaultyMicNote night={night} />
-        {/* The way into a review for any night, not just the one the card is offering. Without it a
-            mistake is permanent. Its own component because `navigate` belongs to whichever component
-            calls the hook — inline here it was out of scope and the button silently did nothing. */}
-        {!night.in_progress && (
-          <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
-        )}
-        <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
-          onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />
+        {/* The review button for an `ok` night is inside the night card (NightBody); Recompute is in the "⋯" menu. */}
       </div>
 
       <div className="card">
-        <div className="sleep-detail__section-title">Night timeline</div>
+        <div className="sleep-card-title">Timeline</div>
         <Timeline night={night} fmtTime={fmtTime} tz={tz} tempUnit={tempUnit} />
         <div className="sleep-legend">
-          <span><i className="sleep-legend__sw sleep-seg--asleep" /> Asleep</span>
-          <span><i className="sleep-legend__sw sleep-seg--stir" /> Stirring</span>
-          <span><i className="sleep-legend__sw sleep-seg--wake" /> Awake</span>
-          <span><i className="sleep-legend__sw sleep-seg--awake" /> Before/after sleep</span>
-          {hasGap && <span><i className="sleep-legend__sw sleep-seg--gap" /> No data</span>}
-          {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> Movement outside the bed</span>}
-          {hasChildOut && <span><i className="sleep-legend__sw sleep-legend__sw--out" /> Out of bed</span>}
-          {(night.transitions || []).length > 0 && (
-            <span><i className="sleep-tl__tx sleep-tl__tx--in" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 1px 0', verticalAlign: 'middle' }} /> Got into bed
-              <i className="sleep-tl__tx sleep-tl__tx--out" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 10px', verticalAlign: 'middle' }} /> Got out of bed</span>
-          )}
+          {states.has('asleep') && <span><i className="sleep-legend__sw sleep-seg--asleep" aria-hidden="true" /> Asleep</span>}
+          {states.has('stir') && <span><i className="sleep-legend__sw sleep-seg--stir" aria-hidden="true" /> Stirring</span>}
+          {states.has('wake') && <span><i className="sleep-legend__sw sleep-seg--wake" aria-hidden="true" /> Awake</span>}
+          {(states.has('awake') || states.has('settling')) && <span><i className="sleep-legend__sw sleep-seg--awake" aria-hidden="true" /> Before/after sleep</span>}
+          {hasGap && <span><i className="sleep-legend__sw sleep-seg--gap" aria-hidden="true" /> No data</span>}
+          {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" aria-hidden="true" /> Movement outside the bed</span>}
+          {hasChildOut && <span><i className="sleep-legend__sw sleep-legend__sw--out" aria-hidden="true" /> Out of bed</span>}
+          {transitionTypes.has('into_bed') && <span><i className="sleep-tl__tx sleep-tl__tx--in" aria-hidden="true" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 1px 0', verticalAlign: 'middle' }} /> Got into bed</span>}
+          {transitionTypes.has('out_of_bed') && <span><i className="sleep-tl__tx sleep-tl__tx--out" aria-hidden="true" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 0', verticalAlign: 'middle' }} /> Got out of bed</span>}
         </div>
         <ClimateTrack night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} tempUnit={tempUnit} />
+        <VitalsTracks night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} />
       </div>
 
-      <div className="card">
-        <div className="sleep-detail__section-title">Wake-ups · {wakes.length}</div>
-        {wakes.length === 0 ? (
-          <div className="camera-tile__sub" style={{ padding: '2px 2px 4px' }}>No awakenings counted (a stir under 5 minutes doesn’t count).</div>
-        ) : (
-          <ul className="sleep-wakes">
-            {wakes.map((w, i) => (
-              <WakeItem key={i} wake={w} hits={alertsInRange(alerts, w.start_at, w.end_at)}
-                clip={clipForWake(wakeClips, w.start_at, w.end_at)}
-                fmtTime={fmtTime} onPlay={setClipFor} onPlayWake={setWakeClip} />
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {visits.length > 0 && (
-        <div className="card">
-          <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
-          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>
-          <ul className="sleep-wakes">
-            {/* Keyed by when the row starts, not its position: each row keeps its own open/closed state, and the live
-                night is re-read every two minutes, so a row inserted before an open one must not hand it over. */}
-            {visits.map((v) => (
-              <VisitItem key={`${v.start_at}|${v.type}`} visit={v} frames={framesForVisit(frames, v)} fmtTime={fmtTime} onShowFrame={setFrameFor} />
-            ))}
-          </ul>
-        </div>
-      )}
+      <NightEventTabs key={`${childId}|${date}`} wakes={wakes} wakeCount={night.wake_count} visits={visits} alerts={alerts}
+        wakeClips={wakeClips} frames={frames} fmtTime={fmtTime} onPlay={setClipFor}
+        onPlayWake={setWakeClip} onShowFrame={setFrameFor}
+        morningWakeAt={!night.in_progress && !wakeDoubted(night) ? night.wake_at : null} />
 
       {clipFor && <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)}
         onProtectedChange={(clipId, value) => {
@@ -573,6 +610,107 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
   );
 }
 
+function NightEventTabs({ wakes: allWakes, wakeCount, visits, alerts, wakeClips, frames, fmtTime, onPlay, onPlayWake, onShowFrame, morningWakeAt }) {
+  // The tab says N wake-ups and the summary says `wake_count`, so both must come from the same rows: the server's standalone
+  // morning-wake row is listed with "Up for the day", not counted (see splitMorningWake). The old card counted every row.
+  const { counted: wakes, morning } = splitMorningWake(allWakes, wakeCount);
+  // The parent keys this component by child and night, so a newly opened night chooses its own useful default.
+  const [selected, setSelected] = useState(() => wakes.length === 0 && visits.length > 0 ? 'room' : 'wakes');
+  // The Room activity explanation is behind a "What is this?" button (owner, staging phone 2026-11-13: a six-line paragraph above the list).
+  const [explainOpen, setExplainOpen] = useState(false);
+  const tabs = ['wakes', 'room'];
+  // Every id here carries a per-instance prefix: fixed strings ("sleep-events-wakes-tab") would collide as soon as two of these
+  // sit in one document (two nights open at once, a modal that embeds one), and a duplicate id points aria-controls and
+  // aria-labelledby at the FIRST copy, so the second instance's tabs would drive the wrong panel for a screen reader.
+  const ids = useId();
+  const tabId = (tab) => `${ids}-${tab}-tab`;
+  const panelId = (tab) => `${ids}-${tab}-panel`;
+  const explainId = `${ids}-explain`;
+  const chooseFromKey = (event, index) => {
+    let next;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    setSelected(tabs[next]);
+    event.currentTarget.parentElement.querySelectorAll('[role="tab"]')[next].focus();
+  };
+  return (
+    <div className="card sleep-events">
+      <div className="sleep-events__tabs seg-track seg-track--tabs" role="tablist" aria-label="Night events">
+        {tabs.map((tab, index) => (
+          <button key={tab} type="button" role="tab" id={tabId(tab)}
+            aria-controls={panelId(tab)} aria-selected={selected === tab}
+            className={`seg-track__btn${selected === tab ? ' seg-track__btn--active' : ''}`}
+            tabIndex={selected === tab ? 0 : -1} onClick={() => setSelected(tab)}
+            onKeyDown={(event) => chooseFromKey(event, index)}>
+            {tab === 'wakes' ? `Wake-ups · ${wakes.length}` : `Room activity · ${visits.length}`}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id={panelId('wakes')} aria-labelledby={tabId('wakes')} hidden={selected !== 'wakes'}>
+        {wakes.length === 0 ? (
+            <div className="camera-tile__sub sleep-events__empty">No wake-ups counted (a stir under 5 minutes doesn’t count).</div>
+          ) : (
+            <ul className="sleep-wakes">
+              {wakes.map((w, i) => (
+                <WakeItem key={`${w.start_at}|${i}`} wake={w} hits={alertsInRange(alerts, w.start_at, w.end_at)}
+                  clip={clipForWake(wakeClips, w.start_at, w.end_at)}
+                  fmtTime={fmtTime} onPlay={onPlay} onPlayWake={onPlayWake} />
+              ))}
+            </ul>
+          )}
+        {/* The morning row keeps what the server attached to it (a clip, alerts), so it is a real row when it has any. */}
+        {morning && morningWakeAt ? (
+          <ul className="sleep-wakes sleep-events__morning-list">
+            <WakeItem wake={morning} morningAt={morningWakeAt} hits={alertsInRange(alerts, morning.start_at, morning.end_at)}
+              clip={clipForWake(wakeClips, morning.start_at, morning.end_at)}
+              fmtTime={fmtTime} onPlay={onPlay} onPlayWake={onPlayWake} />
+          </ul>
+        ) : (
+          <>
+            {/* An unconfirmed morning wake has no "Up for the day" time to show: its row stays a plain, uncounted wake row. */}
+            {morning && (
+              <ul className="sleep-wakes sleep-events__morning-list">
+                <WakeItem wake={morning} hits={alertsInRange(alerts, morning.start_at, morning.end_at)}
+                  clip={clipForWake(wakeClips, morning.start_at, morning.end_at)}
+                  fmtTime={fmtTime} onPlay={onPlay} onPlayWake={onPlayWake} />
+              </ul>
+            )}
+            {!morning && morningWakeAt && <div className="sleep-events__morning"><span><Sunrise size={16} aria-hidden="true" /> Up for the day</span><time>{fmtTime(morningWakeAt)}</time></div>}
+          </>
+        )}
+      </div>
+      <div role="tabpanel" id={panelId('room')} aria-labelledby={tabId('room')} hidden={selected !== 'room'}>
+        <>
+            {visits.length > 0 && (
+              <>
+                {/* ONE short line: the kind every plain row stands for (the dot is the same teal as the timeline's ring), and the button that
+                    opens the full explanation, unchanged. The rows themselves no longer repeat "Movement outside the bed" as a chip. */}
+                <div className="sleep-events__explain">
+                  <span className="sleep-events__caption"><i className="sleep-visit-dot" aria-hidden="true" /> Movement outside the bed</span>
+                  <button type="button" className="sleep-events__what" aria-expanded={explainOpen} aria-controls={explainOpen ? explainId : undefined}
+                    onClick={() => setExplainOpen((o) => !o)}>What is this?</button>
+                </div>
+                {explainOpen && <div id={explainId} className="camera-tile__sub sleep-events__explain-text">Movement the camera saw away from the bed. Before a child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>}
+              </>
+            )}
+            {visits.length === 0 ? <div className="camera-tile__sub sleep-events__empty">No room activity recorded.</div> : (
+              <ul className="sleep-wakes">
+                {/* A live update may insert a row before an open one; time and type keep its state with that row. */}
+                {visits.map((v) => (
+                  <VisitItem key={`${v.start_at}|${v.type}`} visit={v} frames={framesForVisit(frames, v)} fmtTime={fmtTime} onShowFrame={onShowFrame} />
+                ))}
+              </ul>
+            )}
+        </>
+      </div>
+    </div>
+  );
+}
+
 // One wake-up row. Collapsed by default (time + duration + chips); expand it to see the correlated
 // alerts and play whatever was recorded.
 //
@@ -580,14 +718,17 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
 // counts a minute active on a ~200 ms blip while an alert waits for 2-3 seconds sustained. That used to
 // leave a row you couldn't investigate. The automatic wake clip (roadmap 2.4) fills exactly that gap,
 // so a wake is expandable when it has EITHER an alert or a clip.
-function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
+// `morningAt` marks the morning-wake row: it reads "Up for the day" with the time the child got up, instead of a range and a length.
+function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake, morningAt }) {
   const [open, setOpen] = useState(false);
   const expandable = hits.length > 0 || !!clip;
   const head = (
     <>
-      <span className="sleep-wakes__time">{fmtTime(wake.start_at)} – {fmtTime(wake.end_at)}</span>
+      {morningAt
+        ? <span className="sleep-wakes__time sleep-events__morning-label"><Sunrise size={16} aria-hidden="true" /> Up for the day</span>
+        : <span className="sleep-wakes__time">{fmtTime(wake.start_at)} – {fmtTime(wake.end_at)}</span>}
       <span className="sleep-wakes__headright">
-        <span className="sleep-wakes__dur">{fmtDur(wake.minutes)} awake</span>
+        <span className="sleep-wakes__dur">{morningAt ? fmtTime(morningAt) : fmtDur(wake.minutes)}</span>
         {hits.length > 0 && (
           <span className="sleep-wakes__badge">
             <Zap size={11} aria-hidden="true" />{hits.length} alert{hits.length === 1 ? '' : 's'}
@@ -629,17 +770,26 @@ function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
 //
 // Expandable only when a saved frame lies near the row; a row with none is a plain line, with no arrow and no
 // empty state. It lists ALL the frames near it, never one picked for the row: a row can span two bed events,
-// and choosing between them here would hide the very frame someone is looking for. The head may wrap onto a
-// second line on a narrow screen rather than push the page sideways.
+// and choosing between them here would hide the very frame someone is looking for. The head is ONE line at 320px
+// for a viewer at home: the right group (chip, duration, arrow) never drops under the time (index.css, the
+// `.sleep-wakes__head--visit` rules). The only wrap left is INSIDE the time cell, for a viewer away from home whose two
+// times each carry a zone suffix and cannot fit; the time wraps there rather than being cut or pushing the page sideways.
 export function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
   const [open, setOpen] = useState(false);
   const expandable = frames.length > 0;
   const isOut = visit.type === 'child_out';
   const head = (
     <>
-      <span className="sleep-wakes__time">{fmtTime(visit.start_at)}{visit.minutes > 1 ? ` – ${fmtTime(visit.end_at)}` : ''}</span>
+      <span className="sleep-wakes__time">
+        {/* The common kind is a dot with the full wording as its name and title (a screen reader still hears "Movement outside the bed" on
+            every row, and a pointer shows it), and only the less common "Out of bed" keeps a chip. One line per row: the long chip made every
+            row wrap on a phone and put the time on a line of its own. */}
+        {!isOut && <span className="sleep-visit-dot" role="img" aria-label="Movement outside the bed" title="Movement outside the bed" />}
+        {isOut && <span className="sleep-visit-dot sleep-visit-dot--out" aria-hidden="true" />}
+        {fmtTime(visit.start_at)}{visit.minutes > 1 ? ` – ${fmtTime(visit.end_at)}` : ''}
+      </span>
       <span className="sleep-visit-right">
-        <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Movement outside the bed'}</span>
+        {isOut && <span className="sleep-visit-tag sleep-visit-tag--out">Out<span className="sleep-visit-tag__more"> of bed</span></span>}
         <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(visit.minutes)}</span>
         {expandable && <ChevronDown size={16} className={`sleep-wakes__chev${open ? ' is-open' : ''}`} aria-hidden="true" />}
       </span>
@@ -761,6 +911,18 @@ function RefinedTimes({ night, fmtTime }) {
   );
 }
 
+// Half the painted width of the markers above the bar, for markerLeft: the room-activity ring is 9px wide (border-box, border
+// included) plus its 1px outer ring, so 5.5px to the edge; the into/out-of-bed triangle is 8px wide (4px). See .sleep-tl__visit / __tx.
+const VISIT_HALF_PX = 5.5;
+const TX_HALF_PX = 4;
+// A heart-rate or breathing point labels the scrubbed minute only within one grid step of it: the server's points are 5 minutes
+// apart, so this is "the bucket the finger is in or the one beside it", and anything further is a hole, not a reading.
+const VITALS_NEAR_MS = 5 * 60000;
+// The tracks break the line where two neighbouring points are further apart than this (a hole of at least two empty 5-minute
+// buckets), so a sensor that was off for half an hour does not read as a smooth line through the gap. One empty bucket (10
+// minutes between points) is bridged: a single missed bucket is ordinary and a break there would look like a fault.
+const VITALS_GAP_MS = 10 * 60000;
+
 // The to-scale bar: each segment positioned by its share of the window, plus hour tick labels and
 // onset/wake markers so the wake-ups read against a real time axis.
 function Timeline({ night, fmtTime, tz, tempUnit }) {
@@ -769,19 +931,53 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
   const startMs = utcMs(night.display_start || night.window_start);
   const endMs = utcMs(night.display_end || night.window_end);
   const totalMs = Math.max(1, endMs - startMs);
-  const segs = night.segments || [];
+  const segs = useMemo(() => night.segments || [], [night.segments]);
+  // Keyed by the segments, not by every render: a hover (setHover) re-renders this component on each pointer move and the merge
+  // must not run again for it.
+  const drawingSegs = useMemo(() => timelineDrawingSegments(segs), [segs]);
 
   // Hover bubble: as the cursor (or a finger) moves across the bar, show the time under it, the sleep
   // status at that moment, and — if the room had a sensor — the temperature then. `null` = not hovering.
   const barRef = useRef(null);
   const [hover, setHover] = useState(null);
+  const [barWidth, setBarWidth] = useState(0);
+  // The side gaps need actual screen space. Eight pixels leaves a visible block after both 2px gaps;
+  // it is a drawing threshold, unrelated to the minutes used for sleep analysis.
+  const STIR_GAP_WIDTH_PX = 8;
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return undefined;
+    const measure = () => setBarWidth(bar.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
 
   const tempSeries = useMemo(
     () => (night.climate?.series || []).filter((p) => p.temperature != null).map((p) => ({ ms: utcMs(p.t), c: p.temperature })),
     [night]
   );
+  // The radar's heart rate and breathing (`night.vitals.series`, the server's 5-minute points; only on the detail read). Each
+  // point holds the bucket's values or null; a bucket with neither is absent, which is a gap in the data and shown as one.
+  const vitalsSeries = useMemo(
+    () => (night.vitals?.series || []).map((p) => ({ ms: utcMs(p.t), hr: p.hr ?? null, rr: p.rr ?? null })),
+    [night]
+  );
   const toF = tempUnit === 'F';
   const tempUnitLabel = `°${tempUnit || 'C'}`;
+
+  // The nearest point's value for `key` ('hr' | 'rr') when it is within VITALS_NEAR_MS of the scrubbed time, else null: a hole
+  // in the data is not labelled with a reading from further away (the temperature does the same with a wider reach, below).
+  function vitalAt(ms, key) {
+    let best = null;
+    for (const p of vitalsSeries) {
+      if (p[key] == null) continue;
+      if (!best || Math.abs(p.ms - ms) < Math.abs(best.ms - ms)) best = p;
+    }
+    return best && Math.abs(best.ms - ms) <= VITALS_NEAR_MS ? best[key] : null;
+  }
 
   function stateAt(ms) {
     const s = segs.find((seg) => utcMs(seg.from_at) <= ms && ms < utcMs(seg.to_at));
@@ -805,20 +1001,30 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
     if (rect.width <= 0) return;
     const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const ms = startMs + f * totalMs;
-    setHover({ pct: f * 100, time: fmtMs(ms), status: labelFor(stateAt(ms)), temp: tempAt(ms) });
+    setHover({ pct: f * 100, time: fmtMs(ms), status: labelFor(stateAt(ms)), temp: tempAt(ms), hr: vitalAt(ms, 'hr'), rr: vitalAt(ms, 'rr') });
   }
 
+  // A night still running: the bar is drawn from the start to NOW (display_end is clipped to the analysed minutes), so the
+  // window's configured end (7 am) is not where the bar ends. The owner saw "7:00 pm ... 7:00 am" under a bar that stopped at
+  // 8:31 pm (2026-11-14). Finished nights are left exactly as they were.
+  const live = Boolean(night.in_progress && night.as_of);
   const ticks = useMemo(() => {
     const out = [];
     // First whole hour at/after the window start (the window is aligned to a local hour, so stepping
     // by 1h keeps local-hour alignment). Label every 2h to avoid clutter.
+    // A live night is often only an hour or two long, so it labels EVERY hour while it is short, and leaves the label off a tick
+    // that sits on either end of the bar: the row below already names the start and the "Now" time there, and a second "7p"
+    // directly above "7:00 pm" read as a repeat.
+    const every = live && totalMs <= 4 * 3600000 ? 1 : 2;
     let ms = Math.ceil(startMs / 3600000) * 3600000;
     let n = 0;
     for (; ms <= endMs; ms += 3600000, n++) {
-      out.push({ pct: ((ms - startMs) / totalMs) * 100, label: n % 2 === 0 ? shortHour(ms, tz) : null });
+      const pct = ((ms - startMs) / totalMs) * 100;
+      const onEnd = live && (pct < 1 || pct > 99);
+      out.push({ pct, label: n % every === 0 && !onEnd ? shortHour(ms, tz) : null });
     }
     return out;
-  }, [startMs, endMs, totalMs, tz]);
+  }, [startMs, endMs, totalMs, tz, live]);
 
   const onsetPct = pctOf(night.onset_at, startMs, totalMs);
   const wakePct = night.wake_at ? pctOf(night.wake_at, startMs, totalMs) : null;
@@ -839,31 +1045,38 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
         <div className="sleep-tl__txs">
           {transitions.map((t, i) => (
             <span key={i} className={`sleep-tl__tx ${t.type === 'into_bed' ? 'sleep-tl__tx--in' : 'sleep-tl__tx--out'}`}
-              style={{ left: `${t.pct}%` }}
+              style={{ left: markerLeft(t.pct, TX_HALF_PX) }}
               title={`${t.type === 'into_bed' ? 'Got into bed' : 'Got out of bed'} · ${fmtTime(t.at)}`} />
           ))}
         </div>
       )}
-      {/* Room-activity (outside-bed) markers sit above the bar so they read as events, not sleep state. */}
-      {visits.length > 0 && (
-        <div className="sleep-tl__visits">
-          {visits.map((v, i) => (
-            <span key={i} className={`sleep-tl__visit${v.type === 'child_out' ? ' sleep-tl__visit--out' : ''}`}
-              style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}
-              title={`${v.type === 'child_out' ? 'Out of bed' : 'Movement outside the bed'} · ${fmtTime(v.start_at)}`} />
-          ))}
-        </div>
-      )}
-      <div className="sleep-tl__barwrap" ref={barRef}
+      <div className={`sleep-tl__barwrap${visits.length > 0 ? ' sleep-tl__barwrap--room' : ''}`} ref={barRef}
         onMouseMove={(e) => updateHover(e.clientX)}
         onMouseLeave={() => setHover(null)}
         onTouchStart={(e) => updateHover(e.touches[0].clientX)}
         onTouchMove={(e) => updateHover(e.touches[0].clientX)}
         onTouchEnd={() => setHover(null)}
       >
+        {/* Room-activity (outside-bed) markers sit above the bar (top -20px of the wrapper, which makes room for them) so they
+            read as events, not sleep state. They are inside the wrapper so the bar's own coordinates position them. The strip is
+            therefore inside the hover wrapper too, and React events bubble through the DOM tree whatever the geometry, so without
+            the handlers below moving over a marker would show the bar's sleep-status tooltip for a minute the pointer is not over.
+            Over the strip the tooltip is cleared instead (Codex review of #1057); the markers keep their own `title`. */}
+        {visits.length > 0 && (
+          <div className="sleep-tl__visits"
+            onMouseMove={(e) => { e.stopPropagation(); setHover(null); }}
+            onTouchStart={(e) => { e.stopPropagation(); setHover(null); }}
+            onTouchMove={(e) => { e.stopPropagation(); setHover(null); }}>
+            {visits.map((v, i) => (
+              <span key={i} className={`sleep-tl__visit${v.type === 'child_out' ? ' sleep-tl__visit--out' : ''}`}
+                style={{ left: markerLeft(pctOf(v.start_at, startMs, totalMs), VISIT_HALF_PX) }}
+                title={`${v.type === 'child_out' ? 'Out of bed' : 'Movement outside the bed'} · ${fmtTime(v.start_at)}`} />
+            ))}
+          </div>
+        )}
         <div className="sleep-tl__bar">
-          {segs.map((s, i) => (
-            <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}`}
+          {drawingSegs.map((s, i) => (
+            <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}${s.state === 'stir' && (s.minutes === 1 || s.minutes / (totalMs / 60000) * barWidth < STIR_GAP_WIDTH_PX) ? ' sleep-seg--stir-quiet' : ''}`}
               style={{ width: `${(s.minutes / (totalMs / 60000)) * 100}%` }} />
           ))}
           {onsetPct != null && <span className="sleep-tl__mark" style={{ left: `${onsetPct}%` }} />}
@@ -875,6 +1088,8 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
             <span className="sleep-tl__tip-time">{hover.time}</span>
             <span className="sleep-tl__tip-status">{hover.status}</span>
             {hover.temp && <span className="sleep-tl__tip-temp"><Thermometer size={11} aria-hidden="true" />{hover.temp}</span>}
+            {hover.hr != null && <span className="sleep-tl__tip-hr"><HeartPulse size={11} aria-hidden="true" />{hover.hr} bpm</span>}
+            {hover.rr != null && <span className="sleep-tl__tip-rr"><Wind size={11} aria-hidden="true" />{hover.rr}/min</span>}
           </div>
         )}
         {hover && <span className="sleep-tl__cursor" style={{ left: `${hover.pct}%` }} aria-hidden="true" />}
@@ -882,65 +1097,141 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
       <div className="sleep-tl__axis">
         {ticks.map((t, i) => (
           <span key={i} className="sleep-tl__tick" style={{ left: `${t.pct}%` }}>
-            {t.label && <span className="sleep-tl__tick-label">{t.label}</span>}
+            {t.label && <span className={`sleep-tl__tick-label sleep-tl__tick-label--${tickLabelAlign(t.pct)}`}>{t.label}</span>}
           </span>
         ))}
       </div>
       <div className="sleep-tl__ends">
-        <span>{fmtTime(night.window_start)}</span>
-        <span>{fmtTime(night.window_end)}</span>
+        {/* Live: label the ends the bar really has (it starts at display_start, which can be earlier than the configured window,
+            and ends now), not the window's configured ends. */}
+        <span>{fmtTime(live ? (night.display_start || night.window_start) : night.window_start)}</span>
+        <span>{live ? `Now, ${fmtTime(night.as_of)}` : fmtTime(night.window_end)}</span>
       </div>
     </div>
   );
 }
 
-// A companion track under the sleep bar: room temperature across the same time axis, so you can read a
-// wake against how warm the room was. Line is positioned by each reading's real timestamp (not index),
-// keeping it aligned to the timeline above. Temperature is stored in Celsius; converted to the user's
-// unit here. Draws nothing when the child's cameras have no sensor (or too few readings).
+// A companion track under the sleep bar: ONE line-and-area drawing, shared by the temperature track and the heart-rate and breathing
+// tracks (so there is one implementation of the path, the padding and the labels). `points` are { ms, v } in the unit that is
+// drawn, positioned by their real timestamp (not index) so the line stays aligned to the timeline above. Draws nothing under two
+// points. `gapMs`: break the line (a new `M`) between two neighbours further apart than this; null never breaks, which is the
+// temperature track's behaviour, so its path is exactly what it was before the extraction (pinned by a test on a fixed series).
+// The y range is the data's min..max, widened to at least 1 so a flat night is not pinned to the edge. `labelsFromData` writes the
+// two end labels from the data instead of from the widened range (a flat heart rate would otherwise read 82.5 on a whole-number
+// scale); the temperature keeps the widened range it always labelled.
+function LineTrack({ points, startMs, endMs, color, icon, label, caption, format, className = '', height = 46, gapMs = null, labelsFromData = false }) {
+  if (points.length < 2) return null;
+  const totalMs = Math.max(1, endMs - startMs);
+  const vals = points.map((p) => p.v);
+  const dataMin = Math.min(...vals);
+  const dataMax = Math.max(...vals);
+  let min = dataMin;
+  let max = dataMax;
+  if (max - min < 1) { min -= 0.5; max += 0.5; } // don't pin a near-flat night to the edges
+  const span = max - min;
+  const H = height;
+  const coords = points.map((p) => {
+    const x = Math.max(0, Math.min(100, ((p.ms - startMs) / totalMs) * 100));
+    const y = H - 5 - ((p.v - min) / span) * (H - 10);
+    return { x, y, ms: p.ms };
+  });
+  // Runs of points with no hole between them; each run is its own sub-path.
+  const runs = [];
+  for (const c of coords) {
+    const run = runs[runs.length - 1];
+    if (run && (gapMs == null || c.ms - run[run.length - 1].ms <= gapMs)) run.push(c);
+    else runs.push([c]);
+  }
+  const at = (c) => `${c.x.toFixed(2)} ${c.y.toFixed(2)}`;
+  // A run of one point (an island between two holes) is drawn as a dot: a lone `M` has no length, so nothing would show.
+  const runPath = (run) => (run.length === 1 ? `M${at(run[0])} L${at(run[0])}` : run.map((c, i) => `${i === 0 ? 'M' : 'L'}${at(c)}`).join(' '));
+  const d = runs.map(runPath).join(' ');
+  const area = runs
+    .filter((run) => run.length > 1)
+    .map((run) => `${runPath(run)} L${run[run.length - 1].x.toFixed(2)} ${H} L${run[0].x.toFixed(2)} ${H} Z`)
+    .join(' ');
+
+  return (
+    <div className={`sleep-climate${className ? ` ${className}` : ''}`}>
+      <div className="sleep-climate__head">
+        <span className="sleep-climate__label">{icon}{` ${label}`}</span>
+        <span className="sleep-climate__caption">{caption}</span>
+      </div>
+      <div className="sleep-climate__chart">
+        <svg width="100%" height={H} viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" aria-hidden="true">
+          <path d={area} fill={color} opacity="0.12" />
+          <path d={d} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke"
+            strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+        <span className="sleep-climate__hi">{format(labelsFromData ? dataMax : max)}</span>
+        <span className="sleep-climate__lo">{format(labelsFromData ? dataMin : min)}</span>
+      </div>
+    </div>
+  );
+}
+
+// Room temperature across the same time axis, so you can read a wake against how warm the room was. Temperature is stored in
+// Celsius; converted to the user's unit here. Draws nothing when the child's cameras have no sensor (or too few readings).
 function ClimateTrack({ night, startMs, endMs, tempUnit }) {
   const climate = night.climate;
   const series = (climate?.series || []).filter((p) => p.temperature != null);
   if (series.length < 2) return null;
-  const totalMs = Math.max(1, endMs - startMs);
   const toF = tempUnit === 'F';
   const conv = (c) => (toF ? (c * 9) / 5 + 32 : c);
   const unit = `°${tempUnit || 'C'}`;
-  const vals = series.map((p) => conv(p.temperature));
-  let min = Math.min(...vals);
-  let max = Math.max(...vals);
-  if (max - min < 1) { min -= 0.5; max += 0.5; } // don't pin a near-flat night to the edges
-  const span = max - min;
-  const H = 46;
-  const coords = series.map((p) => {
-    const x = Math.max(0, Math.min(100, ((utcMs(p.t) - startMs) / totalMs) * 100));
-    const y = H - 5 - ((conv(p.temperature) - min) / span) * (H - 10);
-    return [x, y];
-  });
-  const d = coords.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
-  const area = `${d} L${coords[coords.length - 1][0].toFixed(2)} ${H} L${coords[0][0].toFixed(2)} ${H} Z`;
-
   const fmt1 = (c) => conv(c).toFixed(1);
   const caption = [`avg ${fmt1(climate.temp_avg)}${unit}`];
   if (climate.temp_min != null && climate.temp_max != null) caption.push(`${fmt1(climate.temp_min)}–${fmt1(climate.temp_max)}${unit}`);
   if (climate.humidity_avg != null) caption.push(`${climate.humidity_avg}% humidity`);
 
   return (
-    <div className="sleep-climate">
-      <div className="sleep-climate__head">
-        <span className="sleep-climate__label"><Thermometer size={13} aria-hidden="true" /> Room temperature</span>
-        <span className="sleep-climate__caption">{caption.join(' · ')}</span>
-      </div>
-      <div className="sleep-climate__chart">
-        <svg width="100%" height={H} viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" aria-hidden="true">
-          <path d={area} fill="var(--sleep-temp)" opacity="0.12" />
-          <path d={d} fill="none" stroke="var(--sleep-temp)" strokeWidth="2" vectorEffect="non-scaling-stroke"
-            strokeLinejoin="round" strokeLinecap="round" />
-        </svg>
-        <span className="sleep-climate__hi">{max.toFixed(1)}{unit}</span>
-        <span className="sleep-climate__lo">{min.toFixed(1)}{unit}</span>
-      </div>
-    </div>
+    <LineTrack
+      points={series.map((p) => ({ ms: utcMs(p.t), v: conv(p.temperature) }))}
+      startMs={startMs} endMs={endMs} color="var(--sleep-temp)"
+      icon={<Thermometer size={13} aria-hidden="true" />} label="Room temperature" caption={caption.join(' · ')}
+      format={(v) => `${v.toFixed(1)}${unit}`}
+    />
+  );
+}
+
+// The radar sensor's heart rate and breathing across the same axis, as two thin tracks under the temperature one (`night.vitals`,
+// from the server; the 5-minute series only comes with the detail read). Each needs two points, else nothing is drawn. A hole in
+// the data is a hole in the line (VITALS_GAP_MS), never a line drawn through it. The caption is the server's summary, which is over
+// the time asleep (onset to wake), while the tracks show the whole timeline: a settling child or a parent at the bed can be on the
+// line but is not in the average. ⚠️ A SENSOR ESTIMATE, not a medical measurement: the sleep page says so under the tracks, and
+// nothing here is coloured as a warning.
+function VitalsTracks({ night, startMs, endMs }) {
+  const vitals = night.vitals;
+  const series = vitals?.series;
+  if (!Array.isArray(series)) return null;
+  const pointsOf = (key) => series.filter((p) => p[key] != null).map((p) => ({ ms: utcMs(p.t), v: p[key] }));
+  const hr = pointsOf('hr');
+  const rr = pointsOf('rr');
+  const showHr = hr.length >= 2;
+  const showRr = rr.length >= 2;
+  if (!showHr && !showRr) return null;
+  // "avg 82 bpm · 71–103" from the summary when the server sent one for that role. With NO summary (valid readings in the
+  // display span but none between onset and wake, so the track draws and its caption used to be blank) the range of the
+  // drawn points, "71–103 bpm", without "avg": there is no average over the time asleep to quote.
+  const captionOf = (s, unit, points) => {
+    if (s) return `avg ${s.avg}${unit} · ${s.min}–${s.max}`;
+    const vs = points.map((p) => Math.round(p.v));
+    return `${Math.min(...vs)}–${Math.max(...vs)}${unit}`;
+  };
+  return (
+    <>
+      {showHr && (
+        <LineTrack points={hr} startMs={startMs} endMs={endMs} color="var(--sleep-hr)" height={36} gapMs={VITALS_GAP_MS} labelsFromData
+          className="sleep-climate--hr" icon={<HeartPulse size={13} aria-hidden="true" />} label="Heart rate"
+          caption={captionOf(vitals.hr, ' bpm', hr)} format={(v) => String(Math.round(v))} />
+      )}
+      {showRr && (
+        <LineTrack points={rr} startMs={startMs} endMs={endMs} color="var(--sleep-rr)" height={36} gapMs={VITALS_GAP_MS} labelsFromData
+          className={`sleep-climate--rr${showHr ? ' sleep-climate--next' : ''}`} icon={<Wind size={13} aria-hidden="true" />} label="Breathing"
+          caption={captionOf(vitals.rr, '/min', rr)} format={(v) => String(Math.round(v))} />
+      )}
+      <div className="sleep-vitals__note">Sensor estimates from the radar, not for medical use.</div>
+    </>
   );
 }
 

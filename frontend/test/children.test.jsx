@@ -10,11 +10,12 @@
 //      on first paint, so every deep link hits this branch for a moment before the data lands.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { renderAs, renderAsAdmin, renderAsCaregiver, forEachRole } from './helpers/render.jsx';
 import Children from '../src/pages/Children.jsx';
 import ChildDetail from '../src/pages/ChildDetail.jsx';
 import { api } from '../src/lib/api.js';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 
 const KIDS = [
   { id: 'kid-1', name: 'Child B', birthday: '2023-03-01', color: '#f4c56a', photo: null },
@@ -38,10 +39,13 @@ const alert = (cameraId, i = 0) => ({
 });
 
 // Path-aware so the child cards (sleep summary, morning review, timelapses, recordings) each get
-// something harmless while the test drives only the alerts feed.
-function mockApi({ alerts = [] } = {}) {
+// something harmless while the test drives only the alerts feed. The timelapse and recording lists are empty unless
+// a test passes some (the two cards render nothing for an empty list).
+function mockApi({ alerts = [], timelapses = [], recordings = [] } = {}) {
   vi.spyOn(api, 'get').mockImplementation((path) => {
     if (String(path).includes('/cameras/alerts')) return Promise.resolve(alerts);
+    if (String(path).includes('/timelapses/child/')) return Promise.resolve(timelapses);
+    if (String(path).includes('/recordings/child/')) return Promise.resolve(recordings);
     return Promise.resolve(null);
   });
   vi.spyOn(api, 'put').mockResolvedValue({});
@@ -117,7 +121,61 @@ describe('a child detail screen', () => {
     expect(screen.getByText('Child B Cot')).toBeTruthy();
     expect(screen.queryByText('Child A Room')).toBeNull();
     expect(screen.queryByText('Hallway')).toBeNull();
-    expect(screen.getByText('Cameras · 2')).toBeTruthy();
+  });
+
+  // The hero card is tinted by the band of the night the sleep card shows (index.css `.night--<band>`).
+  const withNight = (score) => vi.spyOn(api, 'get').mockImplementation((path) => {
+    if (String(path).includes('/cameras/alerts')) return Promise.resolve([]);
+    if (String(path).includes('/sleep/live')) {
+      return Promise.resolve({ scope: 'last', night: { status: 'ok', night_date: '2026-09-01', onset_at: '2026-09-01 09:10:00', wake_at: '2026-09-01 20:47:00', asleep_minutes: 637, score } });
+    }
+    return Promise.resolve(null);
+  });
+  const SCORE = { score: 82, band: 'good', version: 2, provisional: false, low_confidence: false, low_confidence_reasons: [], capped_by: null, early_estimate: false, components: [] };
+  // The card's whole class list: the tint and nothing else (the colour ring is around the photo, not the card; tested below).
+  const tintClasses = (container) => container.querySelector('.night').className;
+  // The duration is two elements (the figure and a smaller "asleep"): matched on the element that holds both.
+  const asleepText = (text) => screen.findByText((_c, el) => el?.classList?.contains('night__sleep-big') && el.textContent === text);
+
+  test.each([
+    ['great', { ...SCORE, score: 91, band: 'great' }],
+    ['good', SCORE],
+    ['fair', { ...SCORE, score: 60, band: 'fair' }],
+    ['low', { ...SCORE, score: 48, band: null }],
+    ['early', { ...SCORE, band: null, early_estimate: true }],
+  ])('★ the hero card takes the %s tint class while a score of that band is shown', async (band, score) => {
+    withNight(score);
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelector('.night').classList.contains(`night--${band}`)).toBe(true));
+    expect(tintClasses(container)).toBe(`night night--${band}`);
+  });
+
+  test('★ switching to another child never leaves the previous child\'s tint on the card while the new sleep request is pending', async () => {
+    // The route stays the same and only :id changes, so ChildDetail is NOT remounted: its state outlives the child.
+    vi.spyOn(api, 'get').mockImplementation((path) => {
+      const p = String(path);
+      if (p.includes('/cameras/alerts')) return Promise.resolve([]);
+      if (p.includes('/children/kid-1/sleep/live')) {
+        return Promise.resolve({ scope: 'last', night: { status: 'ok', night_date: '2026-09-01', onset_at: '2026-09-01 09:10:00', wake_at: '2026-09-01 20:47:00', asleep_minutes: 637, score: SCORE } });
+      }
+      if (p.includes('/children/kid-2/sleep/live')) return new Promise(() => {}); // never settles: the request is pending
+      return Promise.resolve(null);
+    });
+    function Jump() { const go = useNavigate(); return <button type="button" onClick={() => go('/children/kid-2')}>jump</button>; }
+    const { container, user } = renderAsAdmin(
+      <Routes><Route path="/children/:id" element={<><Jump /><ChildDetail /></>} /></Routes>, atChild('kid-1'));
+    await waitFor(() => expect(tintClasses(container)).toBe('night night--good'));
+    await user.click(screen.getByRole('button', { name: 'jump' }));
+    await waitFor(() => expect(container.querySelector('.night__name').textContent).toBe('Child A')); // the new child's page is up
+    expect(tintClasses(container)).toBe('night');
+    expect(screen.queryByText(/asleep/)).toBeNull(); // nor does the card still show the previous child's night
+  });
+
+  test('★ no score (or a night with none) leaves the hero card as the plain gradient: no tint class', async () => {
+    withNight({ score: null, reason: 'in_progress', version: 2 });
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await asleepText('10h 37m asleep');
+    expect(tintClasses(container)).toBe('night');
   });
 
   test('a child with no cameras is told how to assign one, and a caregiver that an admin assigns them', async () => {
@@ -130,19 +188,22 @@ describe('a child detail screen', () => {
     expect(await screen.findByText('No cameras assigned yet — an admin can assign one from the Cameras tab.')).toBeTruthy();
   });
 
-  // ★ The role gate. CameraRow renders a <button> when it is given an onClick and a <div> when it is
-  // not, so "can this person tap through to camera settings" is directly observable.
-  test('an admin can tap a camera row through to its settings', async () => {
-    renderAsAdmin(detailRoutes, atChild('kid-1'));
-    const row = await screen.findByText('Child B Room');
-    expect(row.closest('button')).toBeTruthy();
+  // ★ The role gate. Camera settings are admin-only, so only an admin's tile carries the gear that goes there
+  // (ChildCameraTile gets `onSettings` for an admin and nothing for a caregiver).
+  test('an admin can get from a camera tile to its settings', async () => {
+    const settings = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/cameras/:id" element={<div>camera settings page</div>} /></Routes>;
+    const { user } = renderAsAdmin(settings, atChild('kid-1'));
+    await user.click(await screen.findByRole('button', { name: 'Camera settings for Child B Room' }));
+    expect(await screen.findByText('camera settings page')).toBeTruthy();
   });
 
-  test('a caregiver sees the same cameras but cannot tap into them', async () => {
+  test('a caregiver sees the same cameras but has no way into their settings', async () => {
     renderAsCaregiver(detailRoutes, atChild('kid-1'));
-    const row = await screen.findByText('Child B Room');
-    expect(row).toBeTruthy();
-    expect(row.closest('button')).toBeNull();
+    expect(await screen.findByText('Child B Room')).toBeTruthy();
+    expect(screen.getByText('Child B Cot')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Camera settings for/ })).toBeNull();
+    // Watching live is for everyone.
+    expect(screen.getAllByRole('button', { name: 'Watch live' })).toHaveLength(2);
   });
 
   test('a child that has not loaded yet renders a placeholder rather than crashing', async () => {
@@ -157,9 +218,181 @@ describe('a child detail screen', () => {
     expect(screen.queryByText('Loading…')).toBeNull();
   });
 
-  test('a child with no birthday is invited to add one', async () => {
-    renderAsAdmin(detailRoutes, atChild('kid-2'));
-    expect(await screen.findByText(/Tap to add birthday & photo/)).toBeTruthy();
+  // ★ UI refresh PR C: the age line is the age, or nothing. "Tap to add birthday & photo" is gone; the photo is the avatar's job
+  // (a camera badge) and the birthday lives in child settings, one gear away.
+  test('★ a child with no birthday shows no age line and no invitation on the age line', async () => {
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-2'));
+    await screen.findByText('Child A Room');
+    expect(screen.queryByText(/Tap to add birthday/)).toBeNull();
+    expect(container.querySelector('.night__age')).toBeNull();
+  });
+
+  test('the settings gear has a name and opens the child\'s settings; the avatar still sets the photo', async () => {
+    const edit = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/children/:id/edit" element={<div>child settings</div>} /></Routes>;
+    const { user, unmount } = renderAsAdmin(edit, atChild('kid-1'));
+    await user.click(await screen.findByRole('button', { name: 'Settings for Child B' }));
+    expect(await screen.findByText('child settings')).toBeTruthy();
+    unmount();
+
+    // No photo yet: the avatar button goes to the same settings screen (where the photo is set).
+    const second = renderAsAdmin(edit, atChild('kid-1'));
+    await second.user.click(await screen.findByRole('button', { name: 'Add a photo for Child B' }));
+    expect(await screen.findByText('child settings')).toBeTruthy();
+  });
+
+  // The child's colour ring goes around the PHOTO only (owner, 2026-11-15), never around the night card; and no camera badge on this card.
+  describe('the photo ring and the avatar button on the night card', () => {
+    const night = (container) => container.querySelector('.night');
+    const PHOTO = 'data:image/png;base64,AAAA';
+    const photoKids = (color) => [{ ...KIDS[0], color, photo: PHOTO }];
+    const ringStyle = (container) => container.querySelector('.night__avatar-btn img').getAttribute('style');
+
+    test('★ the photo ring is the -night shade (this card is navy in both themes), and the card has no ring', async () => {
+      const kids = [{ ...KIDS[1], photo: PHOTO }]; // the stored green
+      const { container } = renderAsAdmin(detailRoutes, { ...atChild('kid-2'), kids });
+      await screen.findByText('Child A Room');
+      expect(container.querySelector('.night__avatar-btn img').hasAttribute('data-child-ring')).toBe(true);
+      expect(ringStyle(container)).toContain('var(--child-green-night)');
+      expect(ringSpreadPx(container.querySelector('.night__avatar-btn img')), 'the ring has a visible width').toBeGreaterThan(0);
+      // Guards: the card ring of the first attempt (`night--ringed`, `--child-ring`) must not come back.
+      expect(night(container).className).toBe('night');
+      expect(night(container).getAttribute('style')).toBeNull();
+    });
+
+    test('★ a legacy stored colour rings the photo in its nearest colour; nothing is rewritten', async () => {
+      const { container } = renderAsAdmin(detailRoutes, { ...atChild('kid-1'), kids: photoKids('#F5D9A8') });
+      await screen.findByText('Child B Room');
+      expect(ringStyle(container)).toContain('var(--child-yellow-night)');
+      expect(api.put).not.toHaveBeenCalled();
+    });
+
+    test.each([[null], ['']])('★ a child with no colour (%j) has a plain photo: no ring, and the plain card', async (color) => {
+      const { container } = renderAsAdmin(detailRoutes, { ...atChild('kid-1'), kids: photoKids(color) });
+      await screen.findByText('Child B Room');
+      expect(container.querySelector('.night__avatar-btn img')).not.toBeNull();
+      expect(container.querySelector('[data-child-ring]')).toBeNull();
+      expect(night(container).className).toBe('night');
+      expect(night(container).getAttribute('style')).toBeNull();
+    });
+
+    test('a colour with no photo is the filled initials disc: no ring around anything', async () => {
+      const { container } = renderAsAdmin(detailRoutes, atChild('kid-2'));
+      await screen.findByText('Child A Room');
+      expect(container.querySelector('[data-child-ring]')).toBeNull();
+      expect(container.querySelector('.night__avatar-btn span').getAttribute('style')).toContain('var(--child-green)');
+    });
+
+    test('the band tint is the only class on the card next to `night`', async () => {
+      withNight(SCORE);
+      const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+      await waitFor(() => expect(night(container).className).toBe('night night--good'));
+    });
+
+    test('★ the avatar has no camera badge, and the button is still named and still opens settings', async () => {
+      const edit = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/children/:id/edit" element={<div>child settings</div>} /></Routes>;
+      const { container, user } = renderAsAdmin(edit, atChild('kid-1'));
+      const button = await screen.findByRole('button', { name: 'Add a photo for Child B' });
+      expect(container.querySelector('.night__avatar-badge')).toBeNull();
+      expect(button.querySelector('svg'), 'no glyph at all inside the avatar button').toBeNull();
+      await user.click(button);
+      expect(await screen.findByText('child settings')).toBeTruthy();
+    });
+  });
+
+  // The quiet birthday line: ONLY when a night has no score because there is no birthday (the server's own reason key) AND the
+  // child has none. Each of the other three cases below must stay silent, so an implementation that always (or never) shows
+  // it fails here by name.
+  describe('"Add a birthday" appears only where a missing birthday is why there is no score', () => {
+    const NO_BIRTHDAY_SCORE = { score: null, reason: 'no_duration_reference', version: 2 };
+    const live = (night) => vi.spyOn(api, 'get').mockImplementation((path) => {
+      if (String(path).includes('/cameras/alerts')) return Promise.resolve([]);
+      if (String(path).includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { status: 'ok', night_date: '2026-09-01', asleep_minutes: 637, ...night } });
+      return Promise.resolve(null);
+    });
+    const NUDGE = /Add a birthday in settings/;
+
+    test('no birthday and that reason: the line is there, and goes to settings', async () => {
+      live({ score: NO_BIRTHDAY_SCORE });
+      const edit = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/children/:id/edit" element={<div>child settings</div>} /></Routes>;
+      const { user } = renderAsAdmin(edit, atChild('kid-2'));
+      await user.click(await screen.findByRole('button', { name: NUDGE }));
+      expect(await screen.findByText('child settings')).toBeTruthy();
+    });
+
+    test.each([
+      ['a birthday is set (the reason is about something else)', 'kid-1', { score: NO_BIRTHDAY_SCORE }],
+      ['the night HAS a score', 'kid-2', { score: SCORE }],
+      ['a different reason', 'kid-2', { score: { score: null, reason: 'in_progress', version: 2 } }],
+      ['the child\'s score switch is off (no score key at all)', 'kid-2', {}],
+    ])('silent when %s', async (_why, kid, night) => {
+      live(night);
+      renderAsAdmin(detailRoutes, atChild(kid));
+      await asleepText('10h 37m asleep');
+      expect(screen.queryByText(NUDGE)).toBeNull();
+    });
+  });
+
+  // ★ The morning question lives IN the night card, once. Before this change it was a separate card below the hero titled
+  // "Was last night right?" (outside `.night`), so "inside the card" fails on the old code, and so does "only one".
+  describe('the morning question inside the night card', () => {
+    const PENDING = { state: 'ask', night_date: '2026-09-01', onset_at: '2026-09-01 09:10:00', wake_at: '2026-09-01 20:47:00' }; // 06:47 Melbourne
+    const withReview = (pending) => vi.spyOn(api, 'get').mockImplementation((path) => {
+      const p = String(path);
+      if (p.includes('/cameras/alerts')) return Promise.resolve([]);
+      if (p.includes('/review/pending')) return Promise.resolve(pending);
+      if (p.includes('/sleep/live')) {
+        return Promise.resolve({ scope: 'last', night: { status: 'ok', night_date: '2026-09-01', asleep_minutes: 637, score: SCORE } });
+      }
+      return Promise.resolve(null);
+    });
+
+    test('★ the question appears exactly once, inside the night card, with its two answers', async () => {
+      withReview(PENDING);
+      const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+      const question = await screen.findByText(/Is that right\?/);
+      expect(screen.getAllByText(/Is that right\?/)).toHaveLength(1);
+      expect(question.closest('.night'), 'inside the night card').not.toBeNull();
+      expect(container.querySelectorAll('.night')).toHaveLength(1);
+      for (const name of ['That’s right', 'Not quite']) {
+        const button = screen.getByRole('button', { name });
+        expect(button.closest('.night'), `${name} is inside the card`).not.toBeNull();
+      }
+      // The standalone card (its old title, its old class) is gone.
+      expect(screen.queryByText('Was last night right?')).toBeNull();
+      expect(container.querySelector('.review-card')).toBeNull();
+    });
+
+    test('★ "Not quite" opens the review screen at the same route the review has always had', async () => {
+      withReview(PENDING);
+      const routes = (
+        <Routes>
+          <Route path="/children/:id" element={<ChildDetail />} />
+          <Route path="/children/:id/review/:date" element={<ReviewRouteProbe />} />
+        </Routes>
+      );
+      function ReviewRouteProbe() { const { id, date } = useParams(); return <div>review of {id} on {date}</div>; }
+      const { user } = renderAsAdmin(routes, atChild('kid-1'));
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      expect(await screen.findByText('review of kid-1 on 2026-09-01')).toBeTruthy();
+    });
+
+    test('no question while there is nothing to review', async () => {
+      withReview({ state: 'none' });
+      renderAsAdmin(detailRoutes, atChild('kid-1'));
+      await asleepText('10h 37m asleep');
+      expect(screen.queryByText(/Is that right\?/)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Not quite' })).toBeNull();
+    });
+
+    test('the card\'s controls are real buttons with accessible names (their 44px size is a stylesheet rule, checked on the screenshots)', async () => {
+      withReview(PENDING);
+      renderAsAdmin(detailRoutes, atChild('kid-1'));
+      await screen.findByText(/Is that right\?/);
+      // The names a screen reader reads: the chevron link carries the score and band, the gear and the dismiss have names.
+      expect(screen.getByRole('button', { name: /^Last night .*asleep\. View sleep detail and history.*Sleep score 82, Good$/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Settings for Child B' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
+    });
   });
 
   test('a child WITH a birthday shows an age instead of the invitation', async () => {
@@ -197,10 +430,12 @@ describe('the alerts feed on a child screen', () => {
     expect(screen.getByText(/No alerts for Child B yet/)).toBeTruthy();
   });
 
-  test('the feed is capped at 20 however many arrive', async () => {
+  test('the feed is capped at 20 however many arrive (and the page shows the newest three until "See all alerts")', async () => {
     mockApi({ alerts: Array.from({ length: 25 }, (_, i) => alert('cam-a1', i)) });
-    renderAsAdmin(detailRoutes, atChild('kid-1'));
+    const { user } = renderAsAdmin(detailRoutes, atChild('kid-1'));
     await waitFor(() => expect(screen.getAllByText('Motion').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('Motion').length).toBe(3);
+    await user.click(screen.getByRole('button', { name: 'See all alerts' }));
     expect(screen.getAllByText('Motion').length).toBe(20);
   });
 
@@ -252,6 +487,159 @@ describe('the alerts feed on a child screen', () => {
     expect(screen.queryByText(/No alerts for Child B yet/)).toBeNull();
     // The cameras card still renders — a dead feed must not take the screen down with it.
     expect(screen.getByText('Child B Room')).toBeTruthy();
-    expect(screen.getByText('Cameras · 2')).toBeTruthy();
+  });
+});
+
+// --- everything below the night card (UI refresh PR D) ------------------------------------------
+
+describe('the child page below the night card', () => {
+  const TIMELAPSES = [
+    { id: 't-1', night_date: '2026-09-01', duration_s: 42 },
+    { id: 't-2', night_date: '2026-08-31', duration_s: 40 },
+  ];
+  const RECORDINGS = [{ id: 'r-1', status: 'ready', camera_name: 'Child B Room', started_at: '2026-09-02 10:00:00', duration_s: 30 }];
+  const FIVE_ALERTS = [1, 2, 3, 4, 5].map((i) => ({ ...alert('cam-a1', i), created_at: `2026-09-0${i} 10:00:00` }));
+  const full = () => mockApi({ alerts: FIVE_ALERTS, timelapses: TIMELAPSES, recordings: RECORDINGS });
+  // True when `a` comes before `b` in the document: the DOM order IS the phone layout and the keyboard order (the two-column
+  // desktop layout is CSS grid placement only, never a reorder).
+  const before = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  beforeEach(() => vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`));
+
+  test('★ the sections come in the designed order: night card, camera, timelapse, recent alerts, recordings', async () => {
+    full();
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    const q = (s) => container.querySelector(s);
+    await waitFor(() => expect(q('.recordings-card')).not.toBeNull());
+    await waitFor(() => expect(q('.alert-item')).not.toBeNull());
+    await waitFor(() => expect(q('.timelapse-card')).not.toBeNull());
+    const order = [q('.night'), q('.child-cam'), q('.timelapse-card'), q('.alert-list'), q('.recordings-card')];
+    for (let i = 0; i < order.length - 1; i += 1) expect(before(order[i], order[i + 1]), `section ${i} should precede section ${i + 1}`).toBe(true);
+  });
+
+  test('★ the old "Cameras · n" heading and the "<child> camera" suffix are gone; the tile carries the status and "Watch live"', async () => {
+    full();
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await screen.findByText('Child B Room');
+    expect(screen.queryByText(/^Cameras ·/)).toBeNull();
+    expect(container.querySelector('.cam-row')).toBeNull();
+    // Both of the child's cameras get a tile (one tile each); the offline one says so in words.
+    expect(container.querySelectorAll('.child-cam')).toHaveLength(2);
+    expect(screen.getByText(/· Offline/)).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Watch live' })).toHaveLength(2);
+  });
+
+  // ★ ChildDetail is NOT remounted when only :id changes, and the alerts, recordings and timelapse cards keep local state (the
+  // expanded "See all alerts", the open Recordings row, the picked night). Keyed by child, that state starts over for the next child.
+  test('★ switching child resets "See all alerts" and the Recordings row', async () => {
+    const five = (cam) => [1, 2, 3, 4, 5].map((i) => ({ ...alert(cam, i), created_at: `2026-09-0${i} 10:00:00` }));
+    mockApi({ alerts: [...five('cam-a1'), ...five('cam-b1')], recordings: RECORDINGS });
+    function Jump() { const go = useNavigate(); return <button type="button" onClick={() => go('/children/kid-2')}>jump</button>; }
+    const { container, user } = renderAsAdmin(
+      <Routes><Route path="/children/:id" element={<><Jump /><ChildDetail /></>} /></Routes>, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelectorAll('.alert-item')).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all alerts' }));
+    await user.click(await screen.findByRole('button', { name: /^Recordings/ }));
+    expect(container.querySelectorAll('.alert-item')).toHaveLength(5);
+    expect(container.querySelector('.rec-strip')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'jump' }));
+    await waitFor(() => expect(container.querySelector('.night__name').textContent).toBe('Child A'));
+    await waitFor(() => expect(container.querySelectorAll('.alert-item')).toHaveLength(3));
+    expect(screen.getByRole('button', { name: 'See all alerts' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: /^Recordings/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('.rec-strip')).toBeNull();
+  });
+
+  test('★ a disabled camera has no "Watch live" (the Live tab hides it); the others still do', async () => {
+    mockApi();
+    const cams = CAMS.map((c) => (c.id === 'cam-a2' ? { ...c, disabled: 1 } : c));
+    renderAsAdmin(detailRoutes, { ...atChild('kid-1'), cameras: cams });
+    await screen.findByText('Child B Cot');
+    expect(screen.getAllByRole('button', { name: 'Watch live' })).toHaveLength(1);
+    expect(screen.getByText(/· Disabled/)).toBeTruthy();
+  });
+
+  // ★ The detection line is for EVERY role: the old MOTION/SOUND badges were on the page for a caregiver too, and the owner asked for
+  // them back (as words) after PR D dropped them.
+  test('★ the detection line shows for an admin AND a caregiver, per camera, from the cameras own fields', async () => {
+    const cams = CAMS.map((c) => (c.id === 'cam-a1' ? { ...c, detect_motion_enabled: 1, detect_sound_enabled: 1 }
+      : c.id === 'cam-a2' ? { ...c, detect_motion_enabled: 0, detect_sound_enabled: 1 } : c));
+    for (const render of [renderAsAdmin, renderAsCaregiver]) {
+      mockApi();
+      const { container, unmount } = render(detailRoutes, { ...atChild('kid-1'), cameras: cams });
+      await screen.findByText('Child B Cot');
+      expect([...container.querySelectorAll('.child-cam__detect')].map((el) => el.textContent))
+        .toEqual(['Motion on · Sound on', 'Motion off · Sound on']);
+      unmount();
+      vi.restoreAllMocks();
+    }
+  });
+
+  test('★ "Watch live" goes to the Live tab', async () => {
+    full();
+    const routes = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/" element={<div>the live tab</div>} /></Routes>;
+    const { user } = renderAsAdmin(routes, atChild('kid-1'));
+    await user.click((await screen.findAllByRole('button', { name: 'Watch live' }))[0]);
+    expect(await screen.findByText('the live tab')).toBeTruthy();
+  });
+
+  test('★ recent alerts: three rows, a "See all alerts" row, and the rest on request', async () => {
+    full();
+    const { container, user } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelectorAll('.alert-item')).toHaveLength(3));
+    expect(screen.getByText('Recent alerts')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'See all alerts' }));
+    expect(container.querySelectorAll('.alert-item')).toHaveLength(5);
+  });
+
+  test('★ the timelapse has one player and a strip of recent nights as small thumbnails labelled by weekday', async () => {
+    full();
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelectorAll('.timelapse-strip__item')).toHaveLength(2));
+    const labels = [...container.querySelectorAll('.timelapse-strip__item')].map((el) => el.textContent);
+    expect(labels).toEqual(['Tue', 'Mon']); // 2026-09-01 is a Tuesday, 2026-08-31 a Monday
+    expect(container.querySelectorAll('.timelapse-hero')).toHaveLength(1);
+  });
+
+  test('★ recordings are one row with the newest time, and the thumbnails open from it', async () => {
+    full();
+    const { container, user } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    const row = await screen.findByRole('button', { name: /^Recordings/ });
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('.rec-strip')).toBeNull();
+    await user.click(row);
+    expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(1);
+  });
+
+  // The quiet empty states: each section that has nothing leaves no placeholder behind, and the ones that explain say so.
+  test('★ with nothing to show: no timelapse card, no recordings row, and the alerts card says there are none', async () => {
+    mockApi();
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/recordings/child/kid-1'));
+    await screen.findByText(/No alerts for Child B yet/);
+    expect(container.querySelector('.timelapse-card')).toBeNull();
+    expect(container.querySelector('.recordings-card')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'See all alerts' })).toBeNull();
+    // The alerts card keeps its title even when empty.
+    expect(screen.getByText('Recent alerts')).toBeTruthy();
+  });
+
+  test('a child with no camera gets no tile, only the explanation', async () => {
+    mockApi();
+    const { container } = renderAsAdmin(detailRoutes, { ...atChild('kid-1'), cameras: [] });
+    await screen.findByText('No cameras assigned yet — assign one from the Cameras tab.');
+    expect(container.querySelector('.child-cam')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Watch live' })).toBeNull();
+  });
+
+  test('★ a caregiver sees every section an admin sees, and none of the admin-only controls', async () => {
+    full();
+    const { container } = renderAsCaregiver(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelector('.timelapse-card')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector('.recordings-card')).not.toBeNull());
+    expect(container.querySelectorAll('.child-cam')).toHaveLength(2);
+    expect(container.querySelectorAll('.alert-item')).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: /Camera settings for/ })).toBeNull();
   });
 });

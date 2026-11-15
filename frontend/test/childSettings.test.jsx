@@ -24,6 +24,7 @@ import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAs, renderAsAdmin, ADMIN, CAREGIVER } from './helpers/render.jsx';
 import ChildSettings from '../src/pages/ChildSettings.jsx';
 import { api } from '../src/lib/api.js';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 
 const KID = {
   id: 'kid-1',
@@ -70,6 +71,8 @@ describe('loading a child', () => {
   test('every stored field is shown', async () => {
     mount();
     expect((await screen.findByLabelText('Name')).value).toBe('Child B');
+    expect(screen.getByRole('heading', { name: 'Profile' }).closest('.card')).toContainElement(screen.getByLabelText('Name'));
+    expect(screen.getByRole('heading', { name: 'Sleep' }).closest('.card')).toContainElement(screen.getByRole('switch', { name: /Track sleep/ }));
     expect(screen.getByLabelText(/Birthday/).value).toBe('2023-04-01');
     expect(screen.getByRole('switch', { name: /Track sleep/ }).checked).toBe(true);
     expect(screen.getByLabelText('Bedtime').value).toBe('19:30');
@@ -284,22 +287,165 @@ describe('★★ the immediate photo write', () => {
 });
 
 describe('the colour picker', () => {
-  test('offers every colour and marks the chosen one', async () => {
+  const swatches = () => within(screen.getByRole('group', { name: 'Colour' })).getAllByRole('button');
+  const pressed = () => swatches().filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('aria-label'));
+
+  test('★ offers "No colour" first, then the six colours by hue name, and marks exactly the chosen one (not by colour alone)', async () => {
     mount();
     await screen.findByLabelText('Name');
-    const chosen = screen.getByLabelText(`Colour ${KID.color}`);
-    expect(chosen.style.border).toContain('3px solid var(--text-primary)');
+    expect(swatches().map((b) => b.getAttribute('aria-label'))).toEqual(['No colour', 'Yellow', 'Green', 'Blue', 'Pink', 'Orange', 'Violet']);
+    expect(pressed()).toEqual(['Green']); // KID.color is the stored green
+    const green = screen.getByRole('button', { name: 'Green' });
+    expect(green.querySelector('svg'), 'the chosen swatch carries a check').not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Blue' }).querySelector('svg')).toBeNull();
   });
 
-  test('choosing one updates the form without saving', async () => {
+  test('★ the swatches show the theme-aware shades the avatar and its photo ring use, not the stored pastels', async () => {
+    mount();
+    await screen.findByLabelText('Name');
+    const disc = (name) => screen.getByRole('button', { name }).querySelector('span');
+    expect(disc('Yellow').style.background).toBe('var(--child-yellow)');
+    expect(disc('Violet').style.background).toBe('var(--child-violet)');
+  });
+
+  test('★ each swatch is a 44px target', async () => {
+    mount();
+    await screen.findByLabelText('Name');
+    for (const b of swatches()) { expect(b.style.width).toBe('44px'); expect(b.style.height).toBe('44px'); }
+  });
+
+  test('choosing one updates the form without saving, and stores the swatch\'s own hex', async () => {
     const { user } = mount();
     await screen.findByLabelText('Name');
-    await user.click(screen.getByLabelText('Colour #8A9FE0'));
+    await user.click(screen.getByRole('button', { name: 'Blue' }));
     expect(putSpy).not.toHaveBeenCalled();
+    expect(pressed()).toEqual(['Blue']);
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     expect(putSpy.mock.calls[0][1].color).toBe('#8A9FE0');
+  });
+
+  // ★ The server default is #F5D9A8 and any API client may store any hex. The picker shows the NEAREST swatch as chosen, but only a
+  // press may change what is stored: a rename must not quietly rewrite the colour to the swatch it was displayed as.
+  test.each([['#F5D9A8', 'Yellow'], ['#00ff00', 'Green'], ['#d0a070', 'Orange']])('★ a legacy colour %s marks %s and saving a rename keeps it exactly', async (stored, swatch) => {
+    const { user } = mount({ kid: { ...KID, color: stored } });
+    const name = await screen.findByLabelText('Name');
+    expect(pressed()).toEqual([swatch]);
+    await user.clear(name);
+    await user.type(name, 'Renamed');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1].color).toBe(stored);
+    expect(putSpy.mock.calls[0][1].name).toBe('Renamed');
+  });
+
+  test('a child whose record has no colour field at all starts on the first swatch, as a new child does', async () => {
+    mount({ kid: { ...KID, color: null } });
+    await screen.findByLabelText('Name');
+    expect(pressed()).toEqual(['Yellow']);
+  });
+
+  // The colour is optional (owner, 2026-11-15). '' is a real stored value ("No colour"), never replaced by the yellow default.
+  describe('No colour', () => {
+    const ringed = () => document.querySelector('.avatar-editor [data-child-ring]');
+
+    test('★ "No colour" is a 44px, labelled, slashed-circle button (an icon, not colour alone), pressed only when the child has none', async () => {
+      mount();
+      await screen.findByLabelText('Name');
+      const none = screen.getByRole('button', { name: 'No colour' });
+      expect(none.style.width).toBe('44px');
+      expect(none.style.height).toBe('44px');
+      expect(none.getAttribute('aria-pressed')).toBe('false');
+      expect(none.querySelector('.lucide-ban'), 'the slashed-circle mark, not chosen').not.toBeNull();
+    });
+
+    test('★ the slashed circle is on "No colour" in BOTH states, and the chosen state is not a check in its place', async () => {
+      const { user } = mount(); // starts on a colour
+      await screen.findByLabelText('Name');
+      const none = () => screen.getByRole('button', { name: 'No colour' });
+      expect(none().querySelector('.lucide-ban')).not.toBeNull();
+      expect(none().getAttribute('aria-pressed')).toBe('false');
+      await user.click(none());
+      expect(none().getAttribute('aria-pressed')).toBe('true');
+      expect(none().querySelector('.lucide-ban'), 'still the slashed circle once chosen').not.toBeNull();
+      expect(none().querySelector('.lucide-check'), 'no check hides the slash').toBeNull();
+      expect(none().querySelector('span').style.boxShadow, 'the selected outline the swatches use').not.toBe('none');
+      await user.click(screen.getByRole('button', { name: 'Blue' }));
+      expect(none().getAttribute('aria-pressed')).toBe('false');
+      expect(none().querySelector('.lucide-ban')).not.toBeNull();
+    });
+
+    test('★ a stored colour that is not a hex we map (a legacy row) is drawn as none, so "No colour" is pressed and no swatch is; saving untouched sends it unchanged', async () => {
+      const { user } = mount({ kid: { ...KID, color: 'rebeccapurple' } });
+      const name = await screen.findByLabelText('Name');
+      expect(pressed()).toEqual(['No colour']);
+      expect(document.querySelector('.avatar-editor [data-child-ring]'), 'drawn as none: a plain photo').toBeNull();
+      await user.clear(name);
+      await user.type(name, 'Renamed');
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalled());
+      expect(putSpy.mock.calls[0][1].color, 'not rewritten to "" or a swatch').toBe('rebeccapurple');
+    });
+
+    test('★ a child stored with no colour shows "No colour" pressed (not yellow), and saving untouched sends the empty colour', async () => {
+      const { user } = mount({ kid: { ...KID, color: '' } });
+      const name = await screen.findByLabelText('Name');
+      expect(pressed()).toEqual(['No colour']);
+      // The slashed circle stays when "No colour" is chosen: selection is shown by the outline, not by swapping the mark for a
+      // check (PR #1100 review: the chosen state then had nothing that said "none").
+      expect(screen.getByRole('button', { name: 'No colour' }).querySelector('.lucide-ban'), 'the slashed circle, chosen').not.toBeNull();
+      await user.clear(name);
+      await user.type(name, 'Renamed');
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalled());
+      expect(putSpy.mock.calls[0][1].color).toBe('');
+    });
+
+    test('★ choosing "No colour" then Save sends color: "" (it clears the colour, it is not left out)', async () => {
+      const { user } = mount();
+      await screen.findByLabelText('Name');
+      await user.click(screen.getByRole('button', { name: 'No colour' }));
+      expect(putSpy).not.toHaveBeenCalled();
+      expect(pressed()).toEqual(['No colour']);
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+      expect(putSpy.mock.calls[0][1].color).toBe('');
+    });
+
+    test('choosing "No colour" and then a swatch before saving sends that swatch hex (the choice is not sticky)', async () => {
+      const { user } = mount();
+      await screen.findByLabelText('Name');
+      await user.click(screen.getByRole('button', { name: 'No colour' }));
+      await user.click(screen.getByRole('button', { name: 'Pink' }));
+      expect(pressed()).toEqual(['Pink']);
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+      expect(putSpy.mock.calls[0][1].color).toBe('#E0A5C9');
+    });
+
+    test('★ the edit-screen photo follows the choice live: ringed with a colour, plain with none', async () => {
+      const { user } = mount(); // KID has a photo and the stored green
+      await screen.findByLabelText('Name');
+      expect(ringed(), 'a photo and a colour: ringed').not.toBeNull();
+      expect(ringed().getAttribute('style')).toContain('var(--child-green)');
+      expect(ringSpreadPx(ringed()), 'the ring has a visible width').toBeGreaterThan(0);
+      await user.click(screen.getByRole('button', { name: 'No colour' }));
+      expect(ringed(), 'no colour: a plain photo').toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Blue' }));
+      expect(ringed().getAttribute('style')).toContain('var(--child-blue)');
+    });
+
+    test('a new child starts on yellow (the default is unchanged) and can choose none before the first save', async () => {
+      const { user } = mount({ kid: null, id: 'new' });
+      await screen.findByLabelText('Name');
+      expect(pressed()).toEqual(['Yellow']);
+      await user.type(screen.getByLabelText('Name'), 'Newborn');
+      await user.click(screen.getByRole('button', { name: 'No colour' }));
+      await user.click(screen.getByRole('button', { name: 'Add child' }));
+      await waitFor(() => expect(postSpy).toHaveBeenCalled());
+      expect(postSpy.mock.calls[0][1].color).toBe('');
+    });
   });
 });
 
@@ -310,7 +456,7 @@ describe('what each role is told about clip settings', () => {
       { kids: [KID], route: '/children/kid-1' }
     );
     await screen.findByLabelText('Name');
-    const link = screen.getByRole('link', { name: /Settings › Camera and Recording › Recording/ });
+    const link = screen.getByRole('link', { name: /Settings › Camera and recording › Recording/ });
     expect(link.getAttribute('href')).toBe('/settings/recording');
   });
 
@@ -320,7 +466,7 @@ describe('what each role is told about clip settings', () => {
     renderAs(CAREGIVER, <Routes><Route path="/children/:id" element={<ChildSettings />} /></Routes>,
       { kids: [KID], route: '/children/kid-1' });
     await screen.findByLabelText('Name');
-    expect(screen.queryByRole('link', { name: /Settings › Camera and Recording › Recording/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Settings › Camera and recording › Recording/ })).toBeNull();
     expect(screen.getByText(/an admin can change their length and retention/)).toBeTruthy();
   });
 
@@ -492,10 +638,22 @@ describe('★★ what a caregiver can change (#542)', () => {
   test('★ a caregiver has no Remove child; an admin does', async () => {
     const carer = mount({ who: CAREGIVER });
     await screen.findByLabelText('Name');
-    expect(screen.queryByRole('button', { name: 'Remove child' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More options for this child' })).toBeNull();
     carer.unmount();
     mount({ who: ADMIN });
-    expect(await screen.findByRole('button', { name: 'Remove child' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'More options for this child' })).toBeTruthy();
+  });
+
+  test('★ while the child is still loading there is no ⋯ menu, so Remove child cannot be reached; it appears once loaded', async () => {
+    // Remove moved from inside the form (absent while loading) to the header menu, which is not. An
+    // admin could then confirm and send DELETE for a child the page had not shown yet (PR #1088 review).
+    const first = mount({ kid: null });
+    expect(screen.getByText('Loading…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'More options for this child' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Remove child' })).toBeNull();
+    first.unmount();
+    mount();
+    expect(await screen.findByRole('button', { name: 'More options for this child' })).toBeTruthy();
   });
 
   test('★ a caregiver on Add child is told an admin adds children, with no form to fill in', async () => {
@@ -514,17 +672,23 @@ describe('removing a child', () => {
     // tests green. They are the parts that make the page behind inert and give the dialog a name, and
     // this dialog is a destructive confirmation, which is exactly where that matters.
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
     const dialog = await screen.findByRole('dialog');
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog).toHaveAccessibleName('Remove child');
+    // UI consistency (PR-C): Cancel and the confirm button share the one dialog action row.
+    const row = within(dialog).getByRole('button', { name: 'Cancel' }).closest('.modal-actions');
+    expect(row).not.toBeNull();
+    expect(within(row).getByRole('button', { name: 'Remove' })).toHaveClass('btn-danger');
   });
 
   test('★ asks first, and says what happens to the cameras', async () => {
     // The consequence people do not expect: the cameras survive, unassigned. Saying so is what stops
     // someone believing they are about to delete the cameras too.
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/become unassigned/)).toBeTruthy();
     expect(delSpy).not.toHaveBeenCalled();
@@ -535,7 +699,8 @@ describe('removing a child', () => {
   // consequence. One assertion per category: a regex over the paragraph would survive a dropped line.
   test('★ #540 the dialog says plainly that everything for the child is deleted, lists what, and asks', async () => {
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/permanently deletes everything for this child/)).toBeTruthy();
     const items = within(dialog).getAllByRole('listitem').map((li) => li.textContent);
@@ -560,7 +725,8 @@ describe('removing a child', () => {
     vi.stubGlobal('fetch', fetchSpy);
     try {
       const { user, camerasValue } = mount();
-      await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+      await user.click(screen.getByRole('button', { name: 'More options for this child' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
       await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
       const dialog = screen.getByRole('dialog');
       expect(await within(dialog).findByRole('alert')).toHaveTextContent(reason);
@@ -575,7 +741,8 @@ describe('removing a child', () => {
 
   test('confirming deletes, refreshes and goes back', async () => {
     const { user, camerasValue } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/children/kid-1'));
@@ -586,7 +753,8 @@ describe('removing a child', () => {
   test('a failed delete says why and keeps you on the child', async () => {
     delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Child has recorded nights'));
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
     expect(await screen.findByText('Child has recorded nights')).toBeTruthy();
@@ -599,7 +767,8 @@ describe('removing a child', () => {
   test('★ #378 the failure is shown INSIDE the dialog, once, and the dialog stays open to retry', async () => {
     delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused: cameras still streaming #378'));
     const { user, camerasValue } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
     const dialog = screen.getByRole('dialog');
@@ -612,14 +781,15 @@ describe('removing a child', () => {
     // Cancel and reopen: the old message must not greet the next attempt.
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await user.click(screen.getByRole('button', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
     expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
   });
 
   test('a new child has nothing to remove', async () => {
     mount({ id: 'new' });
     await screen.findByLabelText('Name');
-    expect(screen.queryByRole('button', { name: 'Remove child' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More options for this child' })).toBeNull();
   });
 });
 
@@ -660,6 +830,44 @@ describe('#919 hold alerts until asleep', () => {
     mount({ kid: { ...KID, track_sleep: 0 } });
     await screen.findByLabelText('Name');
     expect(screen.queryByRole('switch', { name: HOLD })).toBeNull();
+  });
+});
+
+// "Show sleep score" (sleep score plan, phase 2): on by default, admin-only, saved with the form like its neighbours.
+describe('show sleep score', () => {
+  const SCORE = /Show sleep score/;
+
+  test('a child from before the switch shows it ON; a stored 0 shows it OFF', async () => {
+    const first = mount({ kid: KID }); // KID carries no show_sleep_score
+    expect((await screen.findByRole('switch', { name: SCORE })).checked).toBe(true);
+    first.unmount();
+    mount({ kid: { ...KID, show_sleep_score: 0 } });
+    expect((await screen.findByRole('switch', { name: SCORE })).checked).toBe(false);
+  });
+
+  test('an admin turning it off sends false with the save, and nothing before Save is pressed', async () => {
+    const { user } = mount();
+    await user.click(await screen.findByRole('switch', { name: SCORE }));
+    expect(putSpy).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1].show_sleep_score).toBe(false);
+  });
+
+  test('a new child is created with it on', async () => {
+    const { user } = mount({ kid: null, id: 'new' });
+    await user.type(screen.getByLabelText('Name'), 'A child');
+    await user.click(screen.getByRole('button', { name: 'Add child' }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy.mock.calls[0][1].show_sleep_score).toBe(true);
+  });
+
+  test('a caregiver sees it disabled and their save does not send it', async () => {
+    const { user } = mount({ who: CAREGIVER });
+    expect(await screen.findByRole('switch', { name: SCORE })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('show_sleep_score');
   });
 });
 

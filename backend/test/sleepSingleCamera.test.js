@@ -115,7 +115,8 @@ test('a noisy second camera cannot change the reported night', () => {
 });
 
 test('the same night scores identically with the second camera removed', () => {
-  // The acceptance condition from ROADMAP 2.6, stated directly: adding a camera must be a no-op for
+  // The acceptance condition from the old ROADMAP 2.6 (single-camera sleep analysis, shipped in
+  // 0.28.0; the heading now names a smaller follow-up), stated directly: adding a camera must be a no-op for
   // the numbers. Comparing two runs is stronger than asserting fixed values, because it stays true
   // if the thresholds are ever retuned.
   addCam(MAIN, 'Cot cam', 0);

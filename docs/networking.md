@@ -56,6 +56,8 @@ These were measured on one Unraid server with a PC and a phone. Wi-Fi with clien
 
 Finding [cameras](cameras.md#finding-cameras) follows the same multicast rules in the other direction. Nightlight can browse mDNS and send ONVIF WS-Discovery probes only where that traffic reaches the cameras. Docker's default bridge does not expose LAN multicast; another VLAN needs a router that relays mDNS, while WS-Discovery usually stays on one network segment. Camera searches run only when an admin starts one (the setup guide starts one when its camera step opens).
 
+Finding [ESPHome devices](esphome.md#finding-devices) also browses mDNS. It needs the same LAN multicast reachability or an mDNS relay across VLANs; Docker's default bridge will not expose those announcements. An admin starts the search on the ESPHome settings screen.
+
 **`MDNS_ANNOUNCE`** turns it on or off. Default: on (unset or blank). `false`, `0`, `no` or `off`, in any case, turn it off, and then nothing listens on UDP port 5353 at all. Any other value leaves it on and logs a warning. It is read at start, so restart the container after changing it.
 
 **What is announced.** Anyone on your network can see:
@@ -95,7 +97,7 @@ Low-latency video can still need a reachable UDP port even when the website itse
 
 ## What connects to the outside
 
-**Settings → Remote Access** itself contacts nothing outside your network; the server only looks up the host names you entered in `PUBLIC_HOST` through DNS. **Test from this device** makes the same connection as live video from your device to your Nightlight server, including contact with the configured STUN server when STUN is enabled. It does not use an external reachability service.
+**Settings → Remote access** itself contacts nothing outside your network; the server only looks up the host names you entered in `PUBLIC_HOST` through DNS. **Test from this device** makes the same connection as live video from your device to your Nightlight server, including contact with the configured STUN server when STUN is enabled. It does not use an external reachability service.
 
 **STUN.** By default the browser and MediaMTX use Google's `stun.l.google.com:19302` to work out a public address for WebRTC. Google can see public IP and connection-timing metadata; it does **not** relay your video (it isn't a TURN server). On your own network STUN isn't needed. Set `STUN_SERVERS` to an empty value to switch it off, or point it at a server you control. HLS compatibility playback never uses STUN.
 

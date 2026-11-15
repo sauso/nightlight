@@ -158,6 +158,26 @@ test('scan manager reuses one active scan and clears its timer', async () => {
   assert.equal(manager.get('missing'), null);
 });
 
+test('scan manager merges updates by id, so two services on one IP stay two entries (#1072)', async () => {
+  let release;
+  const manager = createScanManager({ discover: ({ onCandidate }) => {
+    onCandidate({ id: 'a', ip: '10.0.0.9', port: 6053 });
+    onCandidate({ id: 'b', ip: '10.0.0.9', port: 6054 });
+    onCandidate({ id: 'a', ip: '10.0.0.9', port: 6053, name: 'updated' });
+    onCandidate({ ip: '10.0.0.10' }); // no id: the IP is the key, as before
+    onCandidate({ ip: '10.0.0.10', name: 'same host' });
+    return new Promise((resolve) => { release = resolve; });
+  } });
+  const { scanId } = manager.start();
+  await Promise.resolve();
+  const { candidates } = manager.get(scanId);
+  assert.equal(candidates.length, 3);
+  assert.equal(candidates.find((c) => c.id === 'a').name, 'updated');
+  assert.equal(candidates.find((c) => c.ip === '10.0.0.10').name, 'same host');
+  release({ candidates, sourceErrors: [] });
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
 test('manager hard stop ends a hung scan and prunes expired results', async () => {
   let clock = 1000, fire;
   const manager = createScanManager({ now: () => clock, discover: () => new Promise(() => {}),

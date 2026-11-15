@@ -1,3 +1,12 @@
+// A local calendar date ('YYYY-MM-DD') n days later (or earlier). Pure date arithmetic in UTC, so no timezone or DST can
+// move it: the dates on the sleep screens are already the app timezone's calendar dates, as strings.
+export function addDays(dateStr, n) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+}
+
 // Which settings the sleep detail page works a night out with (#361 PR 4a), and how a set of settings is named.
 //
 // A finished night whose saved settings (camera, timezone, sleep window) differ from today's is shown WITH the

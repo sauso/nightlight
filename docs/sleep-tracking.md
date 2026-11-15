@@ -8,6 +8,8 @@ This guide covers setup, the child card and the sleep detail page, how a night i
 
 ## Turn it on per child
 
+The child settings form has a **Profile** card for their name, birthday, photo and colour (one of six, or **No colour**; it is a ring around the child's photo, and the colour of their initials when there is no photo; "No colour" leaves the photo plain), and a **Sleep** card for the controls below. An admin can remove a saved child from **⋯ → Remove child** in the page header; the confirmation lists the data that will be deleted. Caregivers cannot use that action.
+
 Each child has a **Track sleep** toggle in their settings, with
 their own **bedtime** and **wake time**. Turning tracking off stops it entirely. Only an
 **admin** can turn tracking on or off, change those times or choose the camera the night is measured
@@ -15,14 +17,19 @@ from (a caregiver sees them, greyed out).
 A child can have more than one camera; the night is measured from one of them (see
 [One camera does the measuring](#one-camera-does-the-measuring)).
 
+Under **Track sleep** there is also **Show sleep score** (on by default, admin only): off hides that child's [sleep score](#turning-the-score-off) and changes nothing else.
+
 An admin can also switch on [Hold alerts until asleep](notifications.md#hold-alerts-until-asleep) under **Track sleep**. It is off by default. Motion and sound alerts are dropped until the watcher detects sleep. Outside the sleep window there is no sleep signal, so the hold has no time limit: an evening crying spell or daytime nap may be silent. Inside the window, alerts can resume 45 minutes after the first held alert even if sleep is not detected. The 45 minutes is a design choice, not a measured safety limit. Held alerts are not sent later. Camera-offline alerts continue normally. This is not a safety device.
 
 ## What you see
 
 ### At a glance, and live
 
-Each child's page summarises last night — total sleep, wake-ups,
-longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
+On the **Children** tab, each child card shows last night's total time asleep beneath the name and camera count. A finished night with a score also shows its ring and a word such as "Good" or "Early". While a night is running, the row says **Tonight so far** and shows the time asleep so far, without a score. The list reads each child's night once when opened; the child page below refreshes a running night every three minutes. With tracking off, no usable night or a failed read, the list card shows only the name and camera count. Turning off **Show sleep score** leaves the duration visible and hides the ring.
+
+Each child's page summarises last night in one card — the time asleep, a one-line headline and the
+night's [sleep score](#sleep-score) in a ring with its word ("Good"). The times, wake-ups and longest stretch are
+on the sleep page, one tap away. While a night is in progress the card updates as **"Tonight · so far"**, so an
 early-morning wake appears within a minute or two rather than only after the window closes.
 Treat those live figures as provisional: a night in progress is judged only on what has
 happened so far, so a bedtime can be revised later in the evening and the morning wake isn't
@@ -40,14 +47,14 @@ following day.
 ### In bed, then asleep
 
 On a night where your child was put down a while before they fell asleep
-(a bedtime story, a slow settle), the card and the detail page show both: **In bed** is the
+(a bedtime story, a slow settle), the sleep page shows both: **In bed** is the
 put-down the camera recorded, and **Asleep** is when the room went quiet. That's the same time the
 app has always reported as bedtime. The extra time appears only when "in bed" is at least a minute
 before "asleep", so most nights still show one time. If you corrected a night's asleep time, the
 camera's "In bed" is hidden and only your time is shown: the recorded put-down belongs to the bedtime
 you corrected, so it may not match yours. Correcting only the wake-up time keeps it. If you gave the
 **In bed** time yourself in the morning review, yours is shown, beside your asleep time too. A night
-saved before 0.35.0 has no "in bed" time on the child's card until it's recomputed, and a night
+saved before 0.35.0 has no "in bed" time on the sleep page until it's recomputed, and a night
 you corrected in the morning review is locked against that until the correction is removed (or give
 its **In bed** time yourself in the review). The detail page works the night out fresh each time, so
 it shows the time straight away.
@@ -83,10 +90,31 @@ another room less well.
 
 ### The detail view
 
-Tap the sleep summary for the full **night timeline**: a to-scale bar of
-asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
-and length, a **movement outside the bed** list, and a date picker to step back through
-roughly the last month of nights. Two moment markers sit on the bar — **got into bed** and
+Tap the sleep summary for the **Timeline** card: a to-scale bar of
+asleep / stirring / awake stretches on a real time axis. Nearby short stirs join visually on the bar;
+the underlying times and counts stay separate, and the hover status follows the original segments.
+While a night is still going, the bar runs from the start of the night to now
+and its right-hand end reads **Now** with the time, not the morning end of the night (tonight's page refreshes every two minutes).
+The legend lists only the states present that night. Below it, one card with two tabs, **Wake-ups** and
+**Room activity**, shows each count and its own rows (with clips or saved frames where available).
+The **Wake-ups** count is the same number as the **Wake-ups** figure in the night's summary (mid-night wake-ups only):
+the morning wake is listed at the end as **Up for the day** with the time the child got up, and is not counted.
+The **Coverage** figure appears only when part of the night was not watched, even by a single minute, and a partial night
+is never shown as 100%: the figure is the covered share of the window rounded to the nearest whole percent, then held at
+99% (719 of 720 minutes reads 99%, not 100%). The line is hidden for a fully covered night, so "no Coverage line" means
+every minute was watched.
+**Up for the day** shows the wake the app kept, and also a wake you gave in the review. It is left off only when the app
+set an earlier exit aside as unusually early for this child and no one has confirmed the time (the sleep score calls such a
+wake "not certain" too). The first and last hour labels and the markers at the ends of the bar stay inside the card.
+There is a way to step back through
+roughly the last month of nights: a strip of seven nights (each with its score and a small
+colour bar; tap one to open it) that starts at the newest nights, and a calendar button. Pick an older night
+and the strip slides to centre on it, so the nights either side are one tap away. The strip is a heat map of the
+week, so seven bars sit side by side; the number is always printed too, and a night with no score
+shows a dash. A new child sees only the nights that exist. If the strip cannot be loaded it is left out
+and the page works without it. A thin line under the page's header takes the colour of the night on
+screen (grey when there is no score, or for an early estimate), and the **⋯** button at the right of the
+header holds the actions described below. Two moment markers sit on the bar — **got into bed** and
 **got out of bed** — and they are deliberately the only two shown: they're the put-down and
 the morning departure the night's times were actually derived from. A single camera can see
 that something crossed the edge of the bed, but not *who*, so movement in between is reported
@@ -116,13 +144,13 @@ those has changed since (the camera was turned off, moved to another child or is
 tiles were rearranged, or the window or timezone was changed), the detail page works a **finished** night out with
 the settings it was saved with, so it uses the same settings as the child's card. A line above the night says so,
 for example "Worked out with the settings this night was saved with (Bed cam, 19:30–07:00, Europe/London), using
-today's detection rules". **Show with today's settings** switches the page to today's, and a second button switches
-back. The choice is for that night only and is not remembered: another night, a reload, or a Recompute save goes
+today's detection rules". **Show with today's settings** (in the **⋯** menu at the top of the page; the line above the night says so) switches the
+page to today's, and the same menu item switches back. The choice is for that night only and is not remembered: another night, a reload, or a Recompute save goes
 back to the saved settings. Before, the page always used today's settings, so after such a change a finished night
 could show different numbers from its card, or "no data". The morning review uses the same settings as this page
 (see [A night whose settings have changed](#a-night-whose-settings-have-changed)).
-If switching views fails, the page keeps showing the previous night and shows an error. Press the same settings
-button again to retry.
+If switching views fails, the page keeps showing the previous night and shows an error. Choose the same item in the
+**⋯** menu again to retry.
 
 | The night | Settings the detail page uses |
 |---|---|
@@ -177,6 +205,16 @@ are exactly what they were before. Known limit: each night's average temperature
 0.1°C, so in a very steady room where many nights share the median value (all of which join
 neither group) one group can stay under 10, and the card keeps saying "Not enough nights yet",
 for as long as the room stays that steady.
+
+### Heart rate and breathing (optional)
+
+If the child has an [ESPHome radar sensor](esphome.md) that reports a heart rate or a breathing rate, the sleep screens show them. A child without one sees none of this.
+
+- **On the child's card:** one small line under the headline, such as "82 bpm avg" and "21/min avg", for a night that was scored. Each figure appears only when there is one. The averages cover the time between falling asleep and the morning wake (the whole night so far, while it is running).
+- **On the sleep page:** two thin tracks, **Heart rate** and **Breathing**, under the room temperature track on the same time axis, with the average and the lowest to highest figure in the caption (such as "avg 82 bpm · 71–103"). The average is over the time asleep, from falling asleep to waking, even when that starts before or ends after the timeline shown, so the card and the sleep page give the same figure for a night. If the sensor has readings on the timeline but none between falling asleep and waking, the caption shows only the range ("71–103 bpm"), without an average. The tracks cover the whole timeline, so the time before falling asleep and after waking can be on the line but is not in the average. A track needs at least two readings, or it is left out. A **gap in the line is a gap in the data**: where the sensor gave no valid reading for about 10 minutes or more, the line stops and starts again rather than joining the two sides.
+- **When you hold or drag along the timeline** (a mouse hover on a computer), the bubble also shows the heart rate and breathing at that minute, when there is a reading within 5 minutes of it. The sensor's readings are grouped in 5-minute steps, and each step sits at the average time of the minutes it was measured in, so a reading is never shown before it was taken. Between readings further apart than that, it shows none.
+
+Unlike the room temperature, these come from the sensor's minute readings and are not saved with the night, so a night older than the ESPHome readings retention (default **30 days**, setting `esphome_retention_days`, adjustable from 1 to 365 on the ESPHome settings screen) shows no heart rate or breathing, while the rest of its sleep summary stays. Reading a night never changes it: these figures are not used in the sleep times, the sleep score, the night summary or any notification. They are **sensor estimates from a radar, not for medical use**, and not a safety device. The heart rate in particular has not been validated against anything, and the sensor can read an adult or a pet at the bed as well as the child. [The ESPHome page](esphome.md#heart-rate-and-breathing-on-the-sleep-screens) lists the limits.
 
 ## How a night is estimated
 
@@ -542,6 +580,41 @@ two added fields `wake_at_sensor` and `sensor_rejects` (empty without a sensor, 
 readings around the night's possible wakes, and on a night whose wake you corrected). How it works, how to compare it with your morning reviews, and its limits:
 [The sleep shadow](esphome.md#the-sleep-shadow-for-comparison-only).
 
+### Two more facts are saved with each night
+
+The minute-by-minute data behind a night is kept for 30 days, and the [sleep score](#sleep-score) looks
+further back than that. So each night now also saves two things that can only be worked out from those
+minutes. **Nothing on screen uses them yet.**
+
+- **Stirring minutes** (`stir_minutes`): how many minutes of the sleep had movement **in the bed** without
+  being part of a counted wake-up. A noise on its own does not count, and neither does movement elsewhere in
+  the room: a bedroom microphone hears the whole house, and household noise should not read as a restless
+  child. The first 30 minutes after falling asleep are left out as settling, and so are minutes the camera
+  had no video for. This is narrower than the "stirring" stretches on the [detail view](#the-detail-view),
+  which still show any brief movement or noise.
+- **A small summary** (`summary_facts`): the room's lowest and highest temperature for the night (when there
+  is a [sensor](#room-temperature-optional)), the start time and length of each counted wake-up, and how many
+  of those wake-ups had movement outside the bed within 3 minutes of them.
+
+Both appear in the night's API answers as added fields; `summary_facts` is a small piece of JSON text.
+
+What to know:
+
+- **Nights saved before this release do not have them**, and cannot be given them later once their minute
+  data has gone. The fields are empty for those nights, which means "not known", not "no stirring".
+- **A camera with no bed zone drawn treats its whole picture as the bed.** All the movement it sees then
+  counts as stirring, including someone walking through the room. Draw the zone over the bed to avoid this.
+  Nothing checks that a zone you drew actually sits on the bed.
+- The figures are comparable from night to night for one camera, not between rooms: how much movement counts
+  was measured on two cameras in one house.
+- A wake-up that runs past the end of the sleep window is only checked for room movement up to the end of
+  the window.
+- A night you marked [No one was in the bed](#no-one-was-in-the-bed-says-the-whole-night-was-wrong-not-just-a-time)
+  shows no stirring minutes and no wake-ups in the summary; the temperature range stays. A night the app saw
+  as an empty bed and you gave times to has none either, because nothing was measured.
+- If you correct a night's times, both stay as the detector measured them, so the summary can list a
+  wake-up outside the times you entered.
+
 ### When the motion camera samples
 
 The movement timeline comes from a frame-by-frame motion leg that
@@ -570,25 +643,421 @@ lingers 5 to 10 minutes after the closing one.
   for a camera of this kind the morning review has no recorded *got out / into bed* events after about
   3 hours past the window's end, because nothing past that point feeds the night's numbers.
 
+## Sleep score
+
+Each finished night gets a score from 0 to 100. It answers one question: how did this night compare with
+this child's own recent nights?
+
+The score is an estimate made from what the camera and microphone observed. It is not a medical
+measurement, it says nothing about sleep stages, and it is no reason to worry on its own.
+
+### Where you see it
+
+- **On the child's card**, as a small ring beside last night's sleep, with the number in it. A night
+  still in progress has no ring.
+- **On the sleep detail page**, one night card under the date shows the time asleep, a ring, its word
+  ("Great", "Good", "Fair", or "Early estimate"), a short blurb and **Why this score?**. The review
+  action sits in the card too.
+- **Why this score?** opens a sheet on a phone or a dialog on desktop. Each of the five parts has
+  its measured value, a bar coloured for that part's own score, and a plain word. A part left out
+  has a dashed empty bar and a reason. The sheet also lists the available night figures and says
+  when a score was held down, may still change, is an early estimate, or has low confidence. For a night
+  with no confirmed wake-up it says "still asleep at" the end of the window. The blurb does not repeat the
+  time asleep that the card's heading shows.
+- A night with no score shows **No score yet** and the reason. A night that is **still in progress** instead shows a dashed ring and
+  "Score and night summary after 7:00 AM" (the end of the night window, in your timezone) on both the child's card and this page; a night
+  with no data shows the same dashed ring above its explanation. The child's card does not show last night's review question or
+  receipt while tonight is in progress: that question is about the last finished night.
+
+The ring's arc is coloured by band: green for Great, teal for Good, amber for Fair, a soft rose for a score
+with no band word (under 55), and a neutral grey ring on a dashed track for an early estimate. The colour
+follows the band word the server sends, and it is never the only signal: the number and the word (or
+"Early estimate") are always shown, and no text is set in a band colour. On the child's page the night card
+also takes a faint tint of the same colour. The breakdown describes the night; it gives no advice and
+names no cause.
+
+### Turning the score off
+
+Each child has a **Show sleep score** switch in their settings, under **Track sleep**. It is **on by
+default**, for new children and for children who were already there before the score existed. Only an
+admin can change it (a caregiver sees it greyed out).
+
+Off hides the ring, the score button and the breakdown for that child, for everyone. Nothing else
+changes: the night is still tracked and shown, the [Night summary](#night-summary) still appears (it
+describes the night, it is not the score), the morning sleep report is still sent (it never contained
+the score), and the child's "usual" keeps building, so turning the switch back on shows scores for past
+nights too.
+
+### What goes into it
+
+Five things, each scored 0 to 100 and then combined by weight:
+
+| Part | Weight | What is measured | Compared with |
+| --- | --- | --- | --- |
+| Duration | 35 | Minutes asleep | The child's usual. Full marks at or above it, half at 90 minutes under, none at 4 hours under. |
+| Continuity | 30 | The share of the night spent asleep, the longest unbroken stretch, and the number of wake-ups | Fixed curves from 12 months of age. Under 12 months, or with no birthday entered, the child's usual. |
+| Settling | 15 | Minutes from being put down to falling asleep | A fixed curve: up to 20 minutes is full marks, 45 is half, 90 is none. |
+| Restlessness | 15 | [Stirring minutes](#two-more-facts-are-saved-with-each-night) per hour asleep | Only the amount above the child's usual counts (or above 2 minutes an hour, for a very still sleeper). |
+| Consistency | 5 | The clock time they fell asleep and the time they got up | The child's usual times. Within 15 minutes counts as on time. |
+
+A part that could not be measured is left out and the others keep their proportions. A night with no
+detected put-down, for example, is simply not judged on settling.
+
+**The weakest-link cap.** The score cannot be more than 40 points above the duration part, the continuity
+part or the restlessness part. Without it, a night with long stretches awake could still read "Good"
+because bedtime went well, and twenty unbroken minutes of sleep could read as a middling night.
+
+**The words.** 85 and over is "Great", 70 to 84 is "Good", 55 to 69 is "Fair". Under 55 the number is
+given with no word.
+
+### What "usual" means
+
+"Usual" is the middle value (the median) of the child's own saved nights before this one: the newest 14
+from the last four weeks. A night counts only if sleep was detected, the camera watched at least 80% of
+the sleep window, and it was measured by the same camera with the same sleep window as the night being
+scored. Your [corrections](#correcting-a-night) are included.
+
+Nothing is called usual until there are 7 nights to go on, and that is counted separately for each
+figure. Seven nights of which two have a detected put-down give a usual duration but no usual settling
+time yet.
+
+### The early estimate
+
+Until there are 7 nights, the score is an **early estimate**. Duration is then compared with a published
+figure for the child's age instead of their own usual, and the score carries no word.
+
+The age figures are from Iglowstein and colleagues, *Sleep duration from infancy to adolescence*
+(Pediatrics, 2003). They are what parents reported as their child's usual time in bed at night, not
+minutes asleep. So for an early estimate the night's whole span, from falling asleep to waking, is
+compared with them. It is a rough guide for the first week, nothing more.
+
+An early estimate needs the child's birthday (edit the child to add it), and the child must be at least
+12 months old on that night.
+
+### When there is no score
+
+- The night is still in progress.
+- No sleep was detected, there was too little data, or you said no one was in the bed. The same goes for
+  a night whose corrected times leave no minutes asleep.
+- The detector saw an empty bed and you typed in the times. The wake-ups of that night were never
+  measured, so there is nothing to score.
+- There are fewer than 7 nights to compare with and no birthday is entered.
+- The child is under 12 months old and there are fewer than 7 nights to compare with.
+
+### Provisional and low confidence
+
+A night's figures keep being refined for 3 hours after the sleep window closes. A score worked out before
+then is marked **provisional** and may still change. A saved night you have corrected is locked, so its
+score is final.
+
+A score is marked **low confidence** when the camera watched less than 80% of the sleep window, when more
+than 15 minutes inside the sleep were not watched, or when the wake time is uncertain (no wake was
+detected, or the detector [set aside an early exit](#an-exit-far-earlier-than-usual-does-not-end-the-night)).
+A wake time you gave in the morning review counts as certain, also when you left it as it was. Unwatched
+minutes are never counted as sleep, and with more than 15 of them the longest stretch is left out of the
+score.
+
+### After you correct a night
+
+The score always uses the night as you see it, so a correction changes the score the next time it is
+read, and changes what "usual" means for the nights after it.
+
+If you move the time asleep or the time up by **more than 15 minutes**, that night's restlessness and
+longest stretch are left out of its score and out of the usual: the detector measured them over different
+hours. A smaller adjustment keeps them. The tolerance is fixed at 15 minutes for each of the two times and
+is not a setting.
+
+Settling follows what the page shows: if you changed the time asleep but not the put-down, the night is
+not judged on settling.
+
+### Known limits of the score
+
+- A parent's visit can be counted as the child's wake-up.
+- Sound from another room can be counted as a wake-up. A bedroom microphone hears the whole house.
+- Scores are not comparable between children or between rooms. A camera's angle changes how much movement
+  it sees.
+- A night with no detected put-down is not judged on settling, so it can score higher than the same night
+  with a slow, detected settle.
+- After you correct a time, the number of wake-ups and the minutes awake are still the detector's.
+- Nights saved before stirring minutes were stored have no restlessness figure and never will.
+- Changing the camera a child's sleep is measured from, or the sleep window, starts "usual" again: about
+  a week of early estimates.
+- Physically moving or re-aiming the same camera does **not** start "usual" again. For up to four weeks
+  the usual is partly from the old view.
+- A sleep window that ends near midday can give a wrong usual clock time, because times are counted from
+  noon.
+- Nothing checks that the [zone you drew](#one-camera-does-the-measuring) sits on the bed.
+- Naps are not tracked or scored.
+- A night with no sleep detected has no score at all.
+- Under 12 months, or with no birthday entered, continuity is compared with the child's own usual. Those
+  curves have not been checked against any infant's nights.
+- The age figures are parent-reported times in bed for Swiss children born between 1974 and 1993. They
+  stand in only until the child has a usual of their own.
+- Every weight and curve is a starting value, tuned on two cameras in one house. Expect them to change;
+  when they do, past nights are rescored too, because the score is worked out when it is read and not
+  saved.
+- If the minute-by-minute data for a night has gone (it is kept 30 days), the detail view can no longer
+  draw the night, and the score comes from the saved summary instead.
+
+### For developers: the score in the API
+
+`GET /api/children/:id/sleep/live`, `GET /api/children/:id/sleep?nights=N` and every read of
+`GET /api/children/:id/sleep/:date` add one key, `score`, to each night they return (unless the child's
+[Show sleep score](#turning-the-score-off) switch is off, see the end of this section). No existing key
+changed. The score is worked out from the exact night object in the answer: with your correction laid over
+it, or without it where the answer itself leaves it out (`?stored=1`, `raw=1`, and the reply to an admin's
+`store=1`). Nothing is stored.
+
+`score` is one of:
+
+- **A score:** `{ score, band, version, provisional, low_confidence, low_confidence_reasons, capped_by,
+  early_estimate, unwatched_minutes, components }`. `band` is `great`, `good`, `fair` or `null`.
+  `capped_by` names the part that capped the score, or is `null`. `components` lists the five parts, each
+  `{ key, score, weight, available, reason, value, usual }`; continuity and consistency also carry their
+  `terms`, and duration says what it was compared with in `basis` (`asleep_vs_usual` or `span_vs_age`).
+- **No score:** `{ score: null, reason, version }`, where `reason` is `in_progress`, `not_ok` (with the
+  night's `status`), `promoted_from_empty`, `no_sleep_measured`, `no_duration_reference` or
+  `under_12_months_no_baseline`.
+- **`null`:** scoring failed. The night is returned as usual and one line is logged.
+
+`version` is the formula's version (currently `2`). `/sleep/:date?stored=1` has it at `night.score`;
+`night` is `null` there when no row is saved.
+
+**When the child's Show sleep score switch is off** (`show_sleep_score` is `0` on the child), the three
+routes return every night **without** the `score` key, and without `score_source`. The key is absent,
+not `null`, so a client can tell "switched off" from "scoring failed". Every other key is unchanged. The
+switch is `show_sleep_score` on `PUT /api/children/:id` and `POST /api/children` (`true`/`false`/`1`/`0`,
+admin only, default on) and is returned on each child as `0` or `1`.
+
+A night worked out fresh is scored with the settings it was worked out with: the saved ones for
+`context=stored` and for a night `context=auto` replays, today's otherwise. So "Show with today's
+settings" after a window change is compared with nights measured with today's window, which usually
+means an early estimate.
+
+When a read's fresh night is `no_data` but a saved `ok` row exists (the raw data has aged out, or the
+camera is gone), `score` is the saved night's and the answer also carries `score_source: "stored"`. Every
+other key is still the fresh `no_data` night; read `?stored=1` or the list for the saved figures.
+
+## Night summary
+
+The child's card shows a one-line headline. The sleep page turns the night's observations into
+two or three flowing sentences, joining related facts such as the longest stretch and settling time.
+When those facts cannot be joined, it uses their individual sentences.
+
+It describes what was measured and how that compares with this child's own recent nights. It does not say
+why anything happened, gives no advice, and never mentions sleep stages. It is not written by an AI: the
+sentences come from a fixed library of phrases, filled in with the night's own figures. Which phrase a
+night gets is fixed by the child and the date, so the wording does not change each time you open the page.
+Like the score, it is an estimate from what the camera and microphone observed, not a medical
+measurement.
+
+### Where you see it
+
+- **On the sleep detail page**, the night card combines related facts into a short blurb beside
+  the duration and score ring. With the child's [Show sleep score](#turning-the-score-off) switch
+  off, the card still describes the night and its figures remain on the page.
+- **On the child's card**, the headline on one line under the duration. On a narrow phone a long headline
+  is cut short with "…" rather than wrapped. The sleep page does not repeat the headline: it has the blurb
+  instead, and does not restate the time asleep that the card already shows.
+- Times are shown in your home timezone and your device's 12 or 24 hour clock, and room temperatures in
+  the unit chosen in Settings.
+
+### The headline
+
+One of four, taken from the same two parts of the score that are about waking and stirring (continuity
+and restlessness), so it cannot disagree with the score:
+
+- **Settled**: both parts are 80 or more and the score is in the top band ("Great").
+- **Typical**: both parts are 65 or more and the score is "Good" or better.
+- **Mixed**: everything in between, including a night with little waking but too little sleep.
+- **Unsettled**: either part is under 50.
+
+While the score is an [early estimate](#the-early-estimate) the overall score is not consulted: only the
+two parts decide. A night that was not watched well enough to judge (under 80% of the sleep window, or
+more than 15 minutes of the sleep unwatched) gets a plain line instead, "Sleep as measured overnight."
+These cut-offs are starting values, set on two cameras in one house.
+
+### What the observations can say
+
+Each is chosen only when the figure behind it exists. At most four are shown: a comparison with the
+child's usual that is not "about the same" comes first (the biggest difference first), then how much of
+the night was not watched, then the plain facts.
+
+- Total time asleep, and against the usual: more, less, or about the same (within the larger of 20
+  minutes and 5% of the usual).
+- Wake-ups, and against the usual (within one wake-up).
+- The longest unbroken stretch, and against the usual (within five points of the night's span).
+- Minutes from being put down to falling asleep.
+- Wake-ups bunched together: at least three of them, and more than half of the night's, within 90
+  minutes of the first.
+- How many wake-ups had movement outside the bed around them. It says movement was seen, never who moved.
+- The room's temperature range.
+- How much of the sleep window the camera watched, when that was low.
+- That there are not yet enough recent nights to say what is usual.
+- That no sleep was detected, or that you said no one was in the bed.
+
+### Nights with no score
+
+- **A night in progress** shows a "so far" line and a few plain facts so far, never a verdict. See
+  [While the night is in progress](#while-the-night-is-in-progress).
+- **A night with no score for another reason** gets the plain headline and only measured facts, never a
+  verdict.
+- **Times you entered by hand** over a night the detector saw as empty: the summary says so and gives only
+  the total and the two times. The wake-ups of that night were never measured, so it never says "settled"
+  or "no wake-ups".
+
+### While the night is in progress
+
+Tonight's night carries two extra things, both only until the sleep window closes. There is still **no
+score** and no judgement of the night: half a night says nothing about how it compared with the usual.
+
+**Where the child is now.** One of four states, with the time it began:
+
+- **Not asleep yet**: the camera has not seen the child settle (no time).
+- **Asleep since** a time: the end of the latest wake-up, or the time the child fell asleep when there has
+  been none.
+- **Awake since** a time: the start of the current wake-up.
+- **Unknown**: the answer is too old to call "now" (more than 6 minutes behind the clock), or the night
+  has no camera data yet, or its wake-up list cannot be read (a night saved by an older version).
+
+A wake-up counts only once it has lasted at least 5 active minutes, and the detector joins short quiet
+gaps (up to 3 minutes) into one wake-up. So the state does not flip back to asleep the moment movement
+stops: **a child stays "awake" until 4 minutes after the last wake-up ended**, then reads asleep since the
+end of it. That also covers the few seconds after each minute while the camera's reading for it is still
+being saved. The times are the detector's, not a clock on the child: "asleep since 8:05 PM" is when the
+detector decided, as it does for the night's other times.
+
+**Facts so far.** The night summary keeps its "so far" headline (for example "Sleep so far tonight, as measured.") and adds
+up to four plain facts: time asleep so far, wake-ups so far, the longest unbroken stretch so far and, when there
+is a put-down time, how long it took to fall asleep. They use the same figures as the night's other
+numbers. There is **no comparison with the usual**, no "settled" or "restless" headline and no "not enough
+nights" line. A night where the child has not fallen asleep yet has no facts.
+
+Known limits:
+
+- **A camera that has gone offline is not noticed.** The state is worked out from the last minutes the
+  server has, and a silent camera looks like a child asleep. Check the live view if it matters.
+- **Out of bed is not told apart from awake.** A child who has climbed out and is out of the camera's
+  view reads as awake.
+- **The state can be a few minutes behind.** The child's card re-reads about every 3 minutes, and a
+  minute's reading is saved a few seconds after the minute ends.
+- "No wake-ups so far" means none have been counted yet. The wake-up in progress is counted once it ends.
+- The 4-minute and 6-minute figures are starting values, set from how the detector joins wake-ups and how
+  often the page asks; nothing measured them across other homes.
+- **What the app shows today.** The facts so far appear in the blurb of the night card on tonight's sleep page,
+  with "Score and night summary after <time>" in place of the "No score yet" line. The child's card shows that same line instead of a headline. The where-the-child-is
+  state (`live`) is in the API response only: no screen shows it yet, a later design change will.
+
+### After you correct a night
+
+Wake-ups outside the times you gave are left out before any wake-up observation is chosen. If you moved
+the time asleep or the time up by **more than 15 minutes** (the same rule as the score), the summary does
+not mention wake-ups or the longest stretch at all, because the detector measured them over different
+hours.
+
+### Known limits
+
+- Nights saved before 2026-11-11 have no list of wake-up times and no room temperature range, so the
+  observations about bunched wake-ups, movement near wake-ups and temperature never appear for them.
+  This cannot be filled in later: the minute-by-minute data is gone. See
+  [Two more facts are saved with each night](#two-more-facts-are-saved-with-each-night).
+- Everything the score's known limits say about wake-ups applies here too: a parent's visit or a sound
+  from another room can be counted as a wake-up.
+- The wording and the cut-offs have not been tuned beyond one house. Expect them to change.
+- The summary is in English only.
+
+### For developers: the summary in the API
+
+The three sleep routes add one more key to each night, `summary`, beside `score`. No existing key changed.
+Unlike `score`, it is present **whether or not** the child's Show sleep score switch is on; the switch
+only omits `score` and `score_source`. It is worked out from the same night object as the score, so it
+agrees with it.
+
+```json
+{
+  "headline": { "key": "typical" },
+  "observations": [
+    { "key": "total_sleep_vs_usual", "params": { "minutes": 600, "usual_minutes": 640, "direction": "less" } },
+    { "key": "wake_ups", "params": { "count": 3 } }
+  ],
+  "seed": "<child id>|2026-03-10"
+}
+```
+
+The server sends keys and raw numbers, never wording. `minutes` and `count` are numbers; `*_at` are UTC times
+as `YYYY-MM-DD HH:MM:SS`; `min_c` and `max_c` are degrees Celsius; `direction` is `more`, `less` or
+`about_the_same`. The browser picks the sentence from `seed` and the key and formats the figures. A client
+should skip any key it does not know. `headline.key` is `settled`, `typical`, `mixed`, `unsettled`,
+`neutral_last_night` or `neutral_so_far`. Observation keys: `total_sleep`, `total_sleep_vs_usual`, `wake_ups`,
+`wake_ups_vs_usual`, `longest_stretch`, `longest_stretch_vs_usual`, `settling_time`, `wake_clustering`,
+`room_activity_near_wakes`, `temperature_range`, `reduced_coverage`, `building_baseline`, `no_sleep_detected`,
+`times_entered_by_hand`, `sleep_span` and `nobody_in_bed`; for a night in progress also `total_sleep_so_far`
+(`minutes`), `wake_ups_so_far` (`count`) and `longest_stretch_so_far` (`minutes`).
+
+A night in progress also carries `live`, beside `score` and `summary` (every other night has `live: null`; no
+existing key changed). Like `summary` it is present whether or not Show sleep score is on, and it is `null`
+if working it out failed (one line is logged an hour):
+
+```json
+{ "state": "asleep", "since": "2026-03-11 01:06:00" }
+```
+
+`state` is `not_asleep_yet`, `asleep`, `awake` or `unknown`. `since` is a UTC time as
+`YYYY-MM-DD HH:MM:SS`, like `onset_at`, or `null` for `not_asleep_yet` and `unknown`. A client should treat a
+`state` it does not know as `unknown`.
+
+`summary` is `null` when there is nothing to describe (tracking is off, or the night has no data) and when
+building it failed; the night is then returned as usual and one line is logged.
+
 ## Correcting a night
 
 ### Tell it when it got a night wrong
 
-The morning after, the child's page offers **Was last night right?** — one question: when they got
-up. Tap it and the screen reads **Up at 6:37. Is that right?**
-- **That's right** records that time as your answer. Two taps from the child's page.
-- **Not quite** shows one time field, **Got up for the day**, to type the real time into, and
-  **Save**.
+The morning after, the child's page asks one question, **Up at 6:37. Is that right?**, inside the
+night card under the summary: when they got up.
+- **That's right** records that time as your answer, in one tap, right there; the question then
+  becomes a one-line receipt with a way to change it. On a night where the full screen would ask
+  something else (the two-answers case below, a night already answered, or a time that has changed
+  since the card was drawn), the button opens that screen instead of saving.
+- **Not quite** opens the review screen on **When did they get up for the day?**: what the app had
+  (**We had 6:20 am.**), the time itself between **-5m** and **+5m** buttons (each press moves it five
+  minutes; it stops at midnight and at noon rather than wrapping or crossing into another day, because a time before
+  12:00 is read as the morning after the night and a time from 12:00 on as the evening, and you can always type the
+  time instead), any **out-of-bed** times the app logged within an hour of it as buttons you can tap
+  instead (**6:20 am · out of bed**; at most four), **Add a note**, and **Save**. Nothing is saved until
+  Save, and the field is the one called **Got up for the day**. (The screen's own **That's right** does
+  the same as the card's.)
+- A small **✕** on the question dismisses it for good, as before.
 - On a night where the app has two different answers, the question is instead **Up between 6:10 and
   6:50. When did they get up?**, with **Around** each time and **Another time**
   (see ["Up between"](#up-between-in-the-morning-review-when-the-app-has-two-answers)).
-- **No one was in the bed** (a small link under the buttons) says the whole night was wrong. See
+- **Something else was off** (a row under the question) opens **Edit sleep times**, a sheet that holds
+  **In bed**, **Fell asleep**, a note and **No one was in the bed**, for the rare night one of those is
+  wrong. Each time says what the app had (**We had 7:10 pm.**) and is only recorded if you type in it;
+  opening the sheet and leaving things alone records nothing, and **Save** stays off until you have
+  typed something. **One thing is saved besides what you type:** **Save** in the sheet also saves the up time the
+  page shows, exactly as the page's own **Save** and **That's right** do. On a night you have not answered yet
+  that is the app's guess (or the time you stepped to), so saving there **confirms it**, and the sheet says so
+  (**Saving also confirms the up time shown on the page.**). Where you already gave an answer, or the question is
+  "Up between" and you have not picked a time, the sheet says only that a time you change is saved.
+  **Closing the sheet (Escape, a tap outside it, the ✕) throws away what you typed in
+  it**; nothing is saved by closing. If the row already holds an answer for either time it reads it out
+  (**You said in bed 6:49 pm.**), so a saved answer is never hidden. If the app found no wake-up time
+  for the night at all, there is nothing to confirm, so the screen opens straight onto the time field,
+  and the row says to add when they went to bed and fell asleep (both are needed to make it a slept
+  night).
+- **The sheet's Save sends what the page's buttons always sent.** Saving a bedtime, fell-asleep time or
+  note from the sheet also records the wake-up time the page shows (the app's guess, if you have not
+  changed it), exactly as the bedtime fields did when they sat beside **That's right**. Nothing the
+  server stores changed with the sheet.
+- **Stepping or typing a wake-up time across or after noon follows the server's noon rule.** A bare
+  time before 12:00 is the morning after the night, and from 12:00 it is the night's own day. A time
+  that therefore lands on the wrong day (for example a wake that comes out before the asleep time) is
+  refused with an ordering message, never stored as a wrong time. The -5m / +5m buttons never wrap
+  past midnight.
+- **No one was in the bed** is inside the sheet. It sends only that answer (and a note, if you typed
+  one); any time typed on the page or in the sheet is dropped, never sent beside it. See
   ["No one was in the bed" says the whole night was wrong](#no-one-was-in-the-bed-says-the-whole-night-was-wrong-not-just-a-time).
-- **Change bedtime or fell-asleep time** (a collapsed section) holds **In bed**, **Fell asleep** and a
-  note, for the rare night one of those is wrong. They start closed and are only recorded if you
-  type in them; opening the section and leaving them alone records nothing. If the app found no
-  wake-up time for the night at all, there is nothing to confirm, so the screen opens straight onto
-  the time field with this section already open.
 
 The prompt appears once per night and goes for good once answered **or dismissed** (the **x** on the
 card); nothing is asked about nights with no times to confirm. Either an admin or a caregiver can
@@ -615,7 +1084,7 @@ records who last answered a night.
 
 #### In bed and asleep are two different answers
 
-Under **Change bedtime or fell-asleep time** you can give **In bed** (when they were put down) and
+In the **Edit sleep times** sheet (the **Something else was off** row) you can give **In bed** (when they were put down) and
 **Fell asleep**. On a night with a bedtime story they can be half an hour apart, and you can give
 both. Both are optional, and each is recorded only if you type in it: the times the app guessed are
 shown for you to edit, but they are never saved as yours unless you change them. "In bed" can't be
@@ -670,10 +1139,9 @@ confirm is the one the child's card shows. Times are still shown, and typed, in 
 
 #### Your times become the ones shown
 
-Once you correct a night, the child's card and the sleep
-detail page both show *your* times, marked **You corrected this**, with the total
-sleep recalculated to match wherever an asleep or wake-up time you saved differs from the one that
-screen had (a time that is the same keeps that screen's own total). This is different from
+Once you correct a night, the sleep detail page shows *your* times, marked **You corrected this**, and the child's card
+shows the total sleep recalculated to match wherever an asleep or wake-up time you saved differs
+from the one that screen had (a time that is the same keeps that screen's own total). This is different from
 **Recompute this night**, which re-runs the detector: correcting records what *you* know,
 recomputing re-asks the *app*.
 - A corrected **In bed** only moves the "in bed" time. Saving the review records only the times you
@@ -707,7 +1175,7 @@ the same for every child and every install.
 | Sleep detail page | worked out fresh each time (once finished, with the settings it was saved with) | still worked out fresh each time, with the settings it was saved with and your times laid over it |
 | Editing or removing your correction | — | always allowed |
 
-**Recompute this night** (admins only) is on every night that was scored, including one that shows
+**Recompute this night** (admins only; in the **⋯** menu at the top of the sleep page) is on every night that was scored, including one that shows
 **No one in the bed**, whether the detector scored it empty or you flagged it. It works the same way
 there: the first press compares the saved summary with the current one and saves nothing, the second
 saves. A flagged night is a corrected night, so it normally opens on "locked" until you remove the correction (once its saved summary is final, as described in [A night you have corrected is locked](#a-night-you-have-corrected-is-locked)). It is
@@ -740,7 +1208,7 @@ Either:
     about this night**) and presses **Someone was in the bed**.
 
   The review can still empty a time, for an admin or a caregiver: clear **Got up for the day** (and
-  **Fell asleep** and **In bed** under **Change bedtime or fell-asleep time**), then **Save**. A
+  **Fell asleep** and **In bed** in the **Edit sleep times** sheet), then **Save**. A
   cleared time is removed; one you leave alone is kept. Emptying all three removes the correction.
   **Remove my correction** is the admin's other route, and a save sent straight to the API that
   empties all three times does the same.
@@ -888,8 +1356,8 @@ That is deliberate — it is what a future improvement gets scored against. Noth
 
 ### "No one was in the bed" says the whole night was wrong, not just a time
 
-Under the usual buttons
-is a small link for the case those don't fit at all — a night the detector scored as sleep, or as a wake
+In the **Edit sleep times** sheet (opened from the **Something else was off** row under the question)
+is a button, **No one was in the bed**, for the case those don't fit at all — a night the detector scored as sleep, or as a wake
 or two, when nobody was actually there. It changes the child's card and the sleep detail page to say
 "You said no one was in the bed", the same way a time correction already shows your own times
 instead of the detector's, and it is per night and per child — there's no house- or timezone-specific
@@ -926,7 +1394,7 @@ such button. Saving from there keeps you on that
 night and shows the receipt in place, so working back through a run of nights doesn't send you to
 re-pick the date each time. It asks the same single question as the morning card. A night the app
 called "no one in the bed" has no wake-up time to confirm, so its review opens on the time field
-with **Change bedtime or fell-asleep time** already open: give both times to make it a slept night
+with **Something else was off** under it: give both times there to make it a slept night
 (a wake-up on its own leaves it "no one in the bed", see the table under the #355 point in
 [Known limits, all documented rather than fixed](#known-limits-all-documented-rather-than-fixed)).
 
@@ -1044,6 +1512,8 @@ The limits are described beside the behaviour they affect:
 - [A microphone that looks faulty](#a-microphone-that-looks-faulty)
 - [Getting up and returning to bed](#a-child-who-gets-out-and-climbs-straight-back-in-has-not-got-up)
 - [An exit far earlier than usual](#an-exit-far-earlier-than-usual-does-not-end-the-night)
+- [Stirring minutes and the saved summary](#two-more-facts-are-saved-with-each-night)
+- [The sleep score](#known-limits-of-the-score)
 - [Motion camera sampling](#when-the-motion-camera-samples)
 - [Review corrections and locks](#known-limits-all-documented-rather-than-fixed)
 - [The detail page and a night's saved settings](#finished-nights-use-the-settings-they-were-saved-with)

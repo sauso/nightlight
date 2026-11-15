@@ -12,8 +12,9 @@ which is which.
 | **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
 | **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The **Room activity** list in the night's sleep detail, under a row you open (signed-in users only) |
 
-All three are configured under **Settings → Camera and Recording → Recording** (admin only), and all three write to the same
+All three are configured under **Settings → Camera and recording → Recording** (admin only), and all three write to the same
 place on disk — see [Where recordings are stored](#where-recordings-are-stored).
+The Recording page groups Storage, Automatic clips, Wake clips and On-demand recording under card headings, with one **Save changes** button at the bottom.
 
 ---
 
@@ -33,7 +34,7 @@ because a straight copy can only cut on a keyframe and the clip has to be exactl
 
 1. **Per camera:** open the camera's **Motion** or **Sound** settings and turn on **"Save a clip when
    triggered."**
-2. **Clip length (global):** **Settings → Camera and Recording → Recording → Automatic clips**.
+2. **Clip length (global):** **Settings → Camera and recording → Recording → Automatic clips**.
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
@@ -71,11 +72,11 @@ Alerts that have a clip show a **play button** on their thumbnail; tapping opens
 with a **Download** button. In the mobile app, Download saves the video into your phone's Downloads
 folder.
 
-To keep an alert clip, open it from an alert or from **Settings → Camera and Recording → Clip Management**,
+To keep an alert clip, open it from an alert or from **Settings → Camera and recording → Clip management**,
 then tap the lock button in the player. To keep a wake clip, open the night’s **Wake-ups**, play the clip,
 and tap the same button. Tap the open lock to unprotect it. Only admins can change protection; everyone
 can see the **Protected** badge. A protected alert clip’s Delete button is disabled until you unprotect it.
-Clip Management lists protected alert and wake clips together at the top, including clips older than its
+Clip management lists protected alert and wake clips together at the top, including clips older than its
 day list. You can play and unprotect them there. **Select all shown** skips protected clips.
 
 **A silenced camera, one outside its alert hours, or one under Hold alerts until asleep saves no clip.** A clip belongs to an alert, and
@@ -94,7 +95,7 @@ and [Silencing a camera's alerts](camera-controls.md#silencing-a-cameras-alerts-
 
 ## The "Recording and alerts" panel (per camera, read-only)
 
-**Cameras → edit** a camera → **Recording and alerts**, under Detection. It shows, in one place, what
+**Cameras → edit** a camera → **Advanced** → **Recording and alerts** (the Advanced row is closed until you open it). It shows, in one place, what
 this camera is set up to alert on and record, and whether it is **ready right now**. It is a summary
 only: it has no switch, changes nothing, and adds no setting (so there is no default or range). Admin
 only, like the page it sits on; a caregiver cannot open that page.
@@ -104,7 +105,7 @@ The two groups answer different questions, and the difference is the point:
 | | **Set up** | **Ready right now** |
 |---|---|---|
 | What it is | What is switched on, read from the camera's own settings | Whether the thing behind each switch is actually running |
-| Where it comes from | The camera's fields, the child assigned to it, and **Settings → Camera and Recording → Recording** | The server, asked each time (and again with **Check again**) |
+| Where it comes from | The camera's fields, the child assigned to it, and **Settings → Camera and recording → Recording** | The server, asked each time (and again with **Check again**) |
 | Fresh? | As of the page load | As of the last check; it is a snapshot, so press **Check again** after changing something |
 
 | Row | Set up says | Ready right now says |
@@ -191,7 +192,7 @@ watcher sees only bed motion and sound), scores **one camera** (the child's prim
 put-down and onset rules (including how it treats sound around bedtime and just after falling asleep)
 that the live watcher does not have. The live watcher tracks **every camera assigned to the child**.
 
-**Settings → Camera and Recording → Recording → Wake clips**
+**Settings → Camera and recording → Recording → Wake clips**
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
@@ -270,7 +271,7 @@ right on the frames the detector got wrong” — and those frames now collect t
 Capture a moment yourself. Because every camera keeps a rolling buffer, pressing **Record** reaches
 **backward** in time as well as forward — so you can catch something just *after* it happens.
 
-**Settings → Camera and Recording → Recording → On-demand recording**
+**Settings → Camera and recording → Recording → On-demand recording**
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
@@ -445,7 +446,7 @@ It logs this once, at start-up:
 [clips] CLIPS_DIR "<path>" is not writable (<reason>). Clip recording disabled.
 ```
 
-and **Settings → Camera and Recording → Recording → Storage** shows the path with a warning that reads "not a mapped volume"
+and **Settings → Camera and recording → Recording → Storage** shows the path with a warning that reads "not a mapped volume"
 (the same wording for either cause). Until the folder is fixed and the container restarted, no
 automatic clip, wake clip, on-demand recording or timelapse is saved; alerts still go out, without a
 clip.
@@ -463,7 +464,7 @@ volume. If it resolves to an unmapped path (the container's ephemeral layer), re
 and a clear error is logged — video is never written somewhere it would vanish on recreate or bloat the
 image.
 
-**Settings → Camera and Recording → Recording → Storage** shows where video is being written and how much space it is using, in
+**Settings → Camera and recording → Recording → Storage** shows where video is being written and how much space it is using, in
 three lines that never overlap — **Alert clips**, **Manual recordings** and **Wake clips** — plus the total
 of those three and the free space. The *Storage cap (GB)* and *Keep clips for* limits apply to alert clips
 only: manual recordings are kept until you delete them, and wake clips follow *Keep wake clips for*. The
@@ -584,7 +585,9 @@ is skipped, so recording can never be the thing that fills your disk.
 
 ⚠️ **This is not retention, and nothing here is kept, including protected clips.** Removing a child, or a camera, deletes everything
 that belongs to it, rows and files, and **cannot be undone**. The Remove dialog lists these before you
-confirm and asks "Are you sure?". The two are **different**, and so is what each leaves behind:
+confirm and asks "Are you sure?". Both are admin-only and both start from the **⋯** menu at the top right of the
+child's or the camera's settings page (**Remove child**, **Remove camera**), not from a button under Save. The two are
+**different**, and so is what each leaves behind:
 
 | | Removing a **child** | Removing a **camera** |
 |---|---|---|
@@ -646,4 +649,4 @@ cannot destroy or reconfigure.) On a caregiver's screen the delete buttons are s
 
 This is **different from retention**. The sweeps above are automatic, run on a timer, and apply on every
 install whoever is signed in; signing in as a caregiver changes nothing about what they remove. Only
-*configuring* them (Settings → Camera and Recording → Recording) is admin-only.
+*configuring* them (Settings → Camera and recording → Recording) is admin-only.

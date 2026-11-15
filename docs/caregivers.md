@@ -1,7 +1,15 @@
 # Adding caregivers
 
 Add a login for someone you trust without giving them control over every setting. Once signed in
-as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a partner or babysitter).
+as admin, go to **Settings → Users** to create additional logins (e.g. for a partner or babysitter).
+The **Users** page lists **Accounts**. **Add user** is at the bottom of the Accounts card; the form opens with a **Details** card and a back button labelled **Users**. The role choice still says **Caregiver**.
+
+**Signing a device out.** Each account that is signed in somewhere has a down arrow at the right of its row. Tap it to see that account's active sessions: the device, "(this device)" on the one you are using, and when it was last active. **Sign out** ends that one session, so that phone or browser has to log in again. The sessions are closed until you open them, and an account with no sessions has no arrow. Signing out your own current device logs you out of this one. Tapping the account itself, not the arrow, opens its details.
+
+To remove another account, open that user's page and choose the red **Remove user** button at the bottom. The confirmation explains that the person will be signed out everywhere. You cannot remove your own account.
+
+Instead of choosing a caregiver's password for them, an admin can send them a one-time link and let them choose
+their own: see [Invite a caregiver with a link](#invite-a-caregiver-with-a-link).
 
 The rule (owner decision, 2026-10-10): **a caregiver can watch and act in the moment, but cannot
 destroy or reconfigure.**
@@ -27,7 +35,7 @@ destroy or reconfigure.**
 | Manage caregiver/admin accounts and sessions | No | Yes |
 
 Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
-(Settings → Camera and Recording → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
+(Settings → Camera and recording → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
 
 ### Rearranging the live grid
 
@@ -61,18 +69,102 @@ If a camera's alerts are kept silenced, on and off, for a long time (more than a
 between renewals included), the admins are sent one notification for it, which names no one; on Pushover, ntfy
 and Gotify everyone on them gets it too. See [Long-silence alerts](camera-controls.md#long-silence-alerts).
 
-On a caregiver's screen the admin-only controls are not shown (sleep tracking, the window and the sleep
-camera are shown, greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
+On a caregiver's screen the admin-only controls are not shown (sleep tracking, the window, the sleep
+camera and Show sleep score are shown, greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
 permission gets a refusal rather than a change.
 
 The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
-Camera and Recording, integrations, users and logs) are simply hidden
+Camera and recording, integrations, users and logs) are simply hidden
 for them rather than the whole screen being off-limits.
 
 **Changing someone’s role takes effect immediately** — on their very next action, on every device
 they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
 a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
 sessions at once and signs that person out everywhere.
+
+## Invite a caregiver with a link
+
+Rather than choosing a password for someone and telling it to them, an admin can create the caregiver's account
+without one and send them a link (or show it as a QR code). They open the link, choose their own password, and are
+signed in. The link never contains a password.
+
+**Making an invite (admin):**
+
+1. Go to **Settings → Users → Add user**.
+2. At the top of the form, choose **Send an invite** (the other choice, **Set a password**, is the usual way and is
+   what the form opens on). The password box goes away and the role is fixed to **Caregiver** ("Invites are for
+   caregivers").
+3. Enter their first name, last name and username, and a photo if you like, then tap **Create and show invite**.
+   The setup guide's **Add a caregiver** step has the same two choices.
+4. The page shows a **QR code**, the **link** with a **Copy link** button, and when it runs out. Let them scan the
+   code, or send the link to that person only. Tap **Done** when you have handed it over.
+
+**The link and code are shown once, on this screen.** Nightlight keeps no copy it can show you again. The
+automatic refresh that happens when the app has been in the background for a while is held off while the invite
+shows (so switching to your messaging app to send it does not lose it), but if you reload or leave the page, you
+cannot get the same link back. Make another one instead: open the account from **Settings → Users**, and in its **Invite**
+card tap **Show a new invite**. The old link stops working the moment the new one is made. **Revoke invite**, in the
+same card (and on the invite screen, though not in the setup guide), cancels the invite without making another; the account stays and still cannot
+sign in until it has an invite or a password. The card only offers Revoke while there is a working invite, and its
+password box stays available: setting a password makes the account a normal one and ends the invite.
+
+**What the caregiver sees.** The link opens a page in their browser that says "Welcome, *first name*. Choose a
+password to finish setting up your account.", shows their username, and asks for a password (at least 8
+characters) twice. When they save, they are signed in. The link's address is replaced on the page at once, so it
+does not stay in the browser's address bar or history. If that device is already signed in as someone else, the page
+says so and asks: **Sign out** (then it carries on with the invite) or **Go to Nightlight** (nothing is replaced). If
+the password is saved but signing in straight after fails (a network hiccup, say), the page says "Your password is
+set. Sign in with your username and the password you just chose." with a link to the sign-in page; the link has been
+used up, so there is no need to ask for another.
+
+**How an invite works:**
+
+- **Caregivers only.** An invite always makes a caregiver account. An admin account is created with a password.
+- **Once, within 7 days.** The link works one time, for 7 days from when it was made (not configurable). After that,
+  or once it has been used, it shows as no longer valid, and the person needs a new one.
+- **Until it is used, the account cannot sign in at all**, and it cannot be made an admin. To make it an admin, set
+  a password for it in the same change.
+- **A new link, or none.** An admin can make a new link for an account that is still waiting (the old one stops
+  working at once) or cancel the invite without making another. Setting a password for the account yourself also
+  cancels it. Removing the account removes its invite.
+- **Where the link leads.** It uses the address you are using when you make it, so it only works where that address
+  works: a home-network address works only at home.
+- **The phone app.** The link opens Nightlight in a browser. After choosing a password there, sign in to the
+  Nightlight app with the username shown on that page and the new password.
+- **The accounts list shows where each invite stands.** A small label under the name reads **Invite pending** (a
+  working link exists), **No active invite** (the account is waiting but has no link that works: it was cancelled,
+  ran out, or its password was set another way; make a new link or set its password yourself), and **Joined** with
+  the date, for 7 days after an invite was used. An account with a password and no recent invite has no label. An
+  account's own page shows the same state in its **Invite** card ("Waiting for *name* to choose a password" or "No
+  usable invite"). Dates and times are in your home time zone, as everywhere else in Nightlight.
+- **Nothing in the demo.** The public read-only demo refuses these actions like every other change.
+- **"Just a moment. If you just chose a password, try signing in with it."** The page shows this when another
+  request for the same link is still being processed (usually a second tap on the button). The password they chose
+  has most likely worked: ask them to sign in with it.
+- **"Too many attempts".** If the link's page says this, wait 15 minutes and open the link again. Each network
+  address gets 100 failed tries at invite links per 15 minutes, and everyone who reaches Nightlight through the same
+  reverse proxy, or through Tailscale, can share one address, so someone else's failed tries can use it up. Signing
+  in is not affected.
+
+**What a leaked link gives.** Anyone who has the link before it is used can choose the password and sign in as that
+caregiver: watch and listen to the cameras and talk through them, record, change children's names and photos, answer
+the morning review, and everything else in the caregiver column of [the table above](#what-caregivers-and-admins-can-do).
+Never an admin, and never for more than 7 days or more than once. Send it only to the person it is for. If it went
+somewhere else, cancel it (or make a new one) before they open it.
+
+If the person tells you the link no longer works, first ask whether they have just chosen a password with it. If so,
+ask them to sign in with that password: a second tap on the button, or a page that lost its answer, can make a link
+that has just worked look used. If they never chose a password with it, someone else may have: remove that account.
+
+### After restoring a backup, or going back to an older version
+
+- **A restored backup can bring an invite back.** A backup taken while an invite was open still holds it open, so
+  restoring that backup makes the link work again, even if it was used or cancelled since, until its 7 days run out.
+  After a restore, look at your accounts and cancel any invite you do not expect.
+- **An older version knows nothing about invites.** If you go back to an older version and set a password there for
+  an account that was still waiting, then upgrade again, that account still counts as waiting and cannot sign in
+  (and its link will not replace that password). Set its password again from the current version: that finishes the
+  account and cancels the invite.
 
 ## `SESSION_TTL_DAYS` — how long a sign-in lasts
 

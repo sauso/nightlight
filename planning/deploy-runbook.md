@@ -23,8 +23,9 @@ you read when something does not look right, and it records the traps that have 
 | ☐ | `node scripts/check-changelog.mjs` exit 0 | |
 | ☐ | `df -h /c \| tail -1` shows > 2 GB free | C: hit 100% mid-release once; fastest safe fix is `npm cache clean --force`. |
 
-**Access.** `ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100`. Containers: **`nightlight`** (production)
-and **`nightlight-dev`** (staging), both on `br0.10` with their own routable LAN IPs.
+**Access.** `ssh -i ~/.ssh/<key-file> root@<server-ip>` (the real address and key file name are kept in the
+owner's private notes, not in this repo). Containers: **`nightlight`** (production) and **`nightlight-dev`**
+(staging), each on its own network address.
 
 ⚠️ **Prod database writes are blocked to the agent** (reads are fine), as are prod API writes. Anything
 that needs one — pressing a button, changing a setting — is handed to the owner to do in the app.
@@ -57,7 +58,7 @@ gh run watch <id> --repo sauso/nightlight --exit-status     # GATE: must end "su
 
 ### 1.3 Deploy
 ```bash
-ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 'bash /boot/config/nightlight-deploy.sh dev'
+ssh -i ~/.ssh/<key-file> root@<server-ip> 'bash /boot/config/nightlight-deploy.sh dev'
 ```
 
 ⚠️⚠️ **NEVER hand-roll `docker run`.** It recreates the container without the
@@ -67,7 +68,7 @@ this cannot happen by accident.
 
 ### 1.4 Verify — and mind the trap in the script's own output
 ```bash
-ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 '
+ssh -i ~/.ssh/<key-file> root@<server-ip> '
   c=nightlight-dev
   docker inspect -f "managed={{index .Config.Labels \"net.unraid.docker.managed\"}}" $c
   docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" $c | grep NIGHTLIGHT_GIT_SHA
@@ -130,14 +131,16 @@ While on 0.x: **minor** if `[Unreleased]` contains any `### Added`, else **patch
 
 ### 2.2 Release-prep, on a branch off `dev`
 1. `CHANGELOG.md`: leave an **empty** `## [Unreleased]` on top, then `## [x.y.z] - YYYY-MM-DD`
-   (today's date, Melbourne local) above what was under Unreleased.
+   (today's date in the maintainer's local time) above what was under Unreleased.
    ⚠️ **Do not delete the previous top version header** — that slip orphaned `[0.24.0]` in #147.
    ⚠️ **Merge duplicate type headings** while you are in there. A release batch is assembled from many
    PRs and each adds its own `### Added` without seeing the others. `check-changelog.mjs` gates it.
 2. Bump `version` in **both** `backend/package.json` and `frontend/package.json`.
-3. **Prune `planning/ROADMAP.md` in the same commit** — anything this release ships comes out of it.
-   This is the only checkpoint that catches drift, and skipping it is how two sections sat there
-   describing already-shipped features after 0.25.0.
+3. **Prune `planning/ROADMAP.md` in the same commit** — anything this release ships is **moved to
+   `planning/ROADMAP-archive.md`** under the same section number and sub-headings, leaving a one-line
+   stub in the roadmap that names the version (code comments cite `ROADMAP §x` as text, so a section is
+   moved, never deleted). This is the only checkpoint that catches drift, and skipping it is how two
+   sections sat there describing already-shipped features after 0.25.0.
 
 ### 2.3 Land it, then promote
 `release-x.y.z` → PR into `dev` → squash-merge. Then the `dev → main` PR.
@@ -169,8 +172,8 @@ publication finds nothing. Publishing earlier would disclose with no released fi
 ## 3. Production
 
 ```bash
-ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 'bash /boot/config/nightlight-deploy.sh prod'
-ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 'bash /boot/config/nightlight-deploy.sh dev'  # resync staging
+ssh -i ~/.ssh/<key-file> root@<server-ip> 'bash /boot/config/nightlight-deploy.sh prod'
+ssh -i ~/.ssh/<key-file> root@<server-ip> 'bash /boot/config/nightlight-deploy.sh dev'  # resync staging
 ```
 
 Verify exactly as in §1.4, against the **release commit** — remembering that the OCI label is empty on
@@ -227,4 +230,4 @@ not, so read the release's migration block before rolling back across one.
 - Fast-forward local `dev` in both repos.
 - Update memory: PROD version, what shipped, and any gate that caught something.
 - Report: version, the prod SHA, staging resynced, release URL, branches cleaned, which roadmap items
-  closed, **what the definition-of-done gate found**, and anything skipped.
+  closed and were moved to `ROADMAP-archive.md`, **what the definition-of-done gate found**, and anything skipped.

@@ -38,7 +38,7 @@ for (const ff of FORM_FACTORS) {
 
     // The add-camera form (filled with example values, not saved).
     await page.goto('/#/cameras');
-    await page.getByRole('button', { name: '+ Add camera' }).click();
+    await page.getByRole('button', { name: 'Add camera', exact: true }).click();
     // #957: the full form starts in a collapsed manual card; no scan wait is needed.
     await page.getByRole('button', { name: /Add a camera manually/ }).click();
     await page.getByLabel('Name', { exact: true }).fill('Nursery cam');

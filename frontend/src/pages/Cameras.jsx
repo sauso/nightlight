@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Check, Pencil, Plus, Trash2, Power } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
-import Modal from '../components/Modal.jsx';
 import BreathingDot from '../components/BreathingDot.jsx';
+import MoreMenu from '../components/MoreMenu.jsx';
+import RemoveCameraDialog from '../components/RemoveCameraDialog.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import { loadState } from '../lib/loadState.js';
+import { cameraState } from '../lib/cameraStatus.js';
 
 // Cameras management (its own top-level tab). Editing/adding a camera happens on its own routed
 // screen (CameraSettings.jsx); this page keeps the at-a-glance list plus quick inline actions
@@ -79,37 +82,54 @@ export default function Cameras() {
           <LoadFailed what="cameras" error={contextError} onRetry={refresh} stale={listState === 'stale'} />
         )}
         {listState === 'loading' && <div className="empty-state">Loading…</div>}
-        {listState === 'empty' && <div className="empty-state">No cameras added yet.</div>}
+        {listState !== 'loading' && listState !== 'error' && (
+          <h2 className="section-title cameras-title">Your cameras <span>{cameras.length}</span></h2>
+        )}
+        {listState === 'empty' && (isAdmin ?
+          <section className="night cameras-empty"><h2>Add your first camera</h2>
+            <p>Find cameras on your network or enter their details yourself.</p>
+            <button className="btn btn-primary" onClick={() => navigate('/cameras/new', BACK)}><Plus size={18} aria-hidden="true" />Add camera</button>
+          </section> : <div className="empty-state">No cameras added yet.</div>)}
 
         {cameras.map((cam) => (
-          <div className={`card cam-card${cam.disabled ? ' cam-card--off' : ''}`} key={cam.id}>
-            <div className="cam-card__head">
-              <div className="cam-card__title">
-                <BreathingDot status={cam.disabled ? 'offline' : cam.statusLevel || 'connecting'} />
-                <span className="cam-card__name">{cam.name}</span>
+          <div className="dev-card camera-device" key={cam.id}>
+            <div className="dev-card__main">
+              <div className="dev-card__body">
+                <div className="dev-card__state">
+                  {cameraState(cam).dot === 'neutral' ? <span className="dot--neutral" aria-hidden="true" />
+                    : <BreathingDot status={cameraState(cam).dot} />}
+                  {cameraState(cam).word}
+                </div>
+                <div className="dev-card__name">{cam.name}</div>
+                {cam.rtsp_display && <div className="dev-card__line">{cam.rtsp_display}</div>}
+                {!cam.disabled && (cam.detect_motion_enabled != null || cam.detect_sound_enabled != null) &&
+                  <div className="dev-card__line camera-device__detection">
+                    {cam.detect_motion_enabled != null && `Motion ${cam.detect_motion_enabled ? 'on' : 'off'}`}
+                    {cam.detect_motion_enabled != null && cam.detect_sound_enabled != null && ' · '}
+                    {cam.detect_sound_enabled != null && `Sound ${cam.detect_sound_enabled ? 'on' : 'off'}`}
+                  </div>}
+                {(cam.discovery_source === 'onvif' || cam.ptz_supported || cam.backchannel_supported === 'yes') &&
+                  <div className="camera-device__chips">
+                    {cam.discovery_source === 'onvif' && <span><Check size={13} aria-hidden="true" />ONVIF</span>}
+                    {!!cam.ptz_supported && <span><Check size={13} aria-hidden="true" />PTZ</span>}
+                    {cam.backchannel_supported === 'yes' && <span><Check size={13} aria-hidden="true" />Two-way audio</span>}
+                  </div>}
               </div>
               {isAdmin && (
-                <div className="cam-card__actions">
-                  <button className="icon-btn" onClick={() => toggleEnabled(cam)} disabled={togglingId === cam.id}>
-                    {togglingId === cam.id ? '…' : cam.disabled ? 'Enable' : 'Disable'}
-                  </button>
-                  <button className="icon-btn" onClick={() => navigate(`/cameras/${cam.id}`, BACK)}>Edit</button>
-                  <button className="icon-btn" onClick={() => { setRemoveError(''); setRemoving(cam); }}>Remove</button>
-                </div>
+                <MoreMenu className="more-menu--card" label={`More for ${cam.name}`} menuLabel={`Actions for ${cam.name}`}>
+                  <button role="menuitem" className="more-menu__item" onClick={() => navigate(`/cameras/${cam.id}`, BACK)}><Pencil size={16} aria-hidden="true" />Edit camera</button>
+                  <button role="menuitem" className="more-menu__item" disabled={togglingId === cam.id} onClick={() => toggleEnabled(cam)}><Power size={16} aria-hidden="true" />{cam.disabled ? 'Enable camera' : 'Disable camera'}</button>
+                  <div className="dev-card__menu-divider" />
+                  <button role="menuitem" className="more-menu__item dev-card__delete" onClick={() => { setRemoveError(''); setRemoving(cam); }}><Trash2 size={16} aria-hidden="true" />Remove camera</button>
+                </MoreMenu>
               )}
             </div>
-            {cam.rtsp_display && <div className="camera-tile__sub cam-card__addr">{cam.rtsp_display}</div>}
-            <div className="cam-badge-row">
-              <span className={`cam-badge ${cam.discovery_source === 'onvif' ? 'cam-badge--ok' : 'cam-badge--bad'}`}>ONVIF</span>
-              <span className={`cam-badge ${cam.ptz_supported ? 'cam-badge--ok' : 'cam-badge--bad'}`}>PTZ</span>
-              <span className={`cam-badge ${cam.backchannel_supported === 'yes' ? 'cam-badge--ok' : 'cam-badge--bad'}`}>Two-way Audio</span>
-            </div>
-            <div className="field" style={{ marginBottom: 0, marginTop: 12 }}>
+            <div className="camera-device__foot">
               {/* htmlFor/id (#381): without it the label is not associated with the select, so a screen reader
                   announced an unnamed combobox. The id carries the camera id because there is one select per
                   card and ids must be unique on the page. The caregiver's plain text has no control to
                   point at, so it gets no `for` (an orphan `for` would label nothing). */}
-              <label htmlFor={isAdmin ? `assign-${cam.id}` : undefined}>Assigned to</label>
+              {isAdmin ? <label htmlFor={`assign-${cam.id}`}>Assigned to</label> : <span>Assigned to</span>}
               {/* Admin-only (#552): which child a camera belongs to decides whether its nights are tracked,
                   so a caregiver sees the assignment but cannot change it (the server refuses it). */}
               {isAdmin ? (
@@ -124,25 +144,13 @@ export default function Cameras() {
           </div>
         ))}
 
-        {isAdmin && listState !== 'loading' && listState !== 'error' && (
-          <button className="btn btn-primary" onClick={() => navigate('/cameras/new', BACK)}>+ Add camera</button>
+        {isAdmin && listState !== 'loading' && listState !== 'error' && listState !== 'empty' && (
+          <button className="btn btn-primary cameras-add" onClick={() => navigate('/cameras/new', BACK)}><Plus size={18} aria-hidden="true" />Add camera</button>
         )}
       </main>
 
-      {removing && (
-        <Modal title="Remove camera" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(null))}>
-          <p style={{ marginTop: 0 }}>
-            Remove <strong>{removing.name}</strong>? This stops its stream and deletes it from Nightlight.
-            It can't be undone (you can always add it again).
-          </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setRemoving(null)} disabled={removeBusy}>Cancel</button>
-            <button className="btn btn-danger" type="button" onClick={confirmRemove} disabled={removeBusy}>
-              {removeBusy ? 'Removing…' : 'Remove'}
-            </button>
-          </div>
-        </Modal>
-      )}
+      {removing && <RemoveCameraDialog camera={removing} error={removeError} busy={removeBusy}
+        onClose={() => setRemoving(null)} onConfirm={confirmRemove} />}
     </>
   );
 }

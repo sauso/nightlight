@@ -4,18 +4,27 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import ModalActions from '../components/ModalActions.jsx';
 import AvatarEditor from '../components/AvatarEditor.jsx';
 import Modal from '../components/Modal.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import { loadDraft, clearDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
+import { holdReload } from '../lib/reloadGuard.js';
+import InvitePanel from '../components/InvitePanel.jsx';
 
 const BLANK = { username: '', password: '', role: 'caregiver', first_name: '', last_name: '', photo: null };
 
 // What a reload-surviving draft may store (#377). Not the password (a secret) and not the photo (an existing
 // account's photo saves the moment it is chosen, and a data URL is not what a draft keeps).
 const DRAFT_FIELDS = ['username', 'first_name', 'last_name', 'role'];
+
+// How a NEW account gets its password (#1094). 'password': the admin types one (the long-standing way, and the default so nothing
+// changes for anyone who does not look). 'invite': the admin hands over a one-time link or QR code and the person chooses their own.
+// Deliberately NOT in DRAFT_FIELDS: a draft that reopened the page already on "invite" would hide the password box a person expected.
+const MODE_PASSWORD = 'password';
+const MODE_INVITE = 'invite';
 
 // The screen is reused across caregivers (one route, `:id`). Keyed by the id so each caregiver gets a FRESH copy of
 // the whole component: a draft, a baseline or a "loaded" flag from one account can then never be written under
@@ -26,7 +35,7 @@ export default function UserSettings() {
 }
 
 // Add / edit a caregiver on its own routed screen (replaces the modal), reached from the Family
-// hub or User management. Admin-only (gated by the route). The username stays editable here (an
+// hub or Users. Admin-only (gated by the route). The username stays editable here (an
 // admin action), unlike self-service on the Account screen.
 function UserSettingsForm() {
   const { id } = useParams();
@@ -63,6 +72,22 @@ function UserSettingsForm() {
   // invariant either way (routes/auth.js's keepingAnAdmin) - this just explains it before a demotion
   // is even attempted, instead of the caregiver-list screen only learning about it from a 409.
   const [onlyAdmin, setOnlyAdmin] = useState(false);
+  // #1094. New accounts only: which way the password is set (see MODE_* above).
+  const [mode, setMode] = useState(MODE_PASSWORD);
+  const inviteMode = isNew && mode === MODE_INVITE;
+  // The invite just made or re-issued, while its panel is on screen: { userId, token, expiresAt, firstName }. The token exists ONLY
+  // here: the server answers it once, it is never stored or logged, and a reload loses it (the admin makes a new one).
+  const [invitePanel, setInvitePanel] = useState(null);
+  // An existing account that has not chosen a password yet (password_set === false in GET /auth/users): `null` for everyone else.
+  // `expires` is the live invite's expiry, or null when there is none ("no usable invite": expired, revoked or never made).
+  const [pending, setPending] = useState(null);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const panelOpen = !!invitePanel;
+
+  // While the panel shows, the page must not reload itself after a spell in the background (lib/reloadGuard.js, the same hold the
+  // two-factor set-up panel takes): the token cannot be fetched again, and on a phone the admin leaves for a messaging app to send
+  // the link and comes back. The cleanup releases it on Done, Revoke or leaving the page.
+  useEffect(() => (panelOpen ? holdReload() : undefined), [panelOpen]);
 
   // Persist just the photo immediately for an existing caregiver (no Save press). A new caregiver
   // has no record yet, so their photo rides along when the form is first saved.
@@ -97,13 +122,14 @@ function UserSettingsForm() {
     persistPhoto(null);
   }
 
-  const back = { to: '/settings/users', label: 'Caregivers' };
+  const back = { to: '/settings/users', label: 'Users' };
 
   useEffect(() => {
     // Reset immediately, not just on success below: this effect re-runs when `id` changes (this is a
     // routed screen reused across caregivers), and the previous account's restriction must not still
     // be showing while the new one's data is still loading.
     setOnlyAdmin(false);
+    setPending(null);
     if (isNew) return;
     api.get('/auth/users').then((users) => {
       const u = users.find((x) => x.id === id);
@@ -116,13 +142,16 @@ function UserSettingsForm() {
         setFormReady(true);
         setMfaEnabled(!!u.mfa_enabled);
         setOnlyAdmin(u.role === 'admin' && users.filter((x) => x.role === 'admin').length === 1);
+        // `=== false`, not falsy: a server older than this feature sends no `password_set`, and that account is a normal one.
+        setPending(u.password_set === false ? { expires: u.invite_expires_at ?? null } : null);
       }
       setLoaded(true);
     }).catch((err) => { setError(err.message); setLoaded(true); });
   }, [id, isNew]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // True while anything on screen differs from what is saved, INCLUDING a typed password (never stored).
-  const unsaved = useFormDraft({ key: draftKey, allow: DRAFT_FIELDS, form, baseline, ready: formReady, secrets: [form.password] });
+  // An invite-mode form has no password box, so a password typed before switching is not an unsaved edit.
+  const unsaved = useFormDraft({ key: draftKey, allow: DRAFT_FIELDS, form, baseline, ready: formReady, secrets: inviteMode ? [] : [form.password] });
 
   // Back to what is saved. An EXISTING account's photo is left as it is: it already saved on its own the moment it
   // was chosen. A NEW account has nothing saved, so its chosen photo is part of what is being discarded.
@@ -136,6 +165,18 @@ function UserSettingsForm() {
     setBusy(true);
     setError('');
     try {
+      if (inviteMode) {
+        // No `password` key at all (the server refuses both together) and the role is fixed: an invite can only make a caregiver, so
+        // a leaked link can never be an admin takeover (the server enforces it; this just does not offer it).
+        const created = await api.post('/auth/users', {
+          username: form.username, first_name: form.first_name, last_name: form.last_name, photo: form.photo,
+          role: 'caregiver', invite: true,
+        });
+        // The account exists now, so the draft is stale. Cleared outright: this screen stays up (the panel), so nothing else would.
+        clearDraft(draftKey);
+        setInvitePanel({ userId: created.id, token: created.invite.token, expiresAt: created.invite.expires_at, firstName: form.first_name.trim() });
+        return;
+      }
       if (isNew) {
         await api.post('/auth/users', form);
       } else {
@@ -152,6 +193,38 @@ function UserSettingsForm() {
       setError(err.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Make a fresh invite for an account that has not chosen a password. The old link stops working the moment this succeeds.
+  async function reissueInvite() {
+    setInviteBusy(true);
+    setError('');
+    try {
+      const res = await api.post(`/auth/users/${id}/invite`);
+      setPending({ expires: res.invite.expires_at });
+      setInvitePanel({ userId: id, token: res.invite.token, expiresAt: res.invite.expires_at, firstName: form.first_name.trim() });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
+  // Revoke the open invite: the account stays, still unable to sign in, until a new invite is made or a password is set.
+  async function revokeInvite(userId, { leave }) {
+    // Busy while the DELETE is out, like reissueInvite: otherwise both Invite-card buttons stay live and a second click sends a
+    // duplicate revoke or races a new invite against it (review of #1096).
+    setInviteBusy(true);
+    setError('');
+    try {
+      await api.del(`/auth/users/${userId}/invite`);
+      if (leave) { navigate(back.to); return; }
+      setPending((p) => (p ? { ...p, expires: null } : p));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setInviteBusy(false);
     }
   }
 
@@ -189,16 +262,23 @@ function UserSettingsForm() {
 
   return (
     <>
-      <AppHeader title={isNew ? 'Add caregiver' : (fullName || 'Caregiver')} back={back} />
+      <AppHeader title={isNew ? 'Add user' : (fullName || 'Caregiver')} back={back} />
       <main className="app-main">
         {!loaded ? (
           <div className="empty-state">Loading…</div>
+        ) : invitePanel ? (
+          <>
+            {error && <div className="error-banner" role="alert">{error}</div>}
+            <InvitePanel token={invitePanel.token} expiresAt={invitePanel.expiresAt} firstName={invitePanel.firstName}
+              onDone={() => navigate(back.to)}
+              onRevoke={() => revokeInvite(invitePanel.userId, { leave: true })} />
+          </>
         ) : (
           <form onSubmit={save}>
             {error && <div className="error-banner">{error}</div>}
             {unsaved && (
               <UnsavedNotice restored={restored} onDiscard={discardDraft}
-                note={isNew || form.password ? 'The password is not kept if this page reloads; enter it again.' : ''} />
+                note={(isNew && !inviteMode) || form.password ? 'The password is not kept if this page reloads; enter it again.' : ''} />
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -215,7 +295,7 @@ function UserSettingsForm() {
 
             {/* Identity fields live in their own titled tile, matching the other settings pages. */}
             <div className="card">
-              <div className="card-title">Caregiver details</div>
+              <h2 className="card-heading">Details</h2>
               <div className="onvif-box__row">
                 <div className="field">
                   <label htmlFor="u-first">First name</label>
@@ -233,16 +313,38 @@ function UserSettingsForm() {
                   required autoCapitalize="none" autoCorrect="off" spellCheck={false} />
               </div>
 
-              <div className="field">
-                <label htmlFor="u-password">{isNew ? 'Password' : 'Reset password (optional)'}</label>
-                <input id="u-password" type="password" minLength={8} value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  required={isNew} placeholder={isNew ? '' : 'Leave blank to keep current password'} />
-              </div>
+              {isNew && (
+                <div className="field">
+                  <div className="seg-track" role="group" aria-label="How they get a password">
+                    <button type="button" aria-pressed={!inviteMode} className={`seg-track__btn${!inviteMode ? ' seg-track__btn--active' : ''}`}
+                      onClick={() => setMode(MODE_PASSWORD)}>Set a password</button>
+                    <button type="button" aria-pressed={inviteMode} className={`seg-track__btn${inviteMode ? ' seg-track__btn--active' : ''}`}
+                      // The typed password is dropped: a hidden field must not keep a secret the person can no longer see.
+                      onClick={() => { setMode(MODE_INVITE); setForm((f) => ({ ...f, password: '' })); }}>Send an invite</button>
+                  </div>
+                  {inviteMode && (
+                    <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                      You get a link and a QR code to give them. They open it and choose their own password.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!inviteMode && (
+                <div className="field">
+                  <label htmlFor="u-password">{isNew ? 'Password' : 'Reset password (optional)'}</label>
+                  <input id="u-password" type="password" minLength={8} value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    required={isNew} placeholder={isNew ? '' : 'Leave blank to keep current password'} />
+                </div>
+              )}
 
               <div className="field" style={{ marginBottom: 0 }}>
                 <label htmlFor="u-role">Role</label>
-                <select id="u-role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+                {/* An invite always makes a caregiver, so the select shows that and cannot be changed (the server refuses an
+                    invite for an admin: a leaked link must never be an admin account). */}
+                <select id="u-role" value={inviteMode ? 'caregiver' : form.role} disabled={inviteMode}
+                  onChange={(e) => setForm({ ...form, role: e.target.value })}>
                   {/* Disabled, not omitted: the account IS a caregiver-eligible role in general, just not
                       from here while it's the only admin - a caregiver option no one can currently pick
                       would be more confusing than one that's visibly there but greyed out. */}
@@ -250,7 +352,9 @@ function UserSettingsForm() {
                   <option value="admin">Admin</option>
                 </select>
                 <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                  Caregivers can view cameras and manage children/cameras, but can't manage accounts or change app-wide settings.
+                  {inviteMode
+                    ? 'Invites are for caregivers.'
+                    : 'Caregivers can view cameras and manage children/cameras, but can\'t manage accounts or change app-wide settings.'}
                 </div>
                 {onlyAdmin && (
                   <div className="camera-tile__sub" style={{ marginTop: 6 }}>
@@ -260,9 +364,29 @@ function UserSettingsForm() {
               </div>
             </div>
 
+            {!isNew && pending && (
+              <div className="card">
+                <h2 className="card-heading">Invite</h2>
+                <div className="camera-tile__sub" style={{ marginBottom: 10 }} role="status">
+                  {pending.expires
+                    ? `Waiting for ${form.first_name.trim() || form.username} to choose a password`
+                    : 'No usable invite'}
+                </div>
+                <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+                  This account cannot sign in yet. Setting a password below makes it a normal account and ends any open invite.
+                </div>
+                <div className="form-actions" style={{ marginTop: 0 }}>
+                  <button className="btn btn-secondary" type="button" onClick={reissueInvite} disabled={inviteBusy}>Show a new invite</button>
+                  {pending.expires && (
+                    <button className="btn btn-secondary" type="button" onClick={() => revokeInvite(id, { leave: false })} disabled={inviteBusy}>Revoke invite</button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {!isNew && mfaEnabled && (
               <div className="card">
-                <div className="card-title">Two-factor</div>
+                <h2 className="card-heading">Two-factor</h2>
                 <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
                   This account has two-factor enabled. If they've lost their authenticator and backup
                   codes, reset it so they can sign in with just their password and set it up again.
@@ -274,13 +398,26 @@ function UserSettingsForm() {
             )}
 
             {/* Save sits below the two-factor tile, per the settings layout. */}
-            <button className="btn btn-primary" type="submit" disabled={busy}>
-              {busy ? 'Saving…' : isNew ? 'Add caregiver' : 'Save changes'}
-            </button>
-            {!isNew && id !== me?.id && (
-              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => { setRemoveError(''); setRemoving(true); }}>
-                Remove caregiver
+            <div className="form-actions">
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {inviteMode ? (busy ? 'Creating…' : 'Create and show invite') : busy ? 'Saving…' : isNew ? 'Add user' : 'Save changes'}
               </button>
+            </div>
+
+            {/* Remove user is a visible red button at the bottom, not in a header menu: PR #1088 moved it into a "⋯" menu
+                and the owner could not find it ("lost the ability to delete a caregiver"). Remove child and Remove camera
+                stay in their header menus. Three gates, all required:
+                  - !isNew: a new account has nothing to remove.
+                  - formReady: the form only exists once the GET found the record, so an admin cannot confirm and send a
+                    DELETE for someone the page has not shown yet (PR #1088 review; the form being inside the loaded branch
+                    is what enforces this, formReady is kept explicit so moving the button cannot drop the gate).
+                  - id !== me?.id: never offered on your own account (the server refuses it too). */}
+            {!isNew && formReady && id !== me?.id && (
+              <div className="form-actions" style={{ marginTop: 10 }}>
+                <button className="btn btn-danger" type="button" onClick={() => { setRemoveError(''); setRemoving(true); }}>
+                  Remove user
+                </button>
+              </div>
             )}
           </form>
         )}
@@ -292,24 +429,24 @@ function UserSettingsForm() {
             Turn off two-factor for <strong>{fullName}</strong>? They'll be able to sign in with just their
             password and will need to set two-factor up again.
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setResettingMfa(false)} disabled={mfaResetBusy}>Cancel</button>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setResettingMfa(false)} disabled={mfaResetBusy}>Cancel</button>
             <button className="btn btn-danger" type="button" onClick={confirmResetMfa} disabled={mfaResetBusy}>
               {mfaResetBusy ? 'Resetting…' : 'Reset two-factor'}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
 
       {removing && (
-        <Modal title="Remove caregiver" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
+        <Modal title="Remove user" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
           <p style={{ marginTop: 0 }}>Remove <strong>{fullName}</strong>? They'll be signed out everywhere and can no longer log in.</p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>
             <button className="btn btn-danger" type="button" onClick={confirmRemove} disabled={removeBusy}>
               {removeBusy ? 'Removing…' : 'Remove'}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
     </>

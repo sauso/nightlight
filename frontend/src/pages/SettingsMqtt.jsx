@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import { loadDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
@@ -131,19 +131,15 @@ export default function SettingsMqtt() {
             note="The password and the certificate text are not kept if this page reloads; enter them again." />
         )}
 
-        <form onSubmit={save}>
-          <div className="card">
-            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+        <div className="page-intro">
               Optional — connects to your existing MQTT broker (e.g. from Home Assistant /
               Zigbee2MQTT) to show temperature and humidity on each camera.
-            </div>
-            <label className="log-viewer__toggle" style={{ marginBottom: 14 }}>
-              <Switch
-                checked={!!form.mqtt_enabled}
-                onChange={(e) => setForm({ ...form, mqtt_enabled: e.target.checked })}
-              />
-              Enable MQTT
-            </label>
+        </div>
+        <form onSubmit={save}>
+          <div className="card">
+            <h2 className="card-heading">Broker</h2>
+            <SwitchRow label="Enable MQTT" checked={!!form.mqtt_enabled}
+              onChange={(e) => setForm({ ...form, mqtt_enabled: e.target.checked })} />
             <div className="field">
               <label htmlFor="mqtt-host">Broker host</label>
               <input
@@ -188,30 +184,18 @@ export default function SettingsMqtt() {
             </div>
 
             {/* TLS (#537). Off by default: a plain mqtt:// connection, as before. */}
-            <label className="log-viewer__toggle" style={{ marginBottom: 6 }}>
-              <Switch
-                checked={!!form.mqtt_tls}
-                onChange={(e) => setForm({ ...form, mqtt_tls: e.target.checked })}
-              />
-              Use TLS (mqtts://)
-            </label>
-            <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
+            <SwitchRow label="Use TLS (mqtts://)" checked={!!form.mqtt_tls}
+              onChange={(e) => setForm({ ...form, mqtt_tls: e.target.checked })}>
               Encrypts the connection, including the username and password. Your broker must have TLS turned on,
               usually on port 8883. With the port left blank, 8883 is used when this is on.
-            </div>
+            </SwitchRow>
             {form.mqtt_tls && (
               <>
-                <label className="log-viewer__toggle" style={{ marginBottom: 6 }}>
-                  <Switch
-                    checked={!!form.mqtt_tls_verify}
-                    onChange={(e) => setForm({ ...form, mqtt_tls_verify: e.target.checked })}
-                  />
-                  Verify the broker's certificate
-                </label>
-                <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
+                <SwitchRow label="Verify the broker's certificate" checked={!!form.mqtt_tls_verify}
+                  onChange={(e) => setForm({ ...form, mqtt_tls_verify: e.target.checked })}>
                   Keep this on. Turned off, the connection is still encrypted but Nightlight no longer checks who
                   it is talking to, so anyone on your network who answers as the broker is trusted.
-                </div>
+                </SwitchRow>
                 <div className="field" style={{ marginBottom: 0 }}>
                   <label htmlFor="mqtt-tls-ca">CA certificate (optional)</label>
                   <textarea
@@ -251,9 +235,11 @@ export default function SettingsMqtt() {
             </div>
           )}
 
-          <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
+          <div className="form-actions">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </form>
       </main>
     </>

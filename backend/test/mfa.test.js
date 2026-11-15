@@ -3,6 +3,7 @@
 // meaning. Each of those cost real debugging time, so each gets a test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
 
@@ -98,6 +99,66 @@ test('★ verifyToken allows one time-step of drift, and no more', () => {
   assert.equal(mfa.verifyToken(secret, wayOff), false, 'five minutes ago must not be accepted');
 });
 
+// --- independent of otplib: RFC 6238 computed with node:crypto ----------------------------------
+// Every test above generates its codes with otplib's own generateSync, so a change in the library that moved BOTH
+// the generator and the verifier the same way (a different truncation, step or algorithm) would pass them all while
+// every real authenticator app stopped working. This reference is RFC 6238 (HMAC-SHA1, 30 s step) written out with
+// node:crypto, so a library upgrade has to agree with the standard, not just with itself (found while reviewing the
+// otplib 13.5.0 -> 13.6.0 bump: a side-by-side run of both versions agreed on 444 cases, and this pins the standard).
+function rfc6238(keyBytes, epochSec, digits = 6) {
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(epochSec / 30)));
+  const h = crypto.createHmac('sha1', keyBytes).update(counter).digest();
+  const o = h[h.length - 1] & 15;
+  const n = ((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
+  return String(n % 10 ** digits).padStart(digits, '0');
+}
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function base32(buf) {
+  let bits = 0; let val = 0; let out = '';
+  for (const byte of buf) {
+    val = (val << 8) | byte; bits += 8;
+    while (bits >= 5) { bits -= 5; out += BASE32[(val >> bits) & 31]; }
+  }
+  return bits > 0 ? out + BASE32[(val << (5 - bits)) & 31] : out;
+}
+
+test('★ the RFC 6238 reference itself is right: the published SHA1 vector for 59 s is 94287082', () => {
+  assert.equal(rfc6238(Buffer.from('12345678901234567890'), 59, 8), '94287082');
+});
+
+test('★ a code computed from RFC 6238 (not from otplib) is accepted for its own step; a code two or three steps off is not', () => {
+  // Twenty random keys, not one: a fault in the dynamic-truncation step (the `& 15` offset) only shows for some keys
+  // (about 1 in 16 would hide it with a single key; found by mutating a scratch copy of the library in the review of #1033).
+  const keys = Array.from({ length: 20 }, () => crypto.randomBytes(20));
+  // matchTokenStep reads the real clock itself; if a 30 s boundary passes between this test's clock read and its own,
+  // the edges (one step back / ahead) shift by a step, so such a run is repeated rather than reported as a failure.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const now = Math.floor(Date.now() / 1000);
+    const step = Math.floor(now / 30);
+    const got = keys.map((key) => [0, -30, 30, -60, 60, -90, 90].map((offset) => mfa.matchTokenStep(base32(key), rfc6238(key, now + offset))));
+    if (Math.floor(Date.now() / 1000 / 30) !== step) continue;
+    // 0 = its own step; +-30 s = one step either side, accepted and reported as that step; +-60 s (two steps) and +-90 s refused:
+    // the tolerance is exactly one step (epochTolerance 30), so 60 would accept two steps and was found to survive a mutant before.
+    for (const row of got) assert.deepEqual(row, [step, step - 1, step + 1, null, null, null, null]);
+    return;
+  }
+  assert.fail('the clock crossed a 30 s step boundary on every attempt');
+});
+
+test('★ the same holds for a legacy 80-bit secret (relaxed guardrails) checked against the RFC reference', () => {
+  const key = crypto.randomBytes(10);
+  assert.equal(mfa.isLegacySecret(base32(key)), true);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const now = Math.floor(Date.now() / 1000);
+    const got = mfa.matchTokenStep(base32(key), rfc6238(key, now));
+    if (Math.floor(Date.now() / 1000 / 30) !== Math.floor(now / 30)) continue;
+    assert.equal(got, Math.floor(now / 30));
+    return;
+  }
+  assert.fail('the clock crossed a 30 s step boundary on every attempt');
+});
+
 // --- enrolment URI ----------------------------------------------------------------------------
 
 test('keyUri builds a scannable otpauth URI with the account and issuer', () => {
@@ -109,6 +170,16 @@ test('keyUri builds a scannable otpauth URI with the account and issuer', () => 
   assert.match(uri, new RegExp(`secret=${secret}`));
 });
 
+test('★ keyUri promises only what the verifier checks: SHA1, 6 digits, a 30 s period (the defaults, so the URI may omit them)', () => {
+  // verifySync is called with the library defaults (HMAC-SHA1, 6 digits, 30 s). If the URI told an authenticator app to use
+  // SHA256 (or 8 digits, or another period), the app would make codes the server rejects and nobody could finish enrolling.
+  // Found as a surviving mutant ('SHA1' -> 'SHA256' in keyUri) in the review of #1033.
+  const params = new URL(mfa.keyUri('someone', mfa.generateSecret())).searchParams;
+  assert.ok([null, 'SHA1'].includes(params.get('algorithm')), `algorithm=${params.get('algorithm')}`);
+  assert.ok([null, '6'].includes(params.get('digits')), `digits=${params.get('digits')}`);
+  assert.ok([null, '30'].includes(params.get('period')), `period=${params.get('period')}`);
+});
+
 test('keyUri accepts a custom issuer', () => {
   assert.match(mfa.keyUri('nacho', mfa.generateSecret(), 'Nursery'), /issuer=Nursery/);
 });
@@ -116,6 +187,23 @@ test('keyUri accepts a custom issuer', () => {
 test('keyUri percent-encodes a username with spaces', () => {
   const uri = mfa.keyUri('two words', mfa.generateSecret());
   assert.ok(!uri.includes('two words'), 'a raw space would produce an unscannable URI');
+});
+
+test('★ keyUri never throws for an awkward username or app name: usernames are free text, and a throw here breaks enrolment', () => {
+  // User names are any non-empty text (see routes/auth.js) and the issuer is the configurable app name. otplib 13.6.0's new
+  // generateURI validation covers only type, digits, counter and period (verified by reading its source in the review of #1033);
+  // label and issuer are encoded exactly as before, so this is a pin, not a response to a known risk: a side-by-side run of
+  // 13.5.0 and 13.6.0 gave identical URIs for all of these, and every one must still yield a URI a scanner can parse.
+  const secret = mfa.generateSecret();
+  const usernames = ['two words', 'a:b', 'a@b.example', 'a/b?c=d#e', '50%', 'é ü ñ', '日本語', 'x'.repeat(255), 'x'.repeat(1000), "o'brien", '"q"', '<t>'];
+  const issuers = ['Nightlight', 'My Home Monitor', 'a:b', 'é', 'x'.repeat(255)];
+  for (const issuer of issuers) {
+    for (const username of usernames) {
+      const uri = mfa.keyUri(username, secret, issuer);
+      assert.match(uri, /^otpauth:\/\/totp\//, `${issuer.slice(0, 10)} / ${username.slice(0, 10)}`);
+      assert.equal(new URL(uri).searchParams.get('secret'), secret);
+    }
+  }
 });
 
 // --- matchTokenStep (#550: what the replay check keys on) -------------------------------------

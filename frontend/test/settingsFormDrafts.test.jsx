@@ -426,7 +426,7 @@ describe('add / edit caregiver', () => {
     expect(screen.getByText('Unsaved changes restored.')).toBeInTheDocument();
 
     await second.user.type(screen.getByLabelText('Password'), 'long-enough-1');
-    await second.user.click(screen.getByRole('button', { name: 'Add caregiver' }));
+    await second.user.click(screen.getByRole('button', { name: 'Add user' }));
     expect(await screen.findByText('elsewhere')).toBeInTheDocument();
     expect(Object.keys(sessionStorage)).toEqual([]);
   });
@@ -494,7 +494,7 @@ describe('add / edit caregiver', () => {
   test('removing a caregiver clears its draft', async () => {
     const { user } = mount('/settings/users/u-a');
     await user.type(await screen.findByLabelText('Last name'), 'Smith');
-    await user.click(screen.getByRole('button', { name: 'Remove caregiver' }));
+    await user.click(screen.getByRole('button', { name: 'Remove user' }));
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('elsewhere')).toBeInTheDocument();

@@ -18,10 +18,10 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
-import { renderAsAdmin } from './helpers/render.jsx';
+import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import CameraSettings from '../src/pages/CameraSettings.jsx';
 import CameraForm from '../src/components/CameraForm.jsx';
-import { draftKey } from '../src/lib/formDraft.js';
+import { draftKey, saveDraft } from '../src/lib/formDraft.js';
 import { api } from '../src/lib/api.js';
 
 // A fully configured camera as the API returns it to an admin: address in parts, no secrets, a flag
@@ -81,6 +81,12 @@ const saved = async (spy) => {
   return spy.mock.calls[0][1];
 };
 const openManual = async (user) => user.click(screen.getByRole('button', { name: /Add a camera manually/ }));
+const openAdvanced = async (user) => user.click(screen.getByRole('button', { name: /^Advanced/ }));
+// "Remove camera" lives in the header's ⋯ menu (#1076), not in a button under Save.
+const openRemove = async (user) => {
+  await user.click(await screen.findByRole('button', { name: 'More options for this camera' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Remove camera' }));
+};
 
 beforeEach(() => {
   postSpy = vi.spyOn(api, 'post').mockResolvedValue({ id: 'cam-new' });
@@ -104,12 +110,12 @@ describe('camera form embedded in setup', () => {
     const key = draftKey('u-admin', 'camera:new');
     const view = renderAsAdmin(<CameraForm embedded initialChildId="kid-1" onCreated={vi.fn()} />,
       { kids: KIDS, route: '/setup' });
-    expect(screen.getByLabelText(/Assign to child/)).toHaveValue('kid-1');
+    expect(screen.getByLabelText('Child (optional)')).toHaveValue('kid-1');
     expect(screen.queryByText(/Unsaved changes/)).not.toBeInTheDocument();
     expect(sessionStorage.getItem(key)).toBeNull();
     await view.user.type(screen.getByLabelText('Name'), 'A camera');
     await view.user.click(screen.getByRole('button', { name: 'Discard changes' }));
-    expect(screen.getByLabelText(/Assign to child/)).toHaveValue('kid-1');
+    expect(screen.getByLabelText('Child (optional)')).toHaveValue('kid-1');
     expect(sessionStorage.getItem(key)).toBeNull();
     view.unmount();
     mount({ isNew: true, cam: null });
@@ -119,7 +125,7 @@ describe('camera form embedded in setup', () => {
   test('an unassigned embedded camera requires an assignment before save', async () => {
     const view = renderAsAdmin(<CameraForm embedded initialChildId="kid-1" onCreated={vi.fn()} />,
       { kids: KIDS, route: '/setup' });
-    await view.user.selectOptions(screen.getByLabelText(/Assign to child/), '');
+    await view.user.selectOptions(screen.getByLabelText('Child (optional)'), '');
     await view.user.type(screen.getByLabelText('Name'), 'A camera');
     await view.user.type(screen.getByLabelText('Camera IP address'), '192.0.2.1');
     await view.user.click(screen.getByRole('button', { name: 'Add camera' }));
@@ -140,15 +146,17 @@ test('discovery is offered on Add camera and absent on edit', () => {
 
 describe('loading an existing camera into the form', () => {
   test('every stored field is shown', async () => {
-    mount();
+    const { user } = mount();
     expect((await screen.findByLabelText('Name')).value).toBe('Nursery');
     expect(screen.getByLabelText('Camera IP address').value).toBe('192.168.1.50');
     expect(screen.getByLabelText('RTSP port').value).toBe('554');
-    expect(screen.getByLabelText('Stream path').value).toBe('/stream1');
     expect(screen.getByLabelText('Username').value).toBe('viewer');
+    expect(screen.getByLabelText('Child (optional)').value).toBe('kid-1');
+    // The stream paths and the MQTT topic sit behind the Advanced row (#1076), so they are read once it is open.
+    await openAdvanced(user);
+    expect(screen.getByLabelText('Stream path').value).toBe('/stream1');
     expect(screen.getByLabelText('Low-quality stream path (optional)').value).toBe('/stream2');
     expect(screen.getByLabelText(/MQTT topic/).value).toBe('room/temp');
-    expect(screen.getByLabelText(/Assign to child/).value).toBe('kid-1');
   });
 
   test('★ the password box is EMPTY, and says the stored one is unchanged', async () => {
@@ -217,6 +225,8 @@ describe('★★ saving an edit', () => {
     // for a Hikvision-style camera these fields are the only way to configure talk-back at all, and
     // clearing the username is the documented way to switch it off.
     const { user } = mount();
+    await screen.findByLabelText('Name');
+    await openAdvanced(user);
     expect(await screen.findByLabelText('Talk username')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
@@ -229,7 +239,7 @@ describe('★★ saving an edit', () => {
     // The route attaches on a truthy child_id and detaches on null. '' is neither, and would leave the
     // camera attached to a child the form is showing as Unassigned.
     const { user } = mount();
-    await user.selectOptions(await screen.findByLabelText(/Assign to child/), '');
+    await user.selectOptions(await screen.findByLabelText('Child (optional)'), '');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect((await saved(putSpy)).child_id).toBe(null);
   });
@@ -270,7 +280,7 @@ describe('★ Back and the landing after save/remove agree (#383)', () => {
 
   test('opened from a child: a REMOVE returns there too', async () => {
     const { user } = mount({ from: FROM_CHILD });
-    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await openRemove(user);
     await user.click(await screen.findByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/cameras/cam-1'));
     expect(await screen.findByText('at /children/kid-1')).toBeTruthy();
@@ -414,7 +424,9 @@ describe('the ONVIF fetch', () => {
   test('fills in the paths it discovered and says what it found', async () => {
     postSpy = vi.spyOn(api, 'post').mockResolvedValue(PROBE);
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: /Fetch port, path/ }));
+    await screen.findByLabelText('Name');
+    await openAdvanced(user); // the paths sit behind Advanced (#1076); a successful fetch does not open it for you
+    await user.click(screen.getByRole('button', { name: 'Fetch from ONVIF' }));
 
     await waitFor(() => expect(screen.getByLabelText('Stream path').value).toBe('/onvif/main'));
     expect(screen.getByLabelText('Low-quality stream path (optional)').value).toBe('/onvif/sub');
@@ -440,7 +452,9 @@ describe('the ONVIF fetch', () => {
     // payload is where the damage would actually be.
     postSpy = vi.spyOn(api, 'post').mockResolvedValue({ backchannel: 'no' });
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: /Fetch port, path/ }));
+    await screen.findByLabelText('Name');
+    await openAdvanced(user);
+    await user.click(screen.getByRole('button', { name: 'Fetch from ONVIF' }));
     await waitFor(() => expect(screen.getByText(/Found stream/)).toBeTruthy());
 
     expect(screen.getByLabelText('Stream path').value).toBe('/stream1');
@@ -461,7 +475,9 @@ describe('the ONVIF fetch', () => {
     // losing them here would leave a perfectly capable camera with its features switched off.
     postSpy = vi.spyOn(api, 'post').mockResolvedValue(PROBE);
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: /Fetch port, path/ }));
+    await screen.findByLabelText('Name');
+    await openAdvanced(user);
+    await user.click(screen.getByRole('button', { name: 'Fetch from ONVIF' }));
     await waitFor(() => expect(screen.getByLabelText('Stream path').value).toBe('/onvif/main'));
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -476,7 +492,7 @@ describe('the ONVIF fetch', () => {
   test('it refuses to probe without an address, rather than asking the server about nothing', async () => {
     const { user } = mount({ isNew: true });
     await openManual(user);
-    await user.click(await screen.findByRole('button', { name: /Fetch port, path/ }));
+    await user.click(await screen.findByRole('button', { name: 'Fetch from ONVIF' }));
     expect(await screen.findByText('Enter the camera IP first')).toBeTruthy();
     expect(postSpy).not.toHaveBeenCalled();
   });
@@ -484,7 +500,7 @@ describe('the ONVIF fetch', () => {
   test('a failed probe is reported and leaves the form alone', async () => {
     postSpy = vi.spyOn(api, 'post').mockRejectedValue(new Error('No ONVIF service on that address'));
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: /Fetch port, path/ }));
+    await user.click(await screen.findByRole('button', { name: 'Fetch from ONVIF' }));
     expect(await screen.findByText('No ONVIF service on that address')).toBeTruthy();
     expect(screen.getByLabelText('Stream path').value).toBe('/stream1');
   });
@@ -494,13 +510,17 @@ describe('the two-way audio panel', () => {
   test('★ a backchannel camera is told it needs no login', async () => {
     // Prompting for a talk login on a camera that rides the stream audio is worse than unhelpful: the
     // save path discards whatever is typed, so the field would look like a setting and be a no-op.
-    mount({ cam: { ...CAM, backchannel_supported: 'yes', talk_backend: null } });
+    const { user } = mount({ cam: { ...CAM, backchannel_supported: 'yes', talk_backend: null } });
+    await screen.findByLabelText('Name');
+    await openAdvanced(user);
     expect(await screen.findByText(/no separate login/)).toBeTruthy();
     expect(screen.queryByLabelText('Talk username')).toBeNull();
   });
 
   test('an ISAPI camera gets the credential form and a verify button', async () => {
-    mount();
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    await openAdvanced(user);
     expect(await screen.findByLabelText('Talk username')).toBeTruthy();
     expect(screen.getByLabelText('Talk password').placeholder).toBe('•••••• (unchanged)');
     expect(screen.getByRole('button', { name: 'Verify login' })).toBeTruthy();
@@ -510,8 +530,10 @@ describe('the two-way audio panel', () => {
     // The stated reason in the source: a legacy camera whose backend was never resolved must not be
     // shown the credential form, because leaving its username blank there would read as "disable
     // talk-back" on the next save. Silence is the safe default.
-    mount({ cam: { ...CAM, backchannel_supported: undefined, talk_backend: null } });
+    const { user } = mount({ cam: { ...CAM, backchannel_supported: undefined, talk_backend: null } });
     await screen.findByLabelText('Name');
+    await openAdvanced(user); // opened so that "no panel" is not just "Advanced is closed"
+    expect(screen.getByLabelText('Stream path')).toBeTruthy();
     expect(screen.queryByText(/Two-way audio/)).toBeNull();
   });
 
@@ -521,8 +543,10 @@ describe('the two-way audio panel', () => {
     // longer needs.
     postSpy = vi.spyOn(api, 'post').mockResolvedValue({ backchannel: 'yes', backchannelVerified: true });
     const { user } = mount();
+    await screen.findByLabelText('Name');
+    await openAdvanced(user);
     expect(await screen.findByLabelText('Talk username')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: /Fetch port, path/ }));
+    await user.click(screen.getByRole('button', { name: 'Fetch from ONVIF' }));
     await waitFor(() => expect(screen.queryByLabelText('Talk username')).toBeNull());
     expect(screen.getByText(/no separate login/)).toBeTruthy();
   });
@@ -530,6 +554,8 @@ describe('the two-way audio panel', () => {
   test('verify reports success and failure distinctly', async () => {
     postSpy = vi.spyOn(api, 'post').mockResolvedValue({ codec: 'PCMU' });
     const { user } = mount();
+    await screen.findByLabelText('Name');
+    await openAdvanced(user);
     await user.click(await screen.findByRole('button', { name: 'Verify login' }));
     expect(await screen.findByText(/Talk login works — PCMU/)).toBeTruthy();
 
@@ -541,6 +567,8 @@ describe('the two-way audio panel', () => {
 
   test('verify refuses before there is a username to verify', async () => {
     const { user } = mount({ cam: { ...CAM, talk_username: '' } });
+    await screen.findByLabelText('Name');
+    await openAdvanced(user);
     await user.click(await screen.findByRole('button', { name: 'Verify login' }));
     expect(await screen.findByText('Enter the talk username first')).toBeTruthy();
     expect(postSpy).not.toHaveBeenCalled();
@@ -553,16 +581,16 @@ describe('the detection rows', () => {
     // how someone checks at a glance that a camera is actually armed.
     mount();
     await screen.findByText('Motion detection');
-    const row = (label) => screen.getByText(label).closest('.det-row');
-    expect(row('Motion detection').textContent).toContain('On');
-    expect(row('Sound detection').textContent).toContain('Off');
-    expect(row('Alert schedule').textContent, '1200 and 420 minutes past midnight').toContain('20:00–07:00');
+    // Each row is a button whose name is "<label> <value>" (NavRow, #1076).
+    expect(screen.getByRole('button', { name: 'Motion detection On' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sound detection Off' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Alert schedule 20:00–07:00' }), '1200 and 420 minutes past midnight').toBeTruthy();
   });
 
   test('a camera with no schedule reads Always, not a zero-length window', async () => {
     mount({ cam: { ...CAM, detect_schedule_enabled: 0 } });
     await screen.findByText('Alert schedule');
-    expect(screen.getByText('Alert schedule').closest('.det-row').textContent).toContain('Always');
+    expect(screen.getByRole('button', { name: 'Alert schedule Always' })).toBeTruthy();
   });
 
   test('midnight formats as 00:00 rather than being treated as missing', async () => {
@@ -571,7 +599,7 @@ describe('the detection rows', () => {
     // switch to a formatter that treats 0 as absent, does not put a blank where midnight should be.
     mount({ cam: { ...CAM, detect_start: 0, detect_end: 90 } });
     await screen.findByText('Alert schedule');
-    expect(screen.getByText('Alert schedule').closest('.det-row').textContent).toContain('00:00–01:30');
+    expect(screen.getByRole('button', { name: 'Alert schedule 00:00–01:30' })).toBeTruthy();
   });
 
   test('each row opens its own screen', async () => {
@@ -587,7 +615,7 @@ describe('removing a camera', () => {
     // destructive action stays testable at all. The important half is that opening the dialog is not
     // itself the deletion.
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await openRemove(user);
     expect(await screen.findByText(/This stops its stream and permanently deletes everything/)).toBeTruthy();
     expect(delSpy).not.toHaveBeenCalled();
 
@@ -602,7 +630,7 @@ describe('removing a camera', () => {
   // a single regex over the paragraph would stay green if one line of the list were dropped.
   test('★ #554 the dialog says plainly that everything for the camera is deleted, lists what, and asks', async () => {
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await openRemove(user);
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/permanently deletes everything for this camera/)).toBeTruthy();
     const items = within(dialog).getAllByRole('listitem').map((li) => li.textContent);
@@ -630,7 +658,7 @@ describe('removing a camera', () => {
     vi.stubGlobal('fetch', fetchSpy);
     try {
       const { user, camerasValue } = mount();
-      await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+      await openRemove(user);
       await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
       const dialog = screen.getByRole('dialog');
       expect(await within(dialog).findByRole('alert')).toHaveTextContent(reason);
@@ -646,7 +674,7 @@ describe('removing a camera', () => {
   test('confirming deletes it, refreshes the list and returns to the Cameras tab', async () => {
     // CHANGED ON PURPOSE (#383): was `/family`, see the save test above.
     const { user, camerasValue } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await openRemove(user);
     await user.click(await screen.findByRole('button', { name: 'Remove' }));
 
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/cameras/cam-1'));
@@ -659,7 +687,7 @@ describe('removing a camera', () => {
     // would look exactly like a successful one.
     delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Camera is in use by a recording'));
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await openRemove(user);
     await user.click(await screen.findByRole('button', { name: 'Remove' }));
 
     expect(await screen.findByText('Camera is in use by a recording')).toBeTruthy();
@@ -674,7 +702,7 @@ describe('removing a camera', () => {
   test('★ #378 the failure is shown INSIDE the dialog, once, with the dialog still open and retryable', async () => {
     delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused: recording in progress #378'));
     const { user, camerasValue } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await openRemove(user);
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
     const dialog = screen.getByRole('dialog');
@@ -696,7 +724,7 @@ describe('removing a camera', () => {
     // observable; then rejected with a DIFFERENT message to show the new failure replaces it.
     delSpy = vi.spyOn(api, 'del').mockRejectedValueOnce(new Error('First refusal #378'));
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await openRemove(user);
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
     expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('First refusal #378');
 
@@ -716,13 +744,313 @@ describe('removing a camera', () => {
   test('★ #378 a stale message is gone when the dialog is cancelled and reopened', async () => {
     delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused once #378'));
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    await openRemove(user);
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
     await within(screen.getByRole('dialog')).findByText('Refused once #378');
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
-    await user.click(screen.getByRole('button', { name: 'Remove camera' }));
+    await openRemove(user);
     expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// #1076: Edit camera in groups. The fields, ids and requests did not change; what changed is WHERE they are, and
+// the rule for when the rarely used ones (behind "Advanced") are shown. Each test here fails on the pre-#1076 form.
+// ---------------------------------------------------------------------------------------------------------------
+const advancedRow = () => screen.getByRole('button', { name: /^Advanced/ });
+const HIDDEN_IN_ADVANCED = ['Stream path', 'Low-quality stream path (optional)', /MQTT topic/, 'Talk username'];
+const expectAdvancedClosed = () => {
+  expect(advancedRow()).toHaveAttribute('aria-expanded', 'false');
+  HIDDEN_IN_ADVANCED.forEach((label) => expect(screen.queryByLabelText(label), `${label} is not reachable while closed`).toBeNull());
+};
+const expectAdvancedOpen = () => {
+  expect(advancedRow()).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByLabelText('Stream path')).toBeTruthy();
+};
+
+describe('#1076 the form is in groups, with the rarely used fields behind Advanced', () => {
+  test('(a) a saved camera starts with Advanced CLOSED and its fields unreachable until it is opened', async () => {
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    expectAdvancedClosed();
+    // The groups themselves: the connection fields, the child and the detection rows stay visible.
+    expect(screen.getByLabelText('Camera IP address')).toBeTruthy();
+    expect(screen.getByLabelText('Child (optional)')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Motion detection On' })).toBeTruthy();
+
+    await user.click(advancedRow());
+    expectAdvancedOpen();
+    expect(screen.getByLabelText('Stream path').value, 'the stored values are in there, not blank').toBe('/stream1');
+    // A person can close it again.
+    await user.click(advancedRow());
+    expectAdvancedClosed();
+  });
+
+  test('(b) it opens by itself on a NEW form whose stream path is empty, and an embedded one', async () => {
+    const add = mount({ isNew: true });
+    await openManual(add.user);
+    await screen.findByLabelText('Name');
+    expectAdvancedOpen();
+    add.unmount();
+
+    const embedded = renderAsAdmin(<CameraForm embedded />, { kids: KIDS, route: '/setup' });
+    expectAdvancedOpen();
+    embedded.unmount();
+  });
+
+  test('(b) …and stays closed for a saved camera that has a path, even with a draft that holds nothing inside it', async () => {
+    sessionStorage.clear();
+    saveDraft(draftKey('u-admin', `camera:${CAM.id}`), { name: 'Renamed in a draft' }, ['name']);
+    mount();
+    expect(await screen.findByDisplayValue('Renamed in a draft')).toBeTruthy();
+    expectAdvancedClosed();
+  });
+
+  test('(b) it opens when a message has no field to point at: a failed save', async () => {
+    putSpy = vi.spyOn(api, 'put').mockRejectedValue(new Error('A camera with that name already exists'));
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    expectAdvancedClosed();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('A camera with that name already exists')).toBeTruthy();
+    expectAdvancedOpen();
+  });
+
+  test('(b) …the Save anyway question', async () => {
+    const err = new Error('connection refused');
+    err.data = { needsConfirm: true };
+    putSpy = vi.spyOn(api, 'put').mockRejectedValue(err);
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    expectAdvancedClosed();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText(/Couldn't reach the camera stream/)).toBeTruthy();
+    expectAdvancedOpen();
+  });
+
+  test('(b) …and a failed ONVIF fetch', async () => {
+    postSpy = vi.spyOn(api, 'post').mockRejectedValue(new Error('No ONVIF service on that address'));
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    expectAdvancedClosed();
+    await user.click(screen.getByRole('button', { name: 'Fetch from ONVIF' }));
+    expect(await screen.findByText('No ONVIF service on that address')).toBeTruthy();
+    expectAdvancedOpen();
+  });
+
+  test('(b) …and a restored draft that holds a value inside it', async () => {
+    sessionStorage.clear();
+    saveDraft(draftKey('u-admin', `camera:${CAM.id}`), { sub_rtsp_path: '/half-typed' }, ['sub_rtsp_path']);
+    mount();
+    expect(await screen.findByDisplayValue('/half-typed')).toBeTruthy();
+    expectAdvancedOpen();
+  });
+
+  test('(b) a restored draft on a NEW form opens it too, even though its stream path is not empty', async () => {
+    sessionStorage.clear();
+    saveDraft(draftKey('u-admin', 'camera:new'), { name: 'Draft cam', rtsp_path: '/typed-before-reload' }, ['name', 'rtsp_path']);
+    const embedded = renderAsAdmin(<CameraForm embedded />, { kids: KIDS, route: '/setup' });
+    expect(screen.getByLabelText('Stream path').value).toBe('/typed-before-reload');
+    expectAdvancedOpen();
+    embedded.unmount();
+    sessionStorage.clear();
+  });
+
+  test('(b) a person who closes Advanced again while the message is still showing is not fought', async () => {
+    putSpy = vi.spyOn(api, 'put').mockRejectedValue(new Error('Camera refused the login'));
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Camera refused the login');
+    expectAdvancedOpen();
+    await user.click(advancedRow());
+    expectAdvancedClosed();
+    expect(screen.getByText('Camera refused the login'), 'the message stays where it was, above Save').toBeTruthy();
+    // A later, different attempt that fails opens it again.
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expectAdvancedOpen());
+  });
+
+  test('(b) a restored draft that CLEARS a saved path opens it too (a blank path would otherwise be saved unseen)', async () => {
+    // Codex review of #1080: the rule looked for a truthy value, so a draft whose path was emptied stayed hidden.
+    sessionStorage.clear();
+    saveDraft(draftKey('u-admin', `camera:${CAM.id}`), { rtsp_path: '' }, ['rtsp_path']);
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    expectAdvancedOpen();
+    expect(screen.getByLabelText('Stream path').value).toBe('');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect((await saved(putSpy)).rtsp_path).toBe('');
+  });
+
+  test('(b) the form\'s own "enter the IP first" message does NOT open Advanced (the IP is not in it)', async () => {
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    expectAdvancedClosed();
+    await user.clear(screen.getByLabelText('Camera IP address'));
+    await user.click(screen.getByRole('button', { name: 'Fetch from ONVIF' }));
+    expect(await screen.findByText('Enter the camera IP first')).toBeTruthy();
+    expectAdvancedClosed();
+  });
+
+  test('(b) …nor does the setup guide\'s "assign a child" message', async () => {
+    const embedded = renderAsAdmin(<CameraForm embedded requireChild />, { kids: KIDS, route: '/setup' });
+    const user = embedded.user;
+    await user.type(screen.getByLabelText('Name'), 'Nursery camera');
+    await user.type(screen.getByLabelText('Camera IP address'), '192.0.2.10');
+    await user.click(advancedRow()); // an embedded new form starts open (no path yet); close it
+    expectAdvancedClosed();
+    await user.click(screen.getByRole('button', { name: 'Add camera' }));
+    expect(await screen.findByText('Assign this camera to a child before continuing setup.')).toBeTruthy();
+    expectAdvancedClosed();
+    embedded.unmount();
+  });
+
+  test('(b) a fetch that finds two-way audio needing its own web login opens Advanced, where that login is asked for', async () => {
+    postSpy = vi.spyOn(api, 'post').mockResolvedValue({ backchannel: 'yes', backchannelVerified: false });
+    const { user } = mount({ cam: { ...CAM, backchannel_supported: 'no', talk_backend: null } });
+    await screen.findByLabelText('Name');
+    expectAdvancedClosed();
+    await user.click(screen.getByRole('button', { name: 'Fetch from ONVIF' }));
+    expect(await screen.findByLabelText('Talk username')).toBeTruthy();
+    expectAdvancedOpen();
+  });
+
+  test('the stream path is not `required`: a blank one saves, there is no hidden native validation to trip over', async () => {
+    const { user } = mount({ cam: { ...CAM, rtsp_path: '', sub_rtsp_path: '' } });
+    await screen.findByLabelText('Name');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect((await saved(putSpy)).rtsp_path).toBe('');
+  });
+
+  test('(g) every input and select sits inside a .field, which is where the page gives a control its field styling', async () => {
+    // A control outside `.field` renders as a bare browser control (the Cameras list's "Assigned to" select shipped
+    // that way). Covers the connection fields, the child select, Advanced opened, and the talk login of an ISAPI camera.
+    const { user, container } = mount();
+    await screen.findByLabelText('Name');
+    await openAdvanced(user);
+    const controls = [...container.querySelectorAll('input, select')];
+    expect(controls.length).toBeGreaterThanOrEqual(11);
+    controls.forEach((control) => expect(control.closest('.field'), `#${control.id} is inside a .field`).not.toBeNull());
+  });
+});
+
+describe('#1076 Remove camera is in the header menu', () => {
+  test('(c) the menu opens, offers ONE item, and the item opens the shared dialog with the complete warning', async () => {
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    const button = screen.getByRole('button', { name: 'More options for this camera' });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    await user.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    const items = within(screen.getByRole('menu', { name: 'Camera' })).getAllByRole('menuitem');
+    expect(items.map((i) => i.textContent)).toEqual(['Remove camera']);
+
+    await user.click(items[0]);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/permanently deletes everything for this camera/)).toBeTruthy();
+    expect(within(dialog).getAllByRole('listitem')).toHaveLength(5);
+    expect(delSpy).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(delSpy).not.toHaveBeenCalled();
+  });
+
+  test('(c) the old red button under Save is gone', async () => {
+    mount();
+    await screen.findByLabelText('Name');
+    expect(screen.queryByRole('button', { name: 'Remove camera' }), 'only a menuitem is named that now').toBeNull();
+    expect(document.querySelector('form .btn-danger')).toBeNull();
+  });
+
+  test('(c) the dialog cannot be dismissed while the removal is in flight, and shows a refusal INSIDE itself', async () => {
+    let rejectDelete;
+    delSpy = vi.spyOn(api, 'del').mockImplementation(() => new Promise((_, reject) => { rejectDelete = reject; }));
+    const { user } = mount();
+    await openRemove(user);
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    expect(within(dialog).getByRole('button', { name: 'Removing…' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('dialog'), 'Escape does not close it while busy').toBeTruthy();
+
+    rejectDelete(new Error('Refused: recording in progress'));
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('Refused: recording in progress');
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' })).toBeEnabled();
+  });
+
+  test('(c) there is no menu on Add camera, on an embedded form, or while the camera is still loading', async () => {
+    const add = mount({ isNew: true });
+    await openManual(add.user);
+    await screen.findByLabelText('Name');
+    expect(screen.queryByRole('button', { name: 'More options for this camera' })).toBeNull();
+    add.unmount();
+
+    const embedded = renderAsAdmin(<CameraForm embedded />, { kids: KIDS, route: '/setup' });
+    expect(screen.queryByRole('button', { name: 'More options for this camera' })).toBeNull();
+    embedded.unmount();
+
+    mount({ cam: null });
+    expect(screen.getByText('Loading…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'More options for this camera' })).toBeNull();
+  });
+
+  test('(c) a signed-in non-admin never sees the menu, even on this URL', async () => {
+    // The route guard is the real gate (routeGuards.test.jsx); this pins that the item does not depend on it alone.
+    renderAsCaregiver(
+      <Routes><Route path="/cameras/:id" element={<CameraSettings />} /></Routes>,
+      { cameras: [CAM], camerasLoaded: true, kids: KIDS, route: `/cameras/${CAM.id}` }
+    );
+    await screen.findByLabelText('Name');
+    expect(screen.queryByRole('button', { name: 'More options for this camera' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Remove camera' })).toBeNull();
+  });
+});
+
+describe('#1076 the Detection rows and the two shortened labels', () => {
+  test('(d) a Detection row navigates with the unchanged back-link state, so Back returns to this camera', async () => {
+    const Landing = () => {
+      const loc = useLocation();
+      return <div>landed {loc.pathname} from {loc.state?.from?.to} as {loc.state?.from?.label}</div>;
+    };
+    const { user } = renderAsAdmin(
+      <Routes>
+        <Route path="/cameras/:id" element={<CameraSettings />} />
+        <Route path="/cameras/:id/:screen" element={<Landing />} />
+      </Routes>,
+      { cameras: [CAM], camerasLoaded: true, kids: KIDS, route: `/cameras/${CAM.id}` }
+    );
+    await user.click(await screen.findByRole('button', { name: 'Motion detection On' }));
+    expect(await screen.findByText(/landed \/cameras\/cam-1\/motion from \/cameras\/cam-1 as Camera/)).toBeTruthy();
+  });
+
+  test('(d) each of the three rows goes to its own screen', async () => {
+    for (const [name, screenName] of [['Motion detection On', 'motion'], ['Sound detection Off', 'sound'], ['Alert schedule 20:00–07:00', 'schedule']]) {
+      const { user, unmount } = mount();
+      await user.click(await screen.findByRole('button', { name }));
+      expect(await screen.findByText(`at /cameras/cam-1/${screenName}`)).toBeTruthy();
+      unmount();
+    }
+  });
+
+  test('(e) the labels read "Child (optional)" and "Fetch from ONVIF", and the old wording is gone', async () => {
+    mount();
+    await screen.findByLabelText('Name');
+    expect(screen.getByLabelText('Child (optional)')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fetch from ONVIF' })).toBeTruthy();
+    expect(screen.queryByText(/Assign to child/)).toBeNull();
+    expect(screen.queryByText(/Fetch port, path/)).toBeNull();
+    // The longer hint under the button keeps its sentence.
+    expect(screen.getByText(/Optional: fetch the stream port, path and capabilities/)).toBeTruthy();
+  });
+
+  test('(e) the ONVIF button keeps its busy text', async () => {
+    postSpy = vi.spyOn(api, 'post').mockImplementation(() => new Promise(() => {}));
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Fetch from ONVIF' }));
+    expect(await screen.findByRole('button', { name: 'Fetching…' })).toBeDisabled();
   });
 });

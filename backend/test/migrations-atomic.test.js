@@ -256,6 +256,53 @@ describe('#700 sleep_nights.wake_unconfirmed_at', () => {
   });
 });
 
+describe('sleep_nights.stir_minutes and sleep_nights.summary_facts (the stored night facts)', () => {
+  // The #917 shape below, for the two columns the sleep score plan's phase 1a adds: each has its OWN guard (db.js), so
+  // an install with one and not the other gains the missing one alone. NULL is "not known" for every night stored
+  // before the columns: nothing is backfilled (the per-minute samples behind an old night may be gone), and a default
+  // of 0 would claim a night with no stirring that nobody measured.
+  const COLS = { stir_minutes: 'INTEGER', summary_facts: 'TEXT' };
+  for (const drop of [['stir_minutes', 'summary_facts'], ['stir_minutes'], ['summary_facts']]) {
+    test(`an install without ${drop.join(' and ')} gains ${drop.length > 1 ? 'them' : 'it'} on upgrade; nullable, no default, old rows NULL, twice harmless`, () => {
+      const dir = freshDir();
+      assert.equal(bootDbJs(dir).status, 0);
+      const full = columnsOf(dir, 'sleep_nights');
+      for (const c of Object.keys(COLS)) assert.ok(full.includes(c), `a fresh install has ${c}`);
+      {
+        const db = new Database(dbFile(dir));
+        try {
+          for (const c of drop) db.exec(`ALTER TABLE sleep_nights DROP COLUMN ${c}`);
+          db.exec(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, wake_count, asleep_minutes)
+                   VALUES ('old-kid', '2026-09-01', '2026-09-01 09:30:00', '2026-09-01 21:00:00', 'ok', 2, 50)`);
+        } finally {
+          db.close();
+        }
+      }
+      for (const c of drop) assert.ok(!columnsOf(dir, 'sleep_nights').includes(c), `setup: ${c} rewound`);
+
+      for (let bootNumber = 1; bootNumber <= 2; bootNumber++) {
+        const boot = bootDbJs(dir);
+        assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
+        assert.deepEqual(columnsOf(dir, 'sleep_nights').sort(), [...full].sort(), `sleep_nights after boot ${bootNumber}`);
+        const db = new Database(dbFile(dir));
+        try {
+          for (const [c, type] of Object.entries(COLS)) {
+            const def = db.prepare('PRAGMA table_info(sleep_nights)').all().find((x) => x.name === c);
+            assert.equal(def.type, type, c);
+            assert.equal(def.notnull, 0, `${c}: nullable, NULL is "not known"`);
+            assert.equal(def.dflt_value, null, `${c}: no default, a default would invent facts for old nights`);
+          }
+          const old = db.prepare("SELECT stir_minutes, summary_facts, wake_count, asleep_minutes FROM sleep_nights WHERE child_id = 'old-kid'").get();
+          assert.deepEqual(old, { stir_minutes: null, summary_facts: null, wake_count: 2, asleep_minutes: 50 },
+            'no backfill, and the old night is otherwise untouched');
+        } finally {
+          db.close();
+        }
+      }
+    });
+  }
+});
+
 describe('#917 sleep_nights.wake_at_sensor and sleep_nights.sensor_rejects', () => {
   // The same shape as the #700 test above, with one thing more: each column has its OWN guard (db.js), so an install
   // that has one of them and not the other (a boot interrupted between two releases' ALTERs would be the way) gains the

@@ -268,11 +268,11 @@ publishes depends on the ref:
 See the workspace `CLAUDE.md` for the branch model. In short: work on `dev`, release to
 `main` via PR. Two containers run on Unraid:
 
-- **Production** — on a `br0.10` ipvlan network with its own dedicated routable LAN IP (so WebRTC
+- **Production** — on a custom ipvlan network with its own dedicated routable LAN IP (so WebRTC
   works without host networking — MediaMTX advertises that IP), data dir
   `/mnt/user/appdata/nightlight`, container name `nightlight`, runs `sauso/nightlight:latest`.
   Updated only by a release to `main`.
-- **Staging** — same setup on the same `br0.10` network (its own dedicated LAN IP, adjacent to
+- **Staging** — same setup on the same custom network (its own dedicated LAN IP, adjacent to
   prod's), separate data dir (`/mnt/user/appdata/nightlight-dev`), container name `nightlight-dev`,
   runs `sauso/nightlight:dev`. Test dev builds here.
 

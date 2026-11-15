@@ -162,11 +162,13 @@ describe('#371 the Sound detection screen', () => {
     expect(screen.getByText(/What this detector can and can’t do/)).toBeInTheDocument();
   });
 
-  test('★ the deliberate limits are on screen, with this camera’s own cooldown', async () => {
+  test('★ the deliberate limits open on demand, with this camera’s own cooldown', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({ hours: 1, samples: [] });
-    mount();
+    const { user } = mount();
     expect(await screen.findByText(/It measures loudness, not crying/)).toBeInTheDocument();
     expect(screen.getByText(/can’t tell a cry from speech, a television, or a/)).toBeInTheDocument();
+    expect(screen.queryByText(/after about 45 seconds/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show the other four' }));
     expect(screen.getByText(/after about 45 seconds/)).toBeInTheDocument();
     expect(screen.getByText(/after about\s+5 minutes/)).toBeInTheDocument();
     // 200 is the camera's value, not the 120 default: a hard-coded copy would pass with the default.

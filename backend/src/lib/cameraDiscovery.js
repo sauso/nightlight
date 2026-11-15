@@ -192,7 +192,9 @@ export function createScanManager({ discover = discoverCameras, existingHosts = 
       Promise.resolve().then(() => discover({ signal: scan.controller.signal, existingHosts: existingHosts(),
         onCandidate: (candidate) => {
           if (scan.done) return;
-          const index = scan.candidates.findIndex((item) => item.ip === candidate.ip);
+          // Merge by id when there is one: a camera's id is a hash of its IP, so cameras behave exactly as before,
+          // while the ESPHome search (same manager) has one host with two services as two entries (#1072 review).
+          const index = scan.candidates.findIndex((item) => (item.id ?? item.ip) === (candidate.id ?? candidate.ip));
           if (index < 0) scan.candidates.push(candidate);
           else scan.candidates[index] = candidate;
         } })).then((result) => {

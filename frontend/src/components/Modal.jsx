@@ -235,7 +235,8 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
           <h2 id={titleId}>{title}</h2>
           <div className="modal-card__actions">
             {headerAction}
-            {dismissible && <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>}
+            {/* `modal-card__close` gives the ✕ a 44px target (see its rule in index.css); `icon-btn` alone is a 6x8px padding. */}
+            {dismissible && <button className="icon-btn modal-card__close" onClick={onClose} aria-label="Close">✕</button>}
           </div>
         </div>
         {error && <div className="error-banner" role="alert">{error}</div>}

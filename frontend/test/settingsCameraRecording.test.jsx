@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within, waitFor } from '@testing-library/react';
 import { Route, Routes, useLocation } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import SettingsCameraRecording from '../src/pages/SettingsCameraRecording.jsx';
@@ -38,13 +38,17 @@ function routes(realPage = false) {
   );
 }
 
-describe('Camera and Recording sub-menu', () => {
+describe('Camera and recording sub-menu', () => {
   test('shows the three existing destinations and returns to Settings', async () => {
     const { user } = renderAsAdmin(routes(), { route: '/settings/camera-recording' });
     for (const [label, , desc] of ROWS) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-      expect(screen.getByText(desc)).toBeInTheDocument();
+      const row = screen.getByRole('button', { name: `${label} ${desc}` });
+      expect(row).toHaveClass('nav-row');
+      expect(within(row).getByText(desc)).toBeInTheDocument();
     }
+    expect(screen.getAllByRole('button', { name: /^(Camera controls|Recording|Clip management) / })).toHaveLength(3);
+    expect(screen.getByRole('button', { name: /^Recording / }).querySelector('.nav-row__chip svg').outerHTML)
+      .not.toBe(screen.getByRole('button', { name: /^Clip management / }).querySelector('.nav-row__chip svg').outerHTML);
     await user.click(screen.getByRole('button', { name: 'Back to Settings' }));
     expect(screen.getByText('at /settings')).toBeInTheDocument();
   });
@@ -53,7 +57,7 @@ describe('Camera and Recording sub-menu', () => {
     const { user } = renderAsAdmin(routes(), { route: '/settings/camera-recording' });
     await user.click(screen.getByText(label));
     expect(screen.getByText(`at ${path}`)).toBeInTheDocument();
-    expect(screen.getByText('from /settings/camera-recording (Camera and Recording)')).toBeInTheDocument();
+    expect(screen.getByText('from /settings/camera-recording (Camera settings)')).toBeInTheDocument();
   });
 
   test.each(ROWS)('%s Back returns to the sub-menu after a menu visit or direct link', async (label, path) => {
@@ -61,10 +65,49 @@ describe('Camera and Recording sub-menu', () => {
     for (const start of ['/settings/camera-recording', path]) {
       const { user, unmount } = renderAsAdmin(routes(true), { route: start });
       if (start !== path) await user.click(screen.getByText(label));
-      expect(await screen.findByRole('heading', { name: path === '/settings/clips' ? 'Clip Management' : label })).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Back to Camera and Recording' }));
-      expect(screen.getByRole('heading', { name: 'Camera and Recording' })).toBeInTheDocument();
+      expect(await screen.findByRole('heading', { name: path === '/settings/clips' ? 'Clip management' : label })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Back to Camera settings' }));
+      expect(screen.getByRole('heading', { name: 'Camera and recording' })).toBeInTheDocument();
       unmount();
     }
+  });
+});
+
+describe('Camera controls cards', () => {
+  test('each setting is a visible card title tied to its control, and switches still toggle', async () => {
+    const { user } = renderAsAdmin(<SettingsCamera />, { settings: {
+      ptz_step: 12, camera_offline_alert_enabled: true, camera_offline_alert_minutes: 5,
+      snooze_alert_enabled: true, snooze_alert_minutes: 60,
+    } });
+    for (const name of ['PTZ step size', 'Notify when a camera goes offline',
+      "Notify admins when a camera's alerts stay silenced for a long time"]) {
+      const title = screen.getByRole('heading', { name });
+      expect(title).toHaveClass('card-heading');
+      expect(screen.getByLabelText(name)).toBeInTheDocument();
+    }
+    expect(screen.getByLabelText('Offline for longer than (minutes)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Silenced for longer than (minutes)')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Notify when a camera goes offline'));
+    expect(screen.getByLabelText('Notify when a camera goes offline')).not.toBeChecked();
+    expect(screen.getByLabelText('Offline for longer than (minutes)')).toBeDisabled();
+    await user.click(screen.getByLabelText("Notify admins when a camera's alerts stay silenced for a long time"));
+    expect(screen.getByLabelText('Silenced for longer than (minutes)')).toBeDisabled();
+  });
+
+  test('Save changes stays one full-width primary action with the same request body', async () => {
+    const put = vi.spyOn(api, 'put').mockResolvedValue({});
+    const { user } = renderAsAdmin(<SettingsCamera />, { settings: {
+      ptz_step: 12, camera_offline_alert_enabled: true, camera_offline_alert_minutes: 5,
+      snooze_alert_enabled: true, snooze_alert_minutes: 60,
+    } });
+    const save = screen.getByRole('button', { name: 'Save changes' });
+    expect(save).toHaveClass('btn-primary');
+    await user.clear(screen.getByLabelText('PTZ step size'));
+    await user.type(screen.getByLabelText('PTZ step size'), '20');
+    await user.click(save);
+    await waitFor(() => expect(put).toHaveBeenCalledWith('/settings', {
+      ptz_step: '20', camera_offline_alert_enabled: true, camera_offline_alert_minutes: 5,
+      snooze_alert_enabled: true, snooze_alert_minutes: 60,
+    }));
   });
 });

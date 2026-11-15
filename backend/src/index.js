@@ -3,6 +3,9 @@ import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import { MEDIA_PROXY_BASE_OPTIONS } from './lib/mediaProxyOptions.js';
+import { listenOrFail } from './lib/listenOrFail.js';
+import { defaultBody } from './middleware/defaultBody.js';
 import { WebSocketServer } from 'ws';
 import authRoutes from './routes/auth.js';
 import childrenRoutes from './routes/children.js';
@@ -24,7 +27,7 @@ import gotifyRoutes from './routes/gotify.js';
 import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
 import recordingsRoutes from './routes/recordings.js';
-import { requireAuth, requireAuthQueryOrHeader, verifyToken, isLiveSessionId, purgeExpiredSessions } from './middleware/auth.js';
+import { requireAuth, requireAuthQueryOrHeader, verifyToken, isLiveSessionId, purgeExpiredSessions, purgeOldInvites } from './middleware/auth.js';
 import { demoGuard, demoRequestLimiter, isDemoModeActive } from './middleware/demoMode.js';
 import { whepOnlyGuard } from './middleware/whepOnlyGuard.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -203,7 +206,7 @@ app.use(
   whepOnlyGuard,
   createProxyMiddleware({
     target: process.env.MEDIAMTX_WEBRTC_URL || `http://${MEDIAMTX_INTERNAL_HOST}:8889`,
-    changeOrigin: true,
+    ...MEDIA_PROXY_BASE_OPTIONS, // changeOrigin + agent: false (see the file for why)
     pathRewrite: { '^/live': '' },
     on: {
       proxyRes: (proxyRes, req) => {
@@ -219,7 +222,7 @@ app.use(
   requireAuthQueryOrHeader,
   createProxyMiddleware({
     target: process.env.MEDIAMTX_HLS_URL || `http://${MEDIAMTX_INTERNAL_HOST}:8888`,
-    changeOrigin: true,
+    ...MEDIA_PROXY_BASE_OPTIONS, // changeOrigin + agent: false (see the file for why)
     pathRewrite: { '^/hls': '' },
     on: {
       proxyRes(proxyRes) {
@@ -235,6 +238,7 @@ app.use(
 );
 
 app.use(express.json());
+app.use(defaultBody); // Express 5 leaves req.body undefined when nothing was parsed; see middleware/defaultBody.js
 
 // Demo-mode guard: when DEMO_MODE=true, blocks every write except log in/out (see
 // middleware/demoMode.js for the full policy and why it's positioned here — after
@@ -302,10 +306,19 @@ app.post('/api/csp-report', express.text({ type: '*/*', limit: '64kb' }), (req, 
 
 // Serve the built React frontend (see Dockerfile — built at image-build time into ./public).
 const publicDir = path.join(__dirname, '..', 'public');
+// ⚠️ Express 5's static serving (send 1.x) refuses a file under ANY dot-folder (`/.well-known/...`), where Express 4
+// only refused a dotfile in the last path segment. frontend/public has only icons/ today, so nothing changes; if a
+// `.well-known/` file is ever added (Android app links, security.txt), serve it with `express.static(dir, { dotfiles: 'allow' })`
+// on a dedicated mount, not by loosening this one.
 app.use(express.static(publicDir));
-app.get('*', (req, res) => {
+// Express 5 (path-to-regexp 8) refuses a bare `*`: the wildcard must be named. `/{*splat}` also matches `/`
+// itself, as the old `*` did, so the SPA still loads at the root.
+app.get('/{*splat}', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(path.join(publicDir, 'index.html')); // fence-ok: the built web app, not a media file
+  // `root`, not a joined absolute path: send 1.x (Express 5) refuses a file whose absolute path has ANY dot-folder in
+  // it (`.local/`, `.claude/worktrees/`) when no root is given, so every deep link and refresh was a 404 for an
+  // install running from such a folder. With a root only the part below it is checked. (Express 4 looked at the last segment.)
+  res.sendFile('index.html', { root: publicDir }); // fence-ok: the built web app, not a media file
 });
 
 // The error handler MUST be registered after every route above (Express only passes an error to handlers
@@ -315,7 +328,9 @@ app.get('*', (req, res) => {
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 4000;
-const server = app.listen(PORT, () => {
+// listenOrFail, not a bare app.listen: Express 5 hands a bind failure (port taken) to the callback instead of
+// throwing, which would leave this process "running" with nothing listening. See lib/listenOrFail.js.
+const server = listenOrFail(app, PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
   // #549: the mask this process (and every FFmpeg/MediaMTX it starts) creates files with, and the database's mode.
   // Read-only and cannot throw; see lib/dataDirModes.js and docs/operations.md, "Who can read the data directory".
@@ -397,6 +412,10 @@ safeInterval('reconcile', 5 * 60 * 1000, reconcileCameraPaths);
 // file cannot be imported by a test (it boots the app), and a copy of the rule here is what drifts.
 purgeExpiredSessions();
 safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
+// #1094: caregiver invites used or expired more than 30 days ago, on the same start-and-daily schedule (the rule
+// and its why are in middleware/auth.js, beside the session purge).
+purgeOldInvites();
+safeInterval('purge-invites', 24 * 60 * 60 * 1000, purgeOldInvites);
 
 // Closes the gap recordWebrtcSessionOwner exists for (see the /live mount's own comment): a login
 // session revoked while its owner is already watching a camera doesn't tear down that view on its

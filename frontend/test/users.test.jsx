@@ -15,7 +15,7 @@
 //
 // Role gating is not tested here: both routes are <AdminProtected> (routeGuards.test.jsx).
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within, act } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAsAdmin, ADMIN } from './helpers/render.jsx';
 import SettingsUsers from '../src/pages/SettingsUsers.jsx';
@@ -65,6 +65,11 @@ describe('the caregiver list', () => {
 
   test('lists everyone by display name, with their username and role', async () => {
     mountList();
+    expect(screen.getByRole('heading', { name: 'Users', level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Accounts', level: 2 }).closest('.card')).toBeTruthy();
+    // Sessions live under each account now (see 'the session list' below); the old separate card is gone.
+    expect(screen.queryByRole('heading', { name: 'Active sessions' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add user' }).closest('.card')).toBe(screen.getByRole('heading', { name: 'Accounts' }).closest('.card'));
     expect(await screen.findByText('Nanny McPhee')).toBeTruthy();
     expect(screen.getByText('nanny · caregiver')).toBeTruthy();
     expect(screen.getByText('Nacho Leone')).toBeTruthy();
@@ -93,7 +98,7 @@ describe('the caregiver list', () => {
     // that took every row out of the tab order survived that version. Two tabs: the header's back
     // button is first in the order.
     const { user } = mountList();
-    const row = (await screen.findByText('Nacho Leone')).closest('.list-row');
+    const row = (await screen.findByText('Nacho Leone')).closest('[role="button"]');
     await user.tab();
     await user.tab();
     expect(row, 'the first caregiver row must be tabbable').toBe(document.activeElement);
@@ -102,9 +107,9 @@ describe('the caregiver list', () => {
     expect(await screen.findByText(`at /settings/users/${ADMIN.id}`)).toBeTruthy();
   });
 
-  test('Add caregiver goes to the new-caregiver screen', async () => {
+  test('Add user goes to the new-user screen', async () => {
     const { user } = mountList();
-    await user.click(await screen.findByRole('button', { name: /Add caregiver/ }));
+    await user.click(await screen.findByRole('button', { name: /Add user/ }));
     expect(await screen.findByText('at /settings/users/new')).toBeTruthy();
   });
 
@@ -118,16 +123,170 @@ describe('the caregiver list', () => {
     // ⚠️ These timestamps are what the API actually sends: SQLite datetimes with NO timezone marker,
     // which the component reads as UTC by appending 'Z'. Built as offsets from now so they cannot rot.
     const agoIso = (ms) => new Date(Date.now() - ms).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+    // Two accounts' sessions, the first account with TWO so its count is not 1. The API names the owner by
+    // `username` only (no user id), which is what the page joins on.
     const SESSIONS = [
       { id: 's1', username: 'nacho', device: 'Chrome on Windows', is_current: true, last_seen_at: agoIso(30 * 1000) },
       { id: 's2', username: 'nanny', device: 'Safari on iPhone', is_current: false, last_seen_at: agoIso(3 * 3600 * 1000) },
+      { id: 's3', username: 'nacho', device: 'Firefox on Linux', is_current: false, last_seen_at: agoIso(2 * 24 * 3600 * 1000) },
     ];
 
-    test('shows each session, marking the one you are on', async () => {
+    // The down arrow of an account, found by its accessible name (the count is part of it).
+    const toggleFor = (name) => screen.getByRole('button', { name: new RegExp(`^Show sessions for ${name}, \\d+ active$`) });
+    const waitForToggle = (name) => screen.findByRole('button', { name: new RegExp(`^Show sessions for ${name}, `) });
+    // Opens an account's sessions and returns the session row for one device inside it.
+    async function sessionRow(user, who, device) {
+      await user.click(await waitForToggle(who));
+      return screen.getByText(device).closest('.list-row');
+    }
+
+    test('there is no separate "Active sessions" card, and no "None active" line, even with no sessions', async () => {
+      mockApi({ sessions: SESSIONS });
+      const { unmount } = mountList();
+      await waitForToggle('Nacho Leone');
+      expect(screen.queryByRole('heading', { name: /active sessions/i })).toBeNull();
+      expect(screen.queryByText(/None active/)).toBeNull();
+      unmount();
+
+      mockApi({ sessions: [] });
+      mountList();
+      await screen.findByText('Nanny McPhee');
+      expect(screen.queryByRole('heading', { name: /active sessions/i })).toBeNull();
+      expect(screen.queryByText(/None active/)).toBeNull();
+    });
+
+    test('★ an account with sessions has a COLLAPSED arrow that names the account and the count', async () => {
       mockApi({ sessions: SESSIONS });
       mountList();
-      expect(await screen.findByText(/Chrome on Windows \(this device\)/)).toBeTruthy();
-      expect(screen.getByText(/Safari on iPhone$/)).toBeTruthy();
+      const nacho = await waitForToggle('Nacho Leone');
+      expect(nacho).toHaveAccessibleName('Show sessions for Nacho Leone, 2 active');
+      expect(toggleFor('Nanny McPhee')).toHaveAccessibleName('Show sessions for Nanny McPhee, 1 active');
+      expect(nacho).toHaveAttribute('aria-expanded', 'false');
+      // aria-controls must point at a real element, and it is the one that stays hidden until opened.
+      const panel = document.getElementById(nacho.getAttribute('aria-controls'));
+      expect(panel).not.toBeNull();
+      expect(panel).not.toBeVisible();
+      expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    });
+
+    test('★ opening one account shows only THAT account\'s sessions', async () => {
+      mockApi({ sessions: SESSIONS });
+      const { user } = mountList();
+      await user.click(await waitForToggle('Nanny McPhee'));
+      expect(toggleFor('Nanny McPhee')).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByText('Safari on iPhone')).toBeVisible();
+      expect(screen.getByText('Chrome on Windows (this device)')).not.toBeVisible();
+      expect(screen.getByText('Firefox on Linux')).not.toBeVisible();
+      expect(toggleFor('Nacho Leone')).toHaveAttribute('aria-expanded', 'false');
+
+      // And it closes again.
+      await user.click(toggleFor('Nanny McPhee'));
+      expect(toggleFor('Nanny McPhee')).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByText('Safari on iPhone')).not.toBeVisible();
+    });
+
+    test('shows each session of the account, marking the one you are on', async () => {
+      mockApi({ sessions: SESSIONS });
+      const { user } = mountList();
+      await user.click(await waitForToggle('Nacho Leone'));
+      expect(screen.getByText('Chrome on Windows (this device)')).toBeVisible();
+      expect(screen.getByText('Firefox on Linux')).toBeVisible();
+    });
+
+    test('an account with NO sessions has no arrow, and its row is unchanged', async () => {
+      mockApi({ sessions: [SESSIONS[0]] }); // only nacho is signed in
+      mountList();
+      await waitForToggle('Nacho Leone');
+      expect(screen.queryByRole('button', { name: /Show sessions for Nanny McPhee/ })).toBeNull();
+      expect(screen.getAllByRole('button', { name: /Show sessions for/ })).toHaveLength(1);
+    });
+
+    test('★ each arrow controls its OWN panel: aria-controls ids are unique and each matches exactly one element', async () => {
+      // A mutant giving every panel the same id survived the single-account check above: with one id, both arrows
+      // "pointed at a real element" and a screen reader would open the wrong panel for the second account.
+      mockApi({ sessions: SESSIONS });
+      mountList();
+      const nacho = await waitForToggle('Nacho Leone');
+      const nanny = toggleFor('Nanny McPhee');
+      const nachoId = nacho.getAttribute('aria-controls');
+      const nannyId = nanny.getAttribute('aria-controls');
+      expect(nachoId).toBeTruthy();
+      expect(nannyId).toBeTruthy();
+      expect(nachoId).not.toBe(nannyId);
+      for (const id of [nachoId, nannyId]) {
+        expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+      }
+      // And each id is the panel holding that account's sessions, not the other's.
+      expect(within(document.getElementById(nachoId)).getByText('Firefox on Linux')).toBeInTheDocument();
+      expect(within(document.getElementById(nannyId)).getByText('Safari on iPhone')).toBeInTheDocument();
+    });
+
+    test('★ the users and the sessions are requested together and rendered together (no arrow-less first paint)', async () => {
+      // Sequential awaits asked for the sessions only after the users had arrived, then rendered the rows without
+      // arrows and moved them when the sessions came. Deferred promises make that order observable: both requests
+      // must be out before either reply, and nothing may render from the users reply alone.
+      let resolveUsers; let resolveSessions;
+      const gets = [];
+      vi.spyOn(api, 'get').mockImplementation((path) => {
+        gets.push(path);
+        if (path === '/auth/users') return new Promise((r) => { resolveUsers = r; });
+        if (path === '/auth/sessions/all') return new Promise((r) => { resolveSessions = r; });
+        return Promise.resolve(null);
+      });
+      mountList();
+      await waitFor(() => expect(gets).toContain('/auth/users'));
+      expect(gets).toContain('/auth/sessions/all'); // issued before the users reply: fails with the sequential version
+
+      resolveUsers(USERS);
+      // Let the users reply settle; the rows must still be absent because the sessions have not arrived.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.queryByText('Nanny McPhee')).toBeNull();
+
+      resolveSessions(SESSIONS);
+      // First render that has rows already has the arrows.
+      expect(await waitForToggle('Nacho Leone')).toBeInTheDocument();
+      expect(toggleFor('Nanny McPhee')).toBeInTheDocument();
+    });
+
+    test('Sign out and Add user are type="button" (no accidental form submit if the list is ever wrapped in a form)', async () => {
+      mockApi({ sessions: SESSIONS });
+      const { user } = mountList();
+      const row = await sessionRow(user, 'Nanny McPhee', 'Safari on iPhone');
+      expect(within(row).getByRole('button', { name: 'Sign out' })).toHaveAttribute('type', 'button');
+      expect(screen.getByRole('button', { name: /Add user/ })).toHaveAttribute('type', 'button');
+    });
+
+    test('★ the arrow is a sibling of the open-account row, not inside it, and does not open the account', async () => {
+      mockApi({ sessions: SESSIONS });
+      const { user } = mountList();
+      const toggle = await waitForToggle('Nanny McPhee');
+      // No interactive element nested in the role=button row (invalid nesting; also makes a tap on the arrow open the account).
+      expect(toggle.closest('[role="button"]')).toBeNull();
+      await user.click(toggle);
+      await user.click(toggle);
+      expect(screen.getByText('at /settings/users')).toBeTruthy();
+      expect(screen.queryByText(/at \/settings\/users\/u-care/)).toBeNull();
+    });
+
+    test('keyboard: the arrow is its own tab stop after the row, and Enter on it opens the panel, not the account', async () => {
+      mockApi({ sessions: SESSIONS });
+      const { user } = mountList();
+      await waitForToggle('Nacho Leone');
+      await user.tab(); // header back button
+      await user.tab();
+      expect(document.activeElement).toBe(screen.getByText('Nacho Leone').closest('[role="button"]'));
+      await user.tab();
+      expect(document.activeElement).toBe(toggleFor('Nacho Leone'));
+      await user.keyboard('{Enter}');
+      expect(toggleFor('Nacho Leone')).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByText('at /settings/users')).toBeTruthy();
+    });
+
+    test('clicking an account row still opens that account when it has sessions', async () => {
+      mockApi({ sessions: SESSIONS });
+      const { user } = mountList();
+      await user.click(await screen.findByText('Nanny McPhee'));
+      expect(await screen.findByText('at /settings/users/u-care')).toBeTruthy();
     });
 
     test('★★ "active 3h ago" is computed in UTC, not in the browser\'s timezone', async () => {
@@ -137,28 +296,22 @@ describe('the caregiver list', () => {
       // UTC machine the bug is literally invisible, which is exactly why the suite is not pinned to
       // UTC (see vite.config.js).
       mockApi({ sessions: SESSIONS });
-      mountList();
-      const row = (await screen.findByText(/Safari on iPhone/)).closest('.list-row');
+      const { user } = mountList();
+      const row = await sessionRow(user, 'Nanny McPhee', 'Safari on iPhone');
       expect(within(row).getByText('Active 3h ago')).toBeTruthy();
     });
 
     test('a session seen seconds ago reads "just now"', async () => {
       mockApi({ sessions: SESSIONS });
-      mountList();
-      const row = (await screen.findByText(/Chrome on Windows/)).closest('.list-row');
+      const { user } = mountList();
+      const row = await sessionRow(user, 'Nacho Leone', 'Chrome on Windows (this device)');
       expect(within(row).getByText('Active just now')).toBeTruthy();
-    });
-
-    test('no sessions reads as None active, not as a blank card', async () => {
-      mockApi({ sessions: [] });
-      mountList();
-      expect(await screen.findByText('None active')).toBeTruthy();
     });
 
     test('signing out someone else refreshes the list rather than signing you out', async () => {
       mockApi({ sessions: SESSIONS });
       const { user, auth } = mountList();
-      const row = (await screen.findByText(/Safari on iPhone/)).closest('.list-row');
+      const row = await sessionRow(user, 'Nanny McPhee', 'Safari on iPhone');
       await user.click(within(row).getByRole('button', { name: 'Sign out' }));
 
       await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/auth/sessions/s2'));
@@ -171,7 +324,7 @@ describe('the caregiver list', () => {
       // would sit on a broken screen until something noticed. Logging out is the honest response.
       mockApi({ sessions: SESSIONS });
       const { user, auth } = mountList();
-      const row = (await screen.findByText(/Chrome on Windows/)).closest('.list-row');
+      const row = await sessionRow(user, 'Nacho Leone', 'Chrome on Windows (this device)');
       await user.click(within(row).getByRole('button', { name: 'Sign out' }));
 
       await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/auth/sessions/s1'));
@@ -182,7 +335,7 @@ describe('the caregiver list', () => {
       mockApi({ sessions: SESSIONS });
       delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Session already ended'));
       const { user, auth } = mountList();
-      const row = (await screen.findByText(/Safari on iPhone/)).closest('.list-row');
+      const row = await sessionRow(user, 'Nanny McPhee', 'Safari on iPhone');
       await user.click(within(row).getByRole('button', { name: 'Sign out' }));
 
       expect(await screen.findByText('Session already ended')).toBeTruthy();
@@ -294,6 +447,9 @@ describe('adding and editing a caregiver', () => {
   describe('adding', () => {
     test('starts blank, demands a password, and POSTs the whole form', async () => {
       const { user } = mountEdit('new');
+      expect(screen.getByRole('heading', { name: 'Add user', level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Back to Users' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Details', level: 2 }).closest('.card')).toBeTruthy();
       const username = await screen.findByLabelText('Username (login)');
       expect(username.value).toBe('');
       const pw = screen.getByLabelText('Password');
@@ -302,7 +458,7 @@ describe('adding and editing a caregiver', () => {
 
       await user.type(username, 'newnanny');
       await user.type(pw, 'password123');
-      await user.click(screen.getByRole('button', { name: 'Add caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'Add user' }));
 
       await waitFor(() => expect(postSpy).toHaveBeenCalled());
       const [path, body] = postSpy.mock.calls[0];
@@ -317,7 +473,7 @@ describe('adding and editing a caregiver', () => {
       await user.type(await screen.findByLabelText('Username (login)'), 'admin2');
       await user.type(screen.getByLabelText('Password'), 'password123');
       await user.selectOptions(screen.getByLabelText(/Role/), 'admin');
-      await user.click(screen.getByRole('button', { name: 'Add caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'Add user' }));
       await waitFor(() => expect(postSpy).toHaveBeenCalled());
       expect(postSpy.mock.calls[0][1].role).toBe('admin');
     });
@@ -325,7 +481,7 @@ describe('adding and editing a caregiver', () => {
     test('there is nothing to remove or reset yet', async () => {
       mountEdit('new');
       await screen.findByLabelText('Username (login)');
-      expect(screen.queryByRole('button', { name: 'Remove caregiver' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Remove user' })).toBeNull();
       expect(screen.queryByRole('button', { name: 'Reset two-factor' })).toBeNull();
     });
   });
@@ -336,13 +492,52 @@ describe('adding and editing a caregiver', () => {
       // themselves out of their own install, and the right place to say no is before the click.
       mountEdit(ADMIN.id);
       await screen.findByLabelText('First name');
-      expect(screen.queryByRole('button', { name: 'Remove caregiver' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Remove user' })).toBeNull();
+    });
+
+    test('★ is not offered while the caregiver is still loading, and appears once loaded', async () => {
+      // The button sits inside the form, which does not exist while the page says Loading…. PR #1088 moved it
+      // into the header, which did exist then, so an admin could confirm a DELETE for a caregiver the page
+      // had not shown; it is back in the form and gated on the record having loaded.
+      let release;
+      vi.spyOn(api, 'get').mockImplementation((path) => (path === '/auth/users'
+        ? new Promise((resolve) => { release = () => resolve(USERS); })
+        : Promise.resolve([])));
+      mountEdit();
+      expect(screen.getByText('Loading…')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Remove user' })).toBeNull();
+      await act(async () => { release(); });
+      expect(await screen.findByRole('button', { name: 'Remove user' })).toBeTruthy();
+    });
+
+    test('★ it is a visible red button at the bottom of the form, not in a header menu (owner could not find the menu)', async () => {
+      // PR #1088 moved Remove user into a "⋯" header menu and the owner reported losing the ability to delete a
+      // caregiver. The page has no such menu at all now; the button is the last thing in the form, after Save.
+      mountEdit();
+      const remove = await screen.findByRole('button', { name: 'Remove user' });
+      expect(screen.queryByRole('button', { name: 'More options for this user' }), 'no header menu on this page').toBeNull();
+      expect(screen.queryByRole('menuitem')).toBeNull();
+      expect(remove.className).toContain('btn-danger');
+      expect(remove.closest('form'), 'inside the form, so it cannot exist before the account has loaded').not.toBeNull();
+      const save = screen.getByRole('button', { name: 'Save changes' });
+      expect(save.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING, 'below Save').toBeTruthy();
+      expect(remove.getAttribute('type'), 'a plain button: it must not submit the edit form').toBe('button');
+    });
+
+    test('★ a pending-invite account (no password yet) can be removed too', async () => {
+      // An unused invite is exactly the account an admin most often wants to delete.
+      mockApi({ users: [ME, { ...NANNY, password_set: false, invite_expires_at: '2099-01-01T00:00:00Z', invite_accepted_at: null }] });
+      const { user } = mountEdit();
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
+      expect(await screen.findByText(/signed out everywhere/)).toBeTruthy();
     });
 
     test('is offered on someone else, behind a confirmation', async () => {
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'Remove caregiver' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       expect(await screen.findByText(/signed out everywhere/)).toBeTruthy();
+      // The dialog uses the shared button row: Cancel and the action side by side.
+      expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }).closest('.modal-actions')).not.toBeNull();
       expect(delSpy, 'opening the dialog is not the deletion').not.toHaveBeenCalled();
 
       await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -352,7 +547,7 @@ describe('adding and editing a caregiver', () => {
 
     test('confirming deletes and returns to the list', async () => {
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'Remove caregiver' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       await user.click(await screen.findByRole('button', { name: 'Remove' }));
       await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/auth/users/u-care'));
       expect(await screen.findByText('at /settings/users')).toBeTruthy();
@@ -363,7 +558,7 @@ describe('adding and editing a caregiver', () => {
       // be able to sign in.
       delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Cannot remove the last admin'));
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'Remove caregiver' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       await user.click(await screen.findByRole('button', { name: 'Remove' }));
       expect(await screen.findByText('Cannot remove the last admin')).toBeTruthy();
       expect(screen.getByText('at /settings/users/u-care')).toBeTruthy();
@@ -374,7 +569,7 @@ describe('adding and editing a caregiver', () => {
     test('★ #378 the failure is shown INSIDE the dialog, once, and the dialog stays open to retry', async () => {
       delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused: owns a session #378'));
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'Remove caregiver' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       await user.click(await screen.findByRole('button', { name: 'Remove' }));
 
       const dialog = screen.getByRole('dialog');
@@ -385,7 +580,7 @@ describe('adding and editing a caregiver', () => {
 
       await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-      await user.click(screen.getByRole('button', { name: 'Remove caregiver' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
     });
   });
@@ -458,7 +653,7 @@ describe('adding and editing a caregiver', () => {
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
       // ...and so is the Remove dialog: the reset failure is not its message.
-      await user.click(screen.getByRole('button', { name: 'Remove caregiver' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       expect(within(screen.getByRole('dialog')).queryByText('Reset refused #378')).toBeNull();
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
     });

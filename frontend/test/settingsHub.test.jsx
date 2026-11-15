@@ -16,7 +16,7 @@ import { setupApi } from '../src/lib/setupApi.js';
 // Every label on the admin card. Listed in full deliberately: a menu that silently loses an entry is
 // exactly the kind of regression nothing else would catch.
 const ADMIN_LABELS = [
-  'Setup & diagnostics', 'General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Remote Access', 'Logs',
+  'Setup & diagnostics', 'General', 'Camera and recording', 'Users', 'Integrations', 'Remote access', 'Logs',
 ];
 
 function mockApi({ version = '0.29.0' } = {}) {
@@ -36,11 +36,13 @@ describe('what the menu offers each role', () => {
     renderAsAdmin(<Settings />);
     await screen.findByText('Setup & diagnostics');
     for (const label of ADMIN_LABELS) expect(screen.getByText(label)).toBeTruthy();
-    expect(screen.getByText('Camera Controls, Recording Settings and Clip Management')).toBeInTheDocument();
+    expect(screen.getByText('Camera controls, recording settings and clip management')).toBeInTheDocument();
+    expect(screen.getByText('App name, timezone and temperature unit')).toBeInTheDocument();
     for (const oldLabel of ['Camera controls', 'Recording', 'Clip management']) {
       expect(screen.queryByText(oldLabel)).toBeNull();
     }
-    const rows = [...document.querySelectorAll('.card .list-row')].map((row) => row.textContent);
+    const rows = [...document.querySelectorAll('.card .nav-row')].map((row) => row.textContent);
+    expect(screen.getByRole('button', { name: /Users Manage logins and active sessions/ })).toHaveClass('nav-row');
     const positions = ADMIN_LABELS.map((label) => rows.findIndex((row) => row.startsWith(label)));
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });

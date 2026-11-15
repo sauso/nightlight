@@ -10,7 +10,7 @@ reason about. The container needs its own routable LAN IP so WebRTC has no NAT/I
 (MediaMTX advertises that IP to browsers). There are two supported ways to give it one: **host
 networking** (the README quick-start default — the container shares the host's IP), or an
 **ipvlan network with a dedicated IP**. The Unraid prod + staging deployments both use the latter
-(both on `br0.10` — see Branching and deploy pipeline in `CLAUDE.md`); the host-networking path is what an
+(both on a custom network — see Branching and deploy pipeline in `CLAUDE.md`); the host-networking path is what an
 out-of-the-box `docker run` uses.
 
 ## The video pipeline (the core thing to understand before touching camera code)
@@ -114,6 +114,10 @@ a blank password means "keep the existing one." Keep that invariant.
 - **`lib/rtspProbe.js`** — `validateRtspStream()` (ffprobe over TCP) runs on add/edit so a
   camera that can't be reached (bad creds/path/IP) isn't silently saved; the UI can override
   with `force` for a camera that's just momentarily offline.
+- **ESPHome device discovery** (`lib/esphomeDiscovery.js`, #1071) — browses `_esphomelib._tcp` over mDNS for up to
+  30 seconds and only suggests private IPv4 addresses to admins; it never connects to or adds a device. It reuses
+  `createScanManager` from `cameraDiscovery.js` through its own instance, so a camera search and a device search can
+  run side by side (`POST /api/esphome/discover`, `GET /api/esphome/discover/:scanId`).
 
 ## Self-healing / reconciliation (`backend/src/index.js`)
 
@@ -252,7 +256,13 @@ admin routes that hash (`POST /users`, `PUT /users/:id`) also re-read the caller
 demotion (#261).
 `/me/mfa/enable` also allows one request per user at a time, refused before any hashing, because each
 one costs ten hashes in the shared worker. The worker module keeps each worker's pending jobs separately,
-so a crashed worker rejects only its own jobs. The TOTP replay check (`users.mfa_last_step`, nullable) is
+so a crashed worker rejects only its own jobs. A password that is not valid text (an unpaired UTF-16
+surrogate, which a JSON body can carry as `\ud800`) never reaches the worker: bcryptjs's own text conversion
+fails slowly on one. `lib/passwordHash.js` answers a compare `false` (so `/login` and the confirmation routes
+answer and count it as a wrong password) and rejects a hash with a 400 `UnusablePasswordError`; the routes
+that set a password (`/setup`, `POST`/`PUT /users`, `/me/password`, `/invite/redeem`) check first and answer
+`400 { "error": "That password contains characters that cannot be used" }` before any other work. An emoji is
+a well-formed pair and is accepted as before. The TOTP replay check (`users.mfa_last_step`, nullable) is
 a single `UPDATE ... WHERE mfa_last_step IS NULL OR mfa_last_step < ?` whose row count is the verdict. The
 per-user MFA limiter sits beside the per-source ones in `routes/auth.js` and is keyed on a *verified* MFA
 token; the admin MFA reset also empties it. User-facing rules:
@@ -298,7 +308,9 @@ camera-specific exposure tests cover those. The validation behind the settings, 
 routes (documented ranges, `#RRGGBB` colours, known timezones, the 12-hour snooze cap, no second enrolment
 while MFA is on) is pinned in `backend/test/input-validation.test.js`.
 
-A child's **colour** must be `#RRGGBB` and **birthday** a real `YYYY-MM-DD` date (blank still means default /
+A child's **colour** must be `#RRGGBB`, or the empty string for "no colour" (optional since 2026-11-15: `''` stores `''` on POST and
+clears the colour on PUT; absent or `null` still means the default on POST and "keep" on PUT, and `''` needs no migration because the column is
+`NOT NULL` and `''` satisfies it), and **birthday** a real `YYYY-MM-DD` date (blank still means default /
 clear), and an avatar **photo** (child or user) must be a base64 `data:image/jpeg`, `png` or `webp` URL of at
 most 90 KB (#555). The photo cap is 90 KB, not the 700 KB it once said, because `express.json()` refuses a body
 over its 100 KB default first. For colour, birthday and photo, a value identical to the one stored is accepted
@@ -323,6 +335,71 @@ but keeps the user, so the app stays on screen: `Shell` shows `ServerUnreachable
 lands after the sign-in has ended (no stored token any more) is ignored, so neither leaves a signed-out device on
 "Can't reach Nightlight". On the sign-in screen, once a status check has started the demo's guest sign-in no later
 check runs, so a retry timer that comes due in the same moment cannot open a second guest session.
+
+### Caregiver invites (#1094)
+
+An admin can create a caregiver account without a password and get a one-time link instead; the person opens it and
+chooses their own password. User-facing rules: [caregivers.md](caregivers.md#invite-a-caregiver-with-a-link).
+
+**Data.** `users.password_set` (INTEGER, default 1; added by a guarded `ALTER`, so every existing account is 1) is 0
+for an account still waiting on its invite; its `password_hash` is then a cost-10 bcrypt hash of 32 random bytes
+nobody knows (never empty). `user_invites` holds one row per invite: `token_hash` (sha256 hex of the token, UNIQUE;
+the token itself is never stored), `placeholder_hash` (the account's `password_hash` when the invite was made),
+`created_by`, and `created_at` / `expires_at` / `used_at` as UTC `YYYY-MM-DD HH:MM:SS` text like the session times.
+Rows cascade with their account and are purged daily once used or expired more than 30 days ago
+(`purgeOldInvites`, `middleware/auth.js`, scheduled beside `purgeExpiredSessions`).
+
+**Token.** `crypto.randomBytes(32)` in base64url (43 characters). A 256-bit random token needs no slow hash: lookup is
+by `sha256` equality. It is answered once, in the create (or re-issue) response, and is in no list, GET or log line.
+The public routes take it in the request body, never a query string. The link the web app will build (planned, the
+next update) carries it in the URL fragment, which a browser never sends to a server.
+
+**Routes** (all in `routes/auth.js`, because the redeem needs the module-private `createSession` and `sign`):
+
+| Route | Gate | Request | Answer |
+|---|---|---|---|
+| `POST /api/auth/users` | admin | `{ username, first_name?, last_name?, photo?, role?: 'caregiver', invite: true }` (no password) | `201`, the usual user object plus `invite: { token, expires_at }` |
+| `POST /api/auth/users/:id/invite` | admin | none | `201 { invite: { token, expires_at } }`; every unused invite of the account is deleted first |
+| `DELETE /api/auth/users/:id/invite` | admin | none | `200 { ok: true, revoked: <n> }`; the account stays pending |
+| `POST /api/auth/invite/check` | public | `{ token }` | `200 { first_name, username, app_name }` |
+| `POST /api/auth/invite/redeem` | public | `{ token, password }` | `200 { token, user }`, exactly like `/login`; `409 { "error": "invite_in_progress" }` while another redeem of the same token is hashing |
+
+Every token that cannot be used (unknown, expired, used, revoked, malformed, or the account is no longer a pending
+caregiver holding its placeholder) gets the same `404 { "error": "invite_invalid" }` from both public routes, after the
+same work. `invite` must be the boolean `true` (anything else takes the password path); `invite` with a password, or
+with a role other than `caregiver`, is a `400`. Re-issue answers `400` unless the account is a pending caregiver.
+`GET /api/auth/users` adds three keys to each account (added keys only): `password_set` (boolean),
+`invite_expires_at` (the expiry of an invite the link can still use, by exactly the rule `/invite/check` applies, or
+null when there is none: never made, expired, cancelled, used, or the account's hash was replaced behind it; a screen
+words a pending account with null as "no active invite", not "expired") and `invite_accepted_at` (when an invite was
+used, for 7 days after, else null).
+
+**Redeem.** The cheap checks first (token shape, a live invite, the account still a pending caregiver whose hash is
+still the invite's placeholder), then the 8-character rule and the not-valid-text rule (a `400`, see "Password
+hashing" above), then bcrypt. Two bounds keep the one shared bcrypt worker free for sign-ins: one redeem per token at a
+time and at most 4 invite hashes in flight across all tokens (the rest get the limiters' `429`); both are released
+when the hash fails too. A second redeem of the same token while the first is hashing gets `409 invite_in_progress`,
+not the 404: only a holder of a live token reaches it, so it reveals nothing `/invite/check` does not. **Contract for
+the screens:** disable the button while a redeem is in flight, and treat a `409` as "wait a moment, then try signing in
+with the password you chose". After the hash, the clock is read again and ONE transaction claims the
+invite (`used_at IS NULL AND expires_at > now`) and sets the password (`password_set = 0 AND role = 'caregiver' AND
+password_hash = <placeholder>`); either compare-and-swap missing throws, so the claim rolls back and answers the 404.
+The same transaction deletes the account's other unused invites, sessions and push registrations. After it commits,
+the account's password throttle and two-factor confirmation budget are emptied, and a session is made.
+
+**A pending account never authenticates.** `/login` treats it as a wrong password (the same compare, message and
+throttle count), `/login/mfa` refuses it, and the session check every request passes through joins on
+`users.password_set = 1`, so a session or token from before cannot be used either. `PUT /users/:id` refuses
+`role: 'admin'` for it unless the same request sets a password; an admin setting its password sets `password_set = 1`
+and deletes its unused invites. `keepingAnAdmin` counts only admins with `password_set = 1`, and
+`scripts/promote-admin.js` refuses a pending account.
+
+**Limits on the public routes.** One `express-rate-limit` instance shared by check and redeem, its own (not the
+per-client budget `/login` shares), counting failures only (`skipSuccessfulRequests`): 100 per 15 minutes per source
+address. Junk tokens cost one sha256 and one indexed lookup each and never reach bcrypt. Known limit: behind one proxy
+address (or Tailscale), 100 bad tokens, which anyone can send without holding a link, make the two invite routes
+answer 429 to everyone behind it for the rest of the 15-minute window (sign-in is not affected); a caregiver who sees
+"too many attempts" waits 15 minutes ([caregivers.md](caregivers.md#invite-a-caregiver-with-a-link) says so). Demo mode blocks all five routes (they are unlisted mutations). Tests: `auth-invite.test.js`.
 
 ## Data layer (`backend/src/db.js`)
 
@@ -437,6 +514,85 @@ the bed" (the raw stored row, `?stored=1`, `raw=1` and the store reply keep them
 both null and logs a fixed sentence; #700's history-read counter is restored after the shadow. The rules version becomes
 `'6'` because the returned object changed, although no reported number moved (A/B on both databases).
 
+**Two stored facts per night, read by nothing yet** (sleep score plan, phase 1a; tests in
+`backend/test/sleep-night-facts.test.js`). The per-minute samples are pruned after 30 days, so what a later score and
+night summary need from them is counted in `computeNight` and stored by `upsertNight` in two nullable `sleep_nights`
+columns (guarded `ALTER`s, NULL on older rows, no backfill). `stir_minutes`: minutes of `[onset, sleepEnd)` with an
+in-bed peak over `MOTION_ACTIVE` that are not in a counted wake and are at least `POST_ONSET_SOUND_WITNESS_MIN` after
+onset; sound-only and outside-the-bed-only minutes are excluded on purpose (the detail view's `stir` segment is
+broader and unchanged), and a camera with no bed zone counts all movement (its whole frame is the in-bed channel).
+`summary_facts`: versioned JSON text, the same string on a fresh compute and on the stored row (read it with
+`parseSummaryFacts`): `{ v: 1, climate: { temp_min, temp_max }, sleep: { wakes: [{ start_at, minutes }],
+room_activity_wakes } }`. `wakes` are the runs `accumulateMetrics` counted, so `wakes.length === wake_count` (the
+detail view's `wakes` adds a morning row and is not what is stored); `room_activity_wakes` counts those with an
+`outAt` minute within `ROOM_ACTIVITY_WAKE_MARGIN_MIN` (3, the detail page's alert margin). `stir_minutes` is set on
+an `ok` night only; `summary_facts` on `ok` and on detector-`empty` nights (`sleep: null` there), null otherwise.
+`asNobodyInBed` nulls `stir_minutes` and the `sleep` part and keeps `climate`; a time correction leaves both as
+measured. Unlike #700, #904 and #917, the rules version is NOT bumped for these keys: no rule changed and no existing
+key moved (golden figures captured on the previous source, in the same test file), and a bump would only mark every
+earlier night as scored by other rules.
+
+**The sleep score: the maths, and the routes that return it** (sleep score plan, phases 1b and 1c,
+`planning/sleep-score-plan.md`; tests in `backend/test/sleep-score.test.js`, `backend/test/sleep-baseline.test.js` and
+`backend/test/sleep-score-routes.test.js`). The score is computed on read and never stored. Phase 2 shows it: `components/ScoreRing.jsx` (a decorative inline SVG; the
+control around it carries the accessible text), on the child's card (`SleepSummaryCard.jsx`) and in
+`components/SleepScoreCard.jsx` on the sleep detail page, whose button opens the breakdown in a `Modal`; every word is in
+`frontend/src/lib/sleepScoreText.js`, which falls back to a neutral line for a reason or component key it does not know.
+The per-child switch `children.show_sleep_score` (default 1, admin-only in `PUT /api/children/:id`) is read inside
+`attachScore` itself, so no route can forget it: while it is 0 the night is returned with no `score` and no
+`score_source` key (absent, not null).
+`lib/sleepScoreAttach.js` (`attachScore(child, night, { context, storedNight, nowMs })`) is the one caller of the maths:
+`/sleep/live`, `/sleep?nights=N` and every answer of `/sleep/:date` that is a night pass the exact night object they
+return (after `applyCorrection`, or without it for `?stored=1`, `raw=1` and the store reply) and get it back with an
+added `score` key: `scoreNight`'s result, its `{ score: null, reason, version }` form, or `null` if scoring threw (caught,
+one fixed log line an hour at most, the route still answers). The context a fresh compute is scored with is the one it
+ran with: the route's parsed saved context for `context=stored`, `scoring_view.stored` when `computeNightForDisplay`
+replayed it (`applied === 'stored'`), `currentScoringContext` otherwise; a stored row uses its own `scoring_context`.
+When a read's fresh night is `no_data` and a saved `ok` row exists, the score is the saved row's and
+`score_source: 'stored'` is added; no other key of the fresh night changes. A night in progress or not `ok` skips the
+baseline read. `applyCorrection` adds `wake_given: true` when the review carries a wake time (#1041), which is how a
+wake the parent saved unchanged counts as confirmed.
+**The night summary** (sleep score plan, phase 3; tests in `backend/test/night-summary.test.js`,
+`backend/test/sleep-score-routes.test.js` and `frontend/test/nightSummaryPhrases.test.jsx`). The same `attachScore` adds a
+`summary` key beside `score`: `{ headline: { key }, observations: [{ key, params }], seed }` from
+`lib/nightSummary.js` (`selectSummary(night, score, { childId, input })`, pure, no wording at all). The score is now worked
+out even when the child's switch hides it (that costs the baseline read the switch used to save), because the headline
+class (settled, typical, mixed, unsettled) is derived from the score's continuity and restlessness parts; the switch
+omits only `score` and `score_source`, never `summary`. Selecting the summary has its own try/catch and log line:
+a failure gives `summary: null` and leaves the score and the route alone. It reads the same `toScoringInput` result the
+score used (so the correction rules are the score's: wakes outside a corrected span are filtered, and a time moved by
+more than `correction_span_tolerance_minutes` drops the wake-up and longest-stretch observations) and the stored
+`summary_facts`, which older nights lack. `lib/nightSummaryKeys.js` (no imports) is the one table of headline keys and
+each observation's params; the phrase library `frontend/src/lib/nightSummaryPhrases.js` is tested against it, so a key
+added on one side only fails a test. The library picks a variant with `hash(seed + key)`, skips unknown keys and
+formats times with `lib/homeTime.js`; it is in the browser so retuned wording needs no server release.
+`components/SleepScoreCard.jsx` is the sleep page's night card (ring, duration, a blurb from `nightBlurbText`, the
+"Why this score?" sheet and the review row; a card without a blurb when there is no `summary`),
+and `SleepSummaryCard.jsx` shows the headline on one line.
+`lib/sleepScore.js` holds `lib/sleepScore.js` holds `SCORE_VERSION`, the one frozen `SCORE_CONFIG` (weights, curve anchors, the cap
+margin, band edges, thresholds: change any and bump the version), `toScoringInput(night, { context, nowMs })` and the
+pure `scoreNight(night, baseline, ageMonths)`. `toScoringInput` turns a stored row or a fresh `computeNight` result
+(either with the correction overlay) into one shape and decides per metric whether the figure is usable: settling
+follows `frontend/src/lib/inBed.js`; a span whose asleep or wake time a correction moved by more than
+`correction_span_tolerance_minutes` (15; the larger of the two moves, and a time the detector did not have counts as
+moved) drops the longest stretch and the stir rate; more than 15
+unwatched minutes drops the longest stretch; a night with no confirmed wake or more than 15 unwatched minutes is kept
+out of the usual duration. A fresh compute carries no timezone or window, so its caller passes the context it ran with;
+without one the night matches no baseline. `lib/sleepBaseline.js` (`sleepBaseline(childId, night)`) reads the child's
+stored nights strictly before the night, within 28 days, lays `applyCorrection` over each, builds each through the SAME
+`toScoringInput`, keeps the newest 14 that are `ok`, not promoted from `empty`, at least 80% watched and scored from the
+same camera id and window (`scoring_context`; NULL does not qualify), and returns a median and a count per metric,
+`ready` at 7 usable values of that metric. Clock times are wall-clock minutes since noon in each night's own stored
+zone. Known limits: a physical camera move keeps the camera id, so it does not restart the baseline; the age fallback
+(`AGE_NIGHT_SLEEP_HOURS`, Iglowstein et al. 2003, Table 1) is parent-reported time in bed, not minutes asleep, so it is
+compared with the night's span from falling asleep to waking and is used only until the usual duration is ready
+(`early_estimate`, no band word; the duration component says which with `basis`); the weakest-link cap covers
+duration, continuity and restlessness; consistency measures the shorter way round the clock, but a usual clock time is
+a plain median, so a window that ends near noon can read wrong; the continuity curves for children under
+12 months, or with no birthday, are relative to the child's usual and were not tuned on any infant.
+`scripts/sleep-score-evidence.mjs` scores every stored night of a snapshot copy (tests in
+`backend/test/sleep-score-evidence.test.js`).
+
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
 row's `scoring_context` and parses it (no row, `NULL` or unparseable: `400` with `reason: 'no_stored_context'`, never a
@@ -512,8 +668,9 @@ a recording or wake clip) checks that its `UPDATE` still found the row, and dele
 ## API errors (`backend/src/lib/asyncHandler.js`, `backend/src/middleware/errorHandler.js`)
 
 Every API error is JSON in the same shape the routes already use, `{ "error": "<message>" }`, and a
-request never goes unanswered. Express 4 ignores the promise an `async` handler returns, so **every
-`async` route handler is wrapped in `asyncHandler(...)`**: a rejection (or a throw before the handler's
+request never goes unanswered. Express 4 ignored the promise an `async` handler returns (Express 5, which
+Nightlight now runs, forwards a rejection itself), so **every `async` route handler is still wrapped in
+`asyncHandler(...)`**: a rejection (or a throw before the handler's
 own `try/catch`) is passed to `next(err)` and ends at `errorHandler`, which is mounted **last** in
 `index.js` (after every router and the SPA fallback; Express only delivers an error to handlers
 registered after it). `backend/test/async-errors.test.js` walks every router's real stack and fails for an
@@ -780,7 +937,7 @@ a new deploy has replaced, the reload is what fixes it too (the app also reloads
 
 **Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
 background to repair stale media connections, and that empties React state. The child form, the camera form
-Settings → Camera and Recording → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
+Settings → Camera and recording → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
 (`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
 **no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
 even if allowed, a value that is a URL with credentials in it is dropped whatever its key, and a camera

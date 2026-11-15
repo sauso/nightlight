@@ -127,6 +127,14 @@ const ROUTE_GATES = {
   'POST /api/auth/me/mfa/disable': SIGNED_IN,
   'DELETE /api/auth/users/:id/mfa': ADMIN,
   'DELETE /api/auth/users/:id': ADMIN,
+  // #1094 caregiver invites. Making, re-issuing and revoking an invite is account management (admin). Checking and
+  // redeeming one are PUBLIC: the person opening the link has no account they can sign in to yet, and the invite token
+  // in the body is the credential (one-time, 7 days, caregiver accounts only; failures-only limiter on both;
+  // auth-invite.test.js).
+  'POST /api/auth/users/:id/invite': ADMIN,
+  'DELETE /api/auth/users/:id/invite': ADMIN,
+  'POST /api/auth/invite/check': PUBLIC,
+  'POST /api/auth/invite/redeem': PUBLIC,
 
   // /api/children — `router.use(requireAuth)` gates the whole router; add and delete add requireAdmin.
   'GET /api/children': SIGNED_IN,
@@ -150,6 +158,8 @@ const ROUTE_GATES = {
   'POST /api/cameras/onvif-probe': ADMIN,
   'POST /api/cameras/discover': ADMIN, // #945: multicast scan is an admin-only network action
   'GET /api/cameras/discover/:scanId': ADMIN, // #945: results expose private LAN addresses
+  'POST /api/esphome/discover': ADMIN, // #1071: multicast scan is an admin-only network action
+  'GET /api/esphome/discover/:scanId': ADMIN, // #1071: results expose private LAN addresses
   'POST /api/cameras/probe-report': ADMIN,
   'POST /api/cameras/:id/record/start': SIGNED_IN, //           capturing a moment is acting in it (owner)
   'POST /api/cameras/:id/record/stop': SIGNED_IN,
@@ -251,6 +261,7 @@ const APP_REGISTRATIONS = [
   'use /live requireAuth whepOnlyGuard createProxyMiddleware()', //   SIGNED_IN, plus whepOnlyGuard
   'use /hls requireAuthQueryOrHeader createProxyMiddleware()', //      MEDIA: Safari's <video> cannot send a header
   'use express.json()',
+  'use defaultBody', //                                               no gate: Express 5 leaves req.body undefined, this restores Express 4's {}
   'use demoGuard',
   'use /api/auth authRoutes',
   'use /api/children childrenRoutes',
@@ -275,10 +286,12 @@ const APP_REGISTRATIONS = [
   'get /api/health healthHandler', //                                 PUBLIC: a liveness probe (+ server id and name, #937)
   'post /api/csp-report express.text() <handler>', //                 PUBLIC: browsers send CSP reports without credentials
   'use express.static()',
-  'get * <handler>', //                                               the SPA shell; /api/* falls through to a 404
+  'get /{*splat} <handler>', //                                       the SPA shell (Express 5 spelling of the old `*`); /api/* falls through to a 404
   'use errorHandler', //                                              not a gate: turns a thrown/rejected handler into JSON (#544); must stay LAST
 ];
-const APP_HANDED_TO = ['applyTrustProxy'];
+// listenOrFail(app, PORT, ...) only calls app.listen (lib/listenOrFail.js: Express 5 reports a bind failure through the callback);
+// it registers no route, which is what this pin exists to keep true of anything `app` is handed to.
+const APP_HANDED_TO = ['applyTrustProxy', 'listenOrFail'];
 
 const HOW_TO_UPDATE = 'If you changed a route or a gate ON PURPOSE, update ROUTE_GATES / APP_REGISTRATIONS in ' +
   'backend/test/route-permissions.test.js and say in the PR who gains or loses access. Do not regenerate the pin from the code.';

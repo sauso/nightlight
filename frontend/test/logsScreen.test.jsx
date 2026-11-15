@@ -487,10 +487,13 @@ describe('Settings → Logs', () => {
     });
     const { container } = renderAsAdmin(<SettingsLogs />);
     expect(screen.getByText('Logs')).toBeInTheDocument();
-    expect(screen.getByText('Report a problem')).toBeInTheDocument();
-    expect(screen.getByText('Recent alerts')).toBeInTheDocument();
-    expect(screen.getByText('Camera history')).toBeInTheDocument();
-    expect(screen.getByText('Recent logs')).toBeInTheDocument();
+    // UI consistency (PR-C): every card title is the shared .card-heading (a real heading), not the small grey caption.
+    for (const title of ['Report a problem', 'Recent alerts', 'Camera history', 'Recent logs']) {
+      const heading = screen.getByRole('heading', { name: title });
+      expect(heading, title).toHaveClass('card-heading');
+    }
+    // ...and each of the three feeds has its auto-refresh as a labelled switch, not a bare checkbox.
+    expect(screen.getAllByRole('switch', { name: 'Auto-refresh' })).toHaveLength(3);
     await waitFor(() =>
       expect(container.querySelector('.log-viewer__box').textContent).toContain('movement 0.031')
     );

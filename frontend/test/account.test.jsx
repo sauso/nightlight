@@ -296,6 +296,8 @@ describe('the theme picker', () => {
     // device once a choice has been made.
     mountAccount();
     const group = await screen.findByRole('group', { name: 'Theme' });
+    expect(group).toHaveClass('seg-track');
+    expect(screen.getByRole('heading', { name: 'Appearance', level: 2 }).closest('.card')).toContainElement(group);
     for (const label of ['Light', 'Dark', 'System']) {
       expect(within(group).getByRole('button', { name: label })).toBeTruthy();
     }

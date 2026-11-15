@@ -1,15 +1,24 @@
 :root {
   /* #943: the owner's day/night palette is one tweakable block. Brand actions share --accent;
      --accent-text is lighter only where small text sits on dark surfaces. */
+  /* The navy/lavender neutrals (the original palette) are back (owner, 2026-11-13, design v3). A warm-grey trial on
+     2026-11-12 was rejected: the owner wanted the navy background, so the page, cards, inset, text and borders are the
+     original tokens again, and only the ACCENT colours below (bands, timeline) kept what the trial added. Measured text
+     contrast (WCAG): --text-primary 15.31 / 16.65 / 13.35:1 on the page / card / inset by day, 14.32 / 12.53 / 15.04 at
+     night; --text-secondary 5.75 / 6.26 / 5.02:1 by day (the inset is its tightest surface), 9.07 / 7.93 / 9.53 at night.
+     test/paletteTokens.test.jsx recomputes every text/surface pair from this block. */
   --bg: #f7f4fd;
   --bg-elevated: #ffffff;
   --bg-elevated-2: #eae3f8;
+  /* Child-page button states stay close to the card surface; the inset token is a track, not a pressed fill. */
+  --child-action-hover: #f5f5fd;
+  --child-action-active: #eceefa;
   --text-primary: #1d1a3a;
   --text-secondary: #625c7f;
   --accent: #5663d6;
   --accent-text: #4a55c8;
   --accent-soft: #d3d8ff;
-  /* Peri (owner, 2026-11-06): #5663d6 by day, with WHITE text on it (5.06:1); at night the lighter #8995ff with DARK text (6.71:1).
+  /* Peri (owner, 2026-11-06): #5663d6 by day, with WHITE text on it (5.06:1); at night the lighter #8995ff with DARK text (#14142a, 6.71:1).
      The owner chose both; dark text on #5663d6 would only be 3.57:1, so the two themes need different text colours and that is
      what --on-accent is for: text ON an accent fill is always --on-accent. Borders, rings and icons use --accent-line; small
      text uses --accent-text (#4a55c8 clears 4.5:1 on cards, the page AND the #eae3f8 inset, where plain #5663d6 only reaches
@@ -19,13 +28,90 @@
   --accent-line: #5663d6;
   --complement: #f2c14e;
   --on-complement: #14142a;
+  /* The header is the one navy #14142a in BOTH themes (the original; the warm #1f1a1e of 2026-11-12 is gone). Its text is
+     #e8e2f7 (14.32:1) and its back link --accent-soft/#d3d8ff (12.93:1). index.html's theme-color meta repeats --bar so the
+     phone's status bar matches. */
   --bar: #14142a;
   --bar-text: #e8e2f7;
   --live: #23734f;
   --offline: #aa3f54;
   --border: #ddd5ee;
   --field-bg: #eae3f8;
+  --tap: 44px;
   --radius: 16px;
+
+  /* Score band colours (docs/design-language.md, "Band colours"). Defined here, used by the score ring (and the child card's 12% tint,
+     `.night--<band>`); the strip and breakdown bars follow in later changes. Two rules that hold wherever they are used: a colour is NEVER the only signal (the band word
+     and the number always show), and TEXT IS NEVER SET IN A BAND COLOUR (they are marks: bars, rings, dots). Contrast is
+     WCAG, measured 2026-11-13 on the design v3 colours, which are the 2026-11-12 accents re-tuned for the navy surfaces
+     (a mark needs 3:1).
+     --band-*: the mark on a themed card, by day (on --bg-elevated white / on the --bg-elevated-2 track #eae3f8):
+       great #1e6b3d 6.51 / 5.22   good #0f555c 8.49 / 6.81   fair #a36a10 4.54 / 3.64
+       low   #b85a7e 4.37 / 3.51   early #7a7496 4.41 / 3.53
+     Three day marks moved from the warm trial (design v3): good #126067 to #0f555c (so it stays apart from the rose under
+     protanopia), low #c4688a to #b85a7e (it fell to 2.96:1 on the lavender track, under the 3:1 floor), early #6b6158 to
+     #7a7496 (a warm grey read as a stray brown on lilac; lavender grey reads as "no band").
+     The dark block gives the night values (on #221f3c / the #100f1c track):
+       great #a8edbe 11.68 / 14.02  good #5cbfc6 7.31 / 8.78  fair #d99c50 6.64 / 7.97
+       low   #c77790 4.87 / 5.84    early #d3cde6 10.27 / 12.32   (early moved from beige #ccc3b8, which looked like a dirty
+       highlight on navy)
+     --band-*-ring: the ring on the child page's .night card, which is the same navy gradient in both themes, so these do
+     NOT switch. On the gradient's lightest stop #2c2f63 / against the ring's own track as it composites there (#202145):
+       great #a8edbe 9.16 / 11.37   good #5cbfc6 5.74 / 7.12   fair #d99c50 5.21 / 6.46
+       low   #c77790 3.82 / 4.74    early #d3cde6 8.06 / 10.00
+     (The design's own ring-on-card figures, 6.79 / 4.63 / 4.32 / 3.27 / 6.08, include the 12% band tint it lays over the
+     card, which is now laid over it (`.night--<band>`); the track figures are identical.) The weakest pairs are the day rose bar (3.51:1 on
+     the inset), the day early bar (3.53:1) and the ring's rose (3.27:1 with the tint): all clear the 3:1 a graphic needs,
+     none by much. */
+  --band-great: #1e6b3d;
+  --band-good: #0f555c;
+  --band-fair: #a36a10;
+  --band-low: #b85a7e;
+  --band-early: #7a7496;
+  --band-great-ring: #a8edbe;
+  --band-good-ring: #5cbfc6;
+  --band-fair-ring: #d99c50;
+  --band-low-ring: #c77790;
+  --band-early-ring: #d3cde6;
+
+  /* Placeholder ground behind a camera thumbnail before its picture loads: a dark navy gradient in both themes (a camera
+     image is dark whatever the theme). The original navy pair, from before the 2026-11-12 warm trial (the design v3 token
+     map lists #23264d to #14162f as the original camera placeholder). */
+  --thumb-hi: #23264d;
+  --thumb-lo: #14162f;
+
+  /* Child colours (lib/childColors.js): the six colours a child can be given, as drawn on screen. The STORED value is a different,
+     pastel hex that nothing here changes; these are what the avatar disc and the photo ring use. Same six hues as the stored
+     pastels (same hue and saturation, lightness only), DEEPER by day so the ring and the disc clear the 3:1 a graphic needs on a
+     white card (the pastels are 1.61 to 3.43:1 there, five of the six under 3:1). Initials sit on the fill in --child-*-on, the header navy in both themes:
+     it clears 4.5:1 on every shade (white would need the yellow so deep it reads brown). Measured 2026-11-15 on the white card
+     / the page #f7f4fd by day (ring, then navy initials): yellow #b0790d 3.76 / 3.46, 4.80; green #489070 3.82 / 3.51, 4.73;
+     blue #627ed5 3.84 / 3.53, 4.70; pink #c85f9f 3.75 / 3.45, 4.81; orange #b6752c 3.77 / 3.47, 4.79; violet #747bd9
+     3.76 / 3.46, 4.79. The dark block holds the lighter, original shades; the full table is in docs/design-language.md
+     ("Child colours") and test/paletteTokens.test.jsx recomputes every pair from this stylesheet. */
+  --child-yellow: #b0790d;
+  --child-green: #489070;
+  --child-blue: #627ed5;
+  --child-pink: #c85f9f;
+  --child-orange: #b6752c;
+  --child-violet: #747bd9;
+  --child-yellow-on: #14142a;
+  --child-green-on: #14142a;
+  --child-blue-on: #14142a;
+  --child-pink-on: #14142a;
+  --child-orange-on: #14142a;
+  --child-violet-on: #14142a;
+  /* The photo ring on the child page's `.night` card (Avatar `surface="night"`), which is the same navy gradient (#2c2f63 to #191b38) in BOTH themes, so these do
+     not switch. They are the dark-theme shades, except violet, which is lightened (#7c83db is 3.62:1 on the gradient's lightest
+     stop, but only 2.68:1 once the card's 12% "great"-band wash lightens that corner; #9096e0 is 3.33:1 worst case). The day
+     shades are not used here: they only reach 3.2 to 3.3:1 on the plain gradient, and less under the wash. Defined here only; a
+     test checks every one against the lightest stop, bare and under each band wash. */
+  --child-yellow-night: #f4c56a;
+  --child-green-night: #7fbfa3;
+  --child-blue-night: #8a9fe0;
+  --child-pink-night: #e0a5c9;
+  --child-orange-night: #e0b27f;
+  --child-violet-night: #9096e0;
 
   --font-display: 'Nunito', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
@@ -37,6 +123,8 @@
   --bg: #14142a;
   --bg-elevated: #221f3c;
   --bg-elevated-2: #100f1c;
+  --child-action-hover: #302d49;
+  --child-action-active: #3a3655;
   --text-primary: #e8e2f7;
   --text-secondary: #bcb3d5;
   --accent: #8995ff;
@@ -49,6 +137,21 @@
   --offline: #f4a3ad;
   --border: #383450;
   --field-bg: #100f1c;
+  /* Band marks on a themed card at night (on --bg-elevated #221f3c / the --bg-elevated-2 track #100f1c); measured ratios
+     are in the --band-* comment in :root. The ring variants do not switch, so they are not repeated here. */
+  --band-great: #a8edbe;
+  --band-good: #5cbfc6;
+  --band-fair: #d99c50;
+  --band-low: #c77790;
+  --band-early: #d3cde6;
+  /* Child colours at night: the original lighter shades (the stored values), 4.61 to 9.81:1 on a night card #221f3c (5.27:1 or
+     more on the page), with the same navy initials (5.27:1 or more on each). See the day block above. */
+  --child-yellow: #f4c56a;
+  --child-green: #7fbfa3;
+  --child-blue: #8a9fe0;
+  --child-pink: #e0a5c9;
+  --child-orange: #e0b27f;
+  --child-violet: #7c83db;
 }
 
 * { box-sizing: border-box; }
@@ -102,11 +205,39 @@ button {
   font-family: inherit;
 }
 
+/* No tap-highlight flash on a control. The Android WebView (and iOS Safari) paint a translucent box over whatever is tapped
+   (a grey-blue default on Android), and on our rounded buttons, cards and rows it showed as a square flash that is not part of
+   the design. It is ONE rule for every kind of interactive element, so a new control inherits it: do not set it per
+   component. It covers buttons, links, summaries, selects, labels (which wrap the inputs and the Switch), the checkbox/radio
+   inputs including the role=switch one, the button/tab/menuitem/link roles, and the two plain elements that are click targets
+   without being buttons (the camera tile's video area and a clip row's body).
+   Removing the flash removes the ONLY press feedback some controls had, and a touch tap does not show :focus-visible, so the
+   fallback below gives every button-like control a press state, and a control's own :active rule replaces it. A control with a
+   specific press state of its own is better; the ones that rely on the fallback are listed in docs/design-language.md
+   section 9. Hover rules are unaffected (they stay inside @media (hover: hover)). */
+button, a, summary, label, select, input[type='checkbox'], input[type='radio'], .switch,
+[role='button'], [role='tab'], [role='menuitem'], [role='link'],
+.camera-tile__video-wrap, .clip-row__body {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The generic press state: any enabled button-like control dims a little while it is pressed. brightness only, on purpose:
+   no transform (a shrinking button loses taps near its edge: a full-width .btn at scale(.98) dropped clicks within about 2px of
+   its left and right edge, reproduced in Chromium), no colour fill (a fill token chosen without looking at the control is how
+   the inset colour got used as a pressed fill, see #1064) and no background. :where() makes the selector's own specificity just
+   the :active, so ANY `.control:active` rule written elsewhere wins on the properties it sets (it may set filter itself). */
+:where(button, [role='button'], summary, [role='tab'], [role='menuitem']):where(:not(:disabled)):active {
+  filter: brightness(0.9);
+}
+
 .app-shell {
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  padding-bottom: 64px; /* space for bottom nav */
+  /* Space for the bottom nav PLUS the device's bottom inset: the nav itself pads by that inset (see .bottom-nav), so without it here
+     the last line of every page sat under the nav on a phone with a gesture bar (owner, staging phone 2026-11-13: the sleep page's
+     footer line was clipped). env() is 0 where there is no inset, so nothing changes on a desktop or a plain browser. */
+  padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
 }
 
 .demo-banner {
@@ -163,6 +294,7 @@ button {
 }
 
 .app-header__icon-btn {
+  position: relative;
   background: none;
   border: none;
   padding: 0;
@@ -170,6 +302,9 @@ button {
   display: flex;
   flex-shrink: 0;
 }
+
+/* UI consistency (PR-A): the 36px logo stays inside the fixed header row while its tap area reaches 44px. */
+.app-header__icon-btn::after { content: ''; position: absolute; inset: -4px; }
 
 .app-header__theme {
   position: relative;
@@ -195,21 +330,62 @@ button {
   inset: -7px;
 }
 
+/* UI refresh PR E. `actions` (the sleep page's "⋯" menu) is pinned to the right of the title row. */
+.app-header__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+/* The band-coloured line along the bar's bottom edge on the sleep page: a mark, never text. It is an INSET shadow of the header
+   itself, so it is painted over the bar's own navy (--bar, one navy in both themes) and can never sit on the page background,
+   where the band colours would not reach the 3:1 a graphic needs. It takes the FIXED ring colours (--band-*-ring, made for
+   navy), at full strength, never an opacity blend. 'early' (an early estimate) and 'none' (no score) are one solid neutral,
+   --band-early-ring. test/paletteTokens.test.jsx recomputes every one of these against --bar (all above 5:1). */
+.app-header--band-great { box-shadow: inset 0 -3px 0 var(--band-great-ring); }
+.app-header--band-good { box-shadow: inset 0 -3px 0 var(--band-good-ring); }
+.app-header--band-fair { box-shadow: inset 0 -3px 0 var(--band-fair-ring); }
+.app-header--band-low { box-shadow: inset 0 -3px 0 var(--band-low-ring); }
+.app-header--band-early, .app-header--band-none { box-shadow: inset 0 -3px 0 var(--band-early-ring); }
+
+/* The "⋯" menu (components/MoreMenu.jsx). The button lives on the navy bar, so it takes the bar's soft accent like the back
+   link; it stays compact (32px) while its hit area reaches 44px, the same device as the theme toggle (#381). The panel is a
+   themed popover (it is NOT on the bar), so it sets its own text colour: the header's would otherwise cascade into it. */
+.more-menu { position: relative; }
+.more-menu__btn { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; background: none; color: var(--accent-soft); cursor: pointer; }
+.more-menu__btn::after { content: ''; position: absolute; inset: -6px; }
+.more-menu__panel { position: absolute; right: 0; top: calc(100% + 10px); z-index: 40; min-width: 260px; max-width: min(340px, calc(100vw - 24px)); padding: 6px; background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28); }
+.more-menu__panel[hidden] { display: none; }
+.more-menu__item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 10px; background: none; color: var(--text-primary); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+/* Light state tints, never --bg-elevated-2: that is the inset colour, near-black in the dark theme, so a hovered menu item went
+   black on the raised panel (the same root cause as the child page's rows, #1064). Hover only for a real pointer: a phone has no
+   hover, and the fill would stay on the item after a tap. The keyboard cursor (:focus-visible) and a press keep their fill. */
+.more-menu__item:focus-visible { background: var(--child-action-hover); }
+@media (hover: hover) { .more-menu__item:hover:not(:disabled) { background: var(--child-action-hover); } }
+.more-menu__item:active:not(:disabled) { background: var(--child-action-active); }
+.more-menu__item:disabled { opacity: 0.5; cursor: default; }
+.more-menu__panel .sleep-detail__recompute-note { margin: 0; padding: 0 12px 8px; }
+
 .app-header h1 {
   font-size: 22px;
   color: var(--bar-text);
 }
 
 /* Owner's 2026-11-01 phone screenshots: long back labels took about 40% of the bar and wrapped
-   Camera controls / Clip Management. Cap Back at 35% to leave roughly 225dp for the title;
+   Camera controls / Clip management. Cap Back at 35% to leave roughly 225dp for the title;
    this is an estimate from those screenshots, not measured on devices. */
 .app-header__back {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 2px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 35%;
+  /* 42%, up from 35% (UI consistency PR-A): "Camera settings" needs about 106px of text room and 35% left only 92px at
+     390px wide (Codex review of #1084, measured at 15px). The label never wraps now (nowrap + ellipsis below), so the
+     owner's 2026-11-01 worry (wrapping) does not apply; the title still gets about 190px at 390px. At 320px the longest
+     label still ellipsises, which is the accepted limit. */
+  max-width: 42%;
   margin-left: -6px;
   padding: 4px 6px 4px 0;
   background: none;
@@ -219,6 +395,9 @@ button {
   font-size: 15px;
   font-family: inherit;
 }
+
+/* UI consistency (PR-A): expand the back target vertically without changing the fixed 36px header row. */
+.app-header__back::after { content: ''; position: absolute; inset: -7px 0; }
 
 .app-header__back svg {
   flex-shrink: 0;
@@ -277,6 +456,7 @@ body.in-pip .pip-btn,
 body.in-pip .settings-btn,
 body.in-pip .mute-btn,
 body.in-pip .talk-btn,
+body.in-pip .camera-tile__video-dot,
 body.in-pip .rec-btn,
 body.in-pip .fullscreen-btn,
 body.in-pip .ptz-btn,
@@ -416,8 +596,12 @@ body.in-pip .tile-menu-backdrop {
   width: 100%;
 }
 
-.hamburger-item:hover {
-  background: var(--bg-elevated-2);
+/* No component uses .hamburger-item any more (the hamburger left AppHeader); fixed rather than deleted so a revival does not bring back
+   the near-black hover fill (same token and pointer-only rule as .more-menu__item). */
+@media (hover: hover) {
+  .hamburger-item:hover {
+    background: var(--child-action-hover);
+  }
 }
 
 .hamburger-item--logout {
@@ -511,9 +695,14 @@ body.in-pip .tile-menu-backdrop {
     transition: background 0.15s ease, color 0.15s ease;
   }
 
-  .bottom-nav a:hover {
-    background: var(--bg-elevated-2);
-    color: var(--text-primary);
+  /* The sidebar's hover was the inset fill, which is also the SELECTED item's fill below (so a hovered item looked selected) and is
+     near-black at night. It is the light state tint now, and pointer-only (an iPad in landscape is wide enough for this rail and
+     has no hover). The selected item's own fill below is a deliberate resting surface, not a hover, and is unchanged. */
+  @media (hover: hover) {
+    .bottom-nav a:hover {
+      background: var(--child-action-hover);
+      color: var(--text-primary);
+    }
   }
 
   .bottom-nav a.active {
@@ -596,41 +785,45 @@ body.in-pip .tile-menu-backdrop {
 .tailscale-card, .about-card { min-width: 0; }
 .tailscale-card__heading, .about-card__heading, .tailscale-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tailscale-card__heading, .about-card__heading { justify-content: space-between; }
-.tailscale-card__heading .card-title, .about-card__heading .card-title { margin: 0; }
+.tailscale-card__heading .card-title { margin: 0; }
+.about-card__heading { margin-bottom: 12px; }
+.about-card__heading .card-heading { margin: 0; }
 .tailscale-card .btn, .remote-advanced summary, .tailscale-advanced summary { min-height: 44px; }
 .tailscale-actions .btn { flex: 1 1 130px; width: auto; }
 .tailscale-card p, .tailscale-card li, .about-card p, .about-card li { line-height: 1.5; }
 /* About's Support and safety text sits under the title (the Connection card's text follows an h3, which carries its own margin). */
 .about-card__text { margin: 12px 0; }
 .about-card__text:last-child { margin-bottom: 0; }
-/* A button straight under the title (Remote Access -> Test Low latency video) would touch it: the heading carries no bottom margin. */
-.about-card__heading + .btn { margin-top: 12px; }
 /* Owner testing 2026-11-05: the card's content outranked its own title. The title is the 12px grey .card-title, the h3s fell
    back to the browser default (~18px) and the address was 17.6px. Everything here now sits on the design-language scale
    (docs/design-language.md §3): title 16 (sheet-title size), sub-heading 14, address 15, body 14. The wizard shows the same
    card without the title; its step heading above it is the larger one, so the order still reads title > sub-heading > text. */
 /* Settings -> About -> Connection (.about-card) deliberately shares this look: the owner asked on 2026-11-07 for it to mirror
-   the Remote Access card, after two layouts of its own read badly on a phone. Change the two together. Owner 2026-11-10: the
+   the Remote access card, after two layouts of its own read badly on a phone. Change the two together. Owner 2026-11-10: the
    four cards under "Use your own domain or port forward (advanced)" had the old 12px grey title over 16px body text, the same
    inversion as 2026-11-05, so they are .about-card too (16px/800 title, 14px text). */
 .tailscale-card, .about-card { font-size: 14px; }
-.tailscale-card__heading .card-title, .about-card__heading .card-title { font-size: 16px; font-weight: 800; color: var(--text-primary); }
+.tailscale-card__heading .card-title { font-size: 16px; font-weight: 800; color: var(--text-primary); }
 .tailscale-card h3, .about-card h3 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; }
 /* Owner 2026-11-07: the sub-heading on About is Inter, like the address and text under it (headings h1-h3 are Nunito by default,
-   design-language.md section 3). Only the card TITLES stay Nunito. The Remote Access card keeps the default for now. */
+   design-language.md section 3). Only the card TITLES stay Nunito. The Remote access card keeps the default for now. */
 .about-card h3 { font-family: var(--font-body); }
 /* Owner 2026-11-10: on a phone the address ("https://<name>.<tailnet>.ts.net", about 35-45 characters) ran onto a second line.
-   The font now shrinks with the screen (15px on a desktop, about 13px on a 390px phone, never below 12px) so a typical name stays
+   The font now shrinks with the screen (15px on a desktop, 14px on a 390px phone, never below 14px) so a typical name stays
    on one line; a name still too long wraps, at a dot first (TailscaleCard puts a <wbr> after each one), and only mid-word as the
-   last resort (overflow-wrap), so it can never run off the card. The 3.5vw and the 12px floor are judgement, checked against a
+   last resort (overflow-wrap), so it can never run off the card. The 3.5vw and the 14px floor are judgement, checked against a
    few fictional names at 320-430px, not measured on every device. */
-.tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: clamp(12px, 3.5vw, 15px); }
+.tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: clamp(14px, 3.5vw, 15px); }
 .tailscale-hint { color: var(--text-secondary); font-size: 0.875rem; }
 .tailscale-qr { width: min(180px, 100%); margin: 16px auto; text-align: center; }
 .tailscale-qr svg { display: block; width: 100%; height: auto; }
 .tailscale-qr__background { fill: var(--bg-elevated); }
 .tailscale-qr__modules { fill: var(--text-primary); }
 .tailscale-qr figcaption { margin-top: 8px; color: var(--text-secondary); }
+/* The caregiver invite panel (components/InvitePanel.jsx, #1094). The link is long and has no spaces, so it must be allowed to break
+   anywhere (as .tailscale-address does); user-select: all makes one tap-and-hold select the whole thing for a hand copy. */
+.invite-panel__link { overflow-wrap: anywhere; word-break: break-all; font-size: 13px; color: var(--text-secondary); user-select: all; }
+.invite-panel__status { min-height: 1.4em; margin: 6px 0; }
 .tailscale-advanced, .remote-advanced { margin-top: 18px; }
 .tailscale-advanced summary, .remote-advanced summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
 .tailscale-advanced summary:focus-visible, .remote-advanced summary:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
@@ -676,7 +869,7 @@ body.in-pip .tile-menu-backdrop {
    portrait phones, tablets, and the ≥1200px desktop sidebar layout are untouched; :not(:fullscreen)
    leaves a fullscreened video full-size. */
 @media (orientation: landscape) and (max-height: 480px) {
-  .app-shell { padding-bottom: 48px; }
+  .app-shell { padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
 
   .app-header {
     min-height: 0;
@@ -686,6 +879,7 @@ body.in-pip .tile-menu-backdrop {
   .app-header h1 { font-size: 17px; }
   .app-header__top-row { min-height: 28px; } /* the slim bar's row: the 28px logo, as 36px is on the full bar */
   .app-header__icon { width: 28px; height: 28px; }
+  .app-header__icon-btn::after { inset: -8px; } /* 28px logo + 8px each side = the same 44px target as portrait */
   .app-header__theme { width: 26px; height: 26px; }
   .app-header__theme::after { inset: -9px; }
 
@@ -835,7 +1029,7 @@ body.in-pip .tile-menu-backdrop {
 
 .talk-btn--active {
   background: var(--accent);
-  color: #0a0d1c;
+  color: var(--on-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
@@ -937,6 +1131,18 @@ body.in-pip .tile-menu-backdrop {
   font-weight: 600;
   color: var(--text-primary);
   text-align: center;
+  margin-bottom: 2px;
+}
+
+/* The camera's status as a dot and a word under its name, so the word the tile strip no longer prints is always
+   readable here (colour is never the only signal). */
+.tile-menu__state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
   margin-bottom: 10px;
 }
 
@@ -969,8 +1175,11 @@ body.in-pip .tile-menu-backdrop {
   cursor: pointer;
 }
 
-.tile-menu__item:hover {
-  background: var(--bg-elevated);
+/* Pointer-only: a hover FILL on a phone stays on the item after a tap (same fault as #1064's rows). */
+@media (hover: hover) {
+  .tile-menu__item:hover {
+    background: var(--bg-elevated);
+  }
 }
 
 .tile-menu__item--active {
@@ -1008,6 +1217,14 @@ body.in-pip .tile-menu-backdrop {
   border-radius: 12px;
   cursor: pointer;
 }
+
+/* #1076: the sheet's two destinations are full-width rows, with a clear 56px tap target. */
+.tile-menu__actions { display: grid; gap: 4px; margin-bottom: 8px; }
+.tile-menu__action { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text-primary); font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+.tile-menu__action--stop { color: var(--offline); }
+.tile-menu__action:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.tile-menu__action:active { background: var(--child-action-active); }
+@media (hover: hover) { .tile-menu__action:hover { background: var(--child-action-hover); } }
 
 /* Shown over a tile the user has stopped (per-device playback off, stream torn down). */
 .camera-tile__stopped {
@@ -1103,6 +1320,24 @@ body.in-pip .tile-menu-backdrop {
   50% { box-shadow: 0 0 0 7px rgba(224, 85, 95, 0); }
 }
 
+/* Camera status dot on the video (owner, 2026-11-15: it read oddly beside the child's name in the strip). Top-left,
+   on the vertical centre of the 30px control row that starts at top:10px (10 + 15 - 7 = 18). Without a mic button it
+   takes the corner (left:14px: the 10px edge the controls use plus 4px of air; not measured over real footage); with one (.--after-mic) it sits just right of the 30px mic button, which ends at 40px (left:48px).
+   ⚠️ Keep it clear of the mic's 44px tap area (::after reaches to 47px, see ".mute-btn::after" above): the dot starts
+   at 48px, and pointer-events:none means it can never take a tap anyway. The same drop-shadow glow as the neighbouring
+   overlay icons keeps it legible over bright and dark footage alike. It is the ordinary BreathingDot, so the
+   prefers-reduced-motion rule for .breathing__ring already stills it; no separate rule is needed. z-index 2 like the
+   buttons: above the video, and below the "Camera stopped" cover (z 5), which hides every overlay control the same way. */
+.camera-tile__video-dot {
+  position: absolute;
+  top: 18px;
+  left: 14px;
+  z-index: 2;
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 4px rgba(0, 0, 0, 0.55));
+}
+.camera-tile__video-dot--after-mic { left: 48px; }
+
 .mute-btn svg,
 .pip-btn svg,
 .settings-btn svg,
@@ -1189,30 +1424,6 @@ body.in-pip .tile-menu-backdrop {
   color: var(--text-primary);
 }
 
-/* Camera capability badges (e.g. two-way audio) in the Cameras list */
-.cam-badge-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-}
-.cam-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  border: 1px solid var(--border);
-}
-.cam-badge--ok {
-  color: var(--live);
-  border-color: var(--live);
-}
-.cam-badge--bad {
-  color: var(--offline);
-  border-color: var(--offline);
-}
-
 /* Filled status pill (e.g. MQTT connection state in Settings): green = ok, red = bad, grey = off. */
 .status-badge {
   display: inline-block;
@@ -1230,98 +1441,297 @@ body.in-pip .tile-menu-backdrop {
 .status-badge--off { background: var(--text-secondary); }
 .status-badge--sm { padding: 2px 8px; font-size: 11px; }
 
-/* Rich camera row — small live thumbnail + name + Online/Offline pill + child chip + badges.
-   Shared by the Child detail screen (and reusable). */
-.cam-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 14px; border-bottom: 1px solid var(--border);
-  width: 100%; text-align: left; background: none; border-top: none; border-left: none; border-right: none;
-  font: inherit; color: var(--text-primary);
+/* A child's camera tile on the child page (components/ChildCameraTile.jsx; UI refresh PR D, the approved design). A dark tile in
+   BOTH themes, like a camera picture and like the night card above it, so its text colours are literals that do not follow the
+   theme: chip text #eef0ff on the tile's gradient is 14:1 or more, and the action's dark label on #8995ff is 6.71:1 (the same pair
+   as the night card's primary action). The status dot colours are marks, not text, and each is also said in words in the chip
+   (never colour alone): online #5fd08f, offline #e0556b (the REC badge's red), disabled #b9bdf0. They are brighter than --live and
+   --offline because those two are tuned for a light card and read dim on this ground. */
+.child-cam {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 64px; padding: 10px 6px 10px 16px;
+  margin-bottom: 14px; border-radius: 18px; color: #eef0ff;
+  background: linear-gradient(165deg, var(--thumb-hi) 0%, var(--thumb-lo) 100%);
 }
-.cam-row:last-child { border-bottom: none; }
-.cam-row:hover { background: var(--bg-elevated-2); }
-.cam-thumb {
-  width: 54px; height: 40px; border-radius: 9px; flex-shrink: 0; position: relative;
-  background: radial-gradient(120% 100% at 30% 12%, #2b2f5c 0%, #14162f 78%);
+.child-cam--online { --cam-dot: #5fd08f; }
+.child-cam--offline { --cam-dot: #e0556b; }
+.child-cam--disabled { --cam-dot: #b9bdf0; }
+/* The name and the detection line, stacked, taking the room the buttons leave. It WRAPS rather than truncating the line (phone
+   pass: at 320px "Motion on · Sound on" has to stay readable beside a 44px gear and Watch live). */
+/* `flex-wrap` on the row and a 140px basis here: at 320px the name had one letter per line (phone pass) because the two buttons took the room;
+   the buttons now drop to a second line when the name would be narrower than that. */
+.child-cam__info { flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.child-cam__chip { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; line-height: 1.3; min-width: 0; }
+.child-cam__dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--cam-dot); }
+.child-cam__name { min-width: 0; overflow-wrap: break-word; }
+.child-cam__state { flex: none; white-space: nowrap; font-weight: 500; }
+/* Visually hidden, still read by a screen reader (the "online" the dot stands for). */
+.child-cam__sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* The gear sits at the row's end, the same 44px target it was. */
+.child-cam__settings {
+  flex: none; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%; background: none; color: #c7caff; cursor: pointer;
 }
-.cam-thumb.sm { width: 40px; height: 30px; border-radius: 7px; }
-.cam-thumb.off { filter: grayscale(1) brightness(0.62); }
-.cam-thumb__dot { position: absolute; top: 5px; left: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 32%, transparent); }
-.cam-row__main { flex: 1; min-width: 0; }
-.cam-row__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.cam-row__name { font-weight: 600; font-size: 15px; }
-.cam-row__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-.cam-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--accent-text); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 2px 9px 2px 3px; border-radius: 999px; }
-.cam-chip__mini { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+@media (hover: hover) { .child-cam__settings:hover { background: rgba(255, 255, 255, 0.1); } }
+.child-cam__settings:active { background: rgba(255, 255, 255, 0.16); }
+/* The detection line: quiet muted text under the name. #b9bdf0 is the night card's muted tint (6.85:1 on its lightest stop, and
+   this tile is as dark). */
+.child-cam__detect { padding-left: 16px; font-size: 13px; line-height: 1.3; color: #b9bdf0; }
+.child-cam__watch {
+  flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px;
+  border: none; border-radius: 999px; background: #8995ff; color: #14142a; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+@media (hover: hover) { .child-cam__watch:hover { background: #9aa4ff; } }
+.child-cam__watch:active { background: #aeb6ff; }
+.child-cam__settings:focus-visible, .child-cam__watch:focus-visible { outline: 2px solid #c7caff; outline-offset: 2px; }
+
+/* The child page's layout (pages/ChildDetail.jsx; UI refresh PR D). A phone is one column in DOM order: night card, camera,
+   timelapse, alerts, recordings, sensor history. From 1024px the same elements go into two columns as drawn (night card then
+   alerts on the left; camera, timelapse, recordings and sensor history on the right) by grid placement ONLY, never `order`, so the
+   keyboard and reading order stay the DOM order. The rows are
+     1  night card | camera(s)        (the camera column stretches to the card's height)
+     2  alerts ...  | timelapse
+     3  alerts ...  | recordings
+     4  alerts ...  | sensor history
+     5  alerts ...  | (spare)
+   with the alerts card spanning rows 2 to the end and the last row `1fr`: a spanning item that touches a flexible track is
+   sized by that track, so an alerts list expanded to 20 rows grows into the spare row instead of pushing a gap under the
+   timelapse. Sections that render nothing (no timelapse, no recordings) leave an empty zero-height box, and the margins live
+   on the cards INSIDE the boxes, so an empty one adds no gap. */
+.child-page__cameras { display: flex; flex-direction: column; }
+.child-page__nocam { color: var(--text-secondary); font-size: 13px; }
+@media (min-width: 1024px) {
+  .app-main.child-page { max-width: 1040px; }
+  .child-page {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto auto auto 1fr;
+    column-gap: 20px; align-items: start;
+  }
+  .child-page__night { grid-column: 1; grid-row: 1; }
+  .child-page__cameras { grid-column: 2; grid-row: 1; align-self: start; }
+  .child-page__timelapse { grid-column: 2; grid-row: 2; }
+  .child-page__alerts { grid-column: 1; grid-row: 2 / -1; }
+  .child-page__recordings { grid-column: 2; grid-row: 3; }
+  .child-page__sensors { grid-column: 2; grid-row: 4; }
+}
 
 /* Child hero ("night") card — identity now, last night's sleep later. */
-.night { background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: #eef0ff; border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
+/* ONE fixed navy gradient in both themes (the original #2c2f63 to #191b38), so its text colours are literals that do not
+   follow the theme, kept here as four properties so no rule below repeats a hex. Measured on the gradient's LIGHTEST stop
+   (#2c2f63), where contrast is lowest (it only rises towards #191b38): --night-text #eef0ff 10.95:1; --night-muted #b9bdf0
+   6.85:1 (4.5:1 needed for small text; 5.07:1 or more at the corner the ring's 12% band wash lightens, per the design);
+   --night-link #c7caff 7.86:1 (the periwinkle tint, for the one tappable accent and the chevron); --night-number white for
+   the big figure, as in the design. The 2026-11-12 trial collapsed the old lavender ladder (#eef0ff, #cdd0ff, #b9bdf0,
+   #9fa3e0, #8f93d0) to a few tints; that structure stays, because its dimmest step (#8f93d0, 4.28:1, under the 4.5:1 text needs) was the weakest text on
+   the card and one muted tint is easier to keep readable. test/paletteTokens.test.jsx recomputes these from this rule. */
+.night { --night-text: #eef0ff; --night-muted: #b9bdf0; --night-link: #c7caff; --night-number: #ffffff; --night-divider: rgba(255, 255, 255, 0.1); --night-action: #8995ff; --night-on-action: #14142a; --night-error: #f4a3ad; background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: var(--night-text); border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
+/* A 12% wash of the night's band colour over the card's gradient (owner approved the colour-scaled design, 2026-11-12).
+   ChildDetail.jsx puts `night--<band>` on the card while a score is shown; the band's --band-*-ring colour becomes
+   --night-tint and the card paints it as a flat layer ABOVE the gradient (a background layer, not a pseudo-element, so it
+   cannot sit over the text or intercept a tap). No class means the plain gradient from the `.night` rule above. The wash
+   only moves each pixel 12% of the way to the tint, so the text colours were re-measured on the TINTED lightest stop for
+   every band (paletteTokens.test.jsx recomputes them from this sheet).
+   ⚠️ INSIDE @supports, ON PURPOSE. A declaration that holds var() is valid at PARSE time on every engine and only checked
+   at computed-value time, so on a WebView with no color-mix() (iOS 15 to 16.1, Android WebView before Chromium 111) a
+   `background` using color-mix(... var(--night-tint) ...) would be "invalid at computed-value time" and the WHOLE
+   background would fall to transparent: white text on the page colour. @supports is decided at parse time, so an engine
+   without color-mix skips the block and keeps the plain gradient. The gradient is repeated here (a later rule has to
+   restate the whole `background`); paletteTokens.test.jsx fails if the two copies drift apart, and if any color-mix
+   background on .night ever appears outside an @supports block. */
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .night--great { --night-tint: var(--band-great-ring); }
+  .night--good { --night-tint: var(--band-good-ring); }
+  .night--fair { --night-tint: var(--band-fair-ring); }
+  .night--low { --night-tint: var(--band-low-ring); }
+  .night--early { --night-tint: var(--band-early-ring); }
+  .night--great, .night--good, .night--fair, .night--low, .night--early {
+    background: linear-gradient(color-mix(in srgb, var(--night-tint) 12%, transparent), color-mix(in srgb, var(--night-tint) 12%, transparent)), linear-gradient(165deg, #2c2f63 0%, #191b38 100%);
+  }
+}
 .night__head { display: flex; align-items: center; gap: 13px; width: 100%; }
-.night__avatar-btn { background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; border-radius: 50%; line-height: 0; }
-.night__avatar-btn:focus-visible { outline: 2px solid #c7caff; outline-offset: 3px; }
-.night__id-btn { flex: 1; min-width: 0; display: block; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit; text-align: left; }
-.night__edit { background: none; border: none; cursor: pointer; font-family: inherit; }
+/* The avatar button opens the photo, or settings when there is none (it replaced the "Tap to add birthday & photo" line); it
+   carries no camera badge (owner, 2026-11-15: the badge belongs on the edit screens, where the photo is actually changed).
+   The 64px avatar is the design's smaller portrait: the card's weight now goes to the night, not the face. */
+.night__avatar-btn { position: relative; background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; border-radius: 50%; line-height: 0; }
+.night__avatar-btn:focus-visible { outline: 2px solid var(--night-link); outline-offset: 3px; }
+/* A child's photo wears a 3px ring in the child's colour (Avatar.jsx, `data-child-ring`: a box-shadow, so it takes no layout). The
+   2px keyboard outline above would sit on top of that ring (3px of shadow, outline starting 3px out), so when the avatar is ringed
+   the outline moves 3px further out, clear of the ring and still distinct from it (a 2px outline in the link colour, not a coloured band). */
+.night__avatar-btn:has([data-child-ring]):focus-visible { outline-offset: 6px; }
 /* Enlarged child photo in a modal (tapped from the detail hero). */
 .photo-full { display: block; width: 100%; border-radius: 12px; }
 .night__id { flex: 1; min-width: 0; }
-.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; }
-.night__age { display: block; font-size: 12.5px; color: #b9bdf0; margin-top: 3px; }
-.night__edit { font-size: 12.5px; color: #c7caff; opacity: 0.85; flex-shrink: 0; }
-.night__sleep { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); color: #cdd0ff; }
-.night__soon { font-size: 12px; color: #9fa3e0; margin-top: 2px; }
-/* "In bed 19:47 · Asleep 20:04" — same weight as the range line above it. Its own class rather than a
-   second .night__soon so nothing selecting "the range line" can pick this one up instead. */
-.night__inbed { font-size: 12px; color: #9fa3e0; margin-top: 2px; }
-.night__sleep-head { font-weight: 600; font-size: 13px; color: #cdd0ff; }
-.night__sleep-big { font-size: 22px; font-weight: 700; color: #fff; margin: 1px 0 2px; line-height: 1.1; }
-.night__est { font-size: 10.5px; color: #8f93d0; margin-top: 5px; }
+/* One line, cut with an ellipsis: a long or unbroken name must not push the gear off a 375px card (.night__id is a min-width: 0 flex child). */
+.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.night__age { display: block; font-size: 13px; color: var(--night-muted); margin-top: 3px; }
+/* The settings entry: one gear, 44px square (the touch-target floor), on the card's right. It replaced the name/age buttons and
+   the "Edit ›" link, which all went to the same place. */
+.night__settings { flex: none; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 50%; cursor: pointer; color: var(--night-link); }
+/* Pointer-only: on a phone the fill would stay on the button after a tap. */
+@media (hover: hover) { .night__settings:hover { background: var(--night-divider); } }
+.night__settings:focus-visible { outline: 2px solid var(--night-link); outline-offset: 2px; }
+.night__sleep { display: block; margin-top: 14px; padding: 14px 0 0; border-top: 1px solid var(--night-divider); color: var(--night-muted); }
+/* The label / duration column, the ring and the chevron on one row; the headline sits under the row, full width, so the ring no
+   longer narrows it. The chevron is the card's only "this is a link" cue besides the label, so it stays. */
+.night__sleep-row { display: flex; align-items: center; gap: 11px; }
+.night__soon { font-size: 12px; color: var(--night-muted); margin-top: 2px; }
+.night__sleep-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--night-muted); }
+.night__sleep-big { font-size: 28px; font-weight: 700; color: var(--night-number); margin: 3px 0 0; line-height: 1.1; }
+.night__sleep-unit { font-size: 15px; font-weight: 500; color: var(--night-muted); }
+/* The night summary's headline on the child's card. It WRAPS (two lines at most in practice): at 320px wide "Steady, with some
+   waking or stirring." was cut to "Steady, with some waking or stirri..." (phone pass, UI refresh PR H, 2026-11-13), which hides the
+   one thing the line is for. It used to be one line cut with an ellipsis because the text is also in the button's aria-label, but
+   that serves a screen reader, not the person looking at the card. `overflow-wrap: anywhere` so a long unbroken word in a
+   translated or future phrase wraps rather than pushing the card wider. */
+.night__headline { font-size: 15px; font-weight: 700; line-height: 1.35; color: var(--night-text); margin-top: 14px; overflow-wrap: anywhere; }
+/* "Score and night summary after 7:00 AM" (lib/sleepScoreText.js pendingNightText), on a night that is still going: quiet, because
+   it is a promise and not a result, so it is the muted tint and not the headline's weight. */
+.night__pending-line { font-size: 13px; line-height: 1.4; color: var(--night-muted); margin-top: 14px; overflow-wrap: anywhere; }
+/* The radar's heart rate and breathing (SleepSummaryCard `night.vitals`): one quiet line under the headline, the same muted tint as the
+   pending line because it is a sensor estimate and not the result. The two figures sit side by side and wrap onto a second line at 320px
+   (flex-wrap) rather than being cut. Tokens only: the navy card is the same in both themes (paletteTokens pins that). */
+.night__vitals { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; line-height: 1.4; color: var(--night-muted); margin-top: 10px; font-variant-numeric: tabular-nums; }
+.night__vital { display: inline-flex; align-items: center; gap: 5px; }
 
 /* Sleep summary card as a button into the detail page */
-.night__sleep--btn { width: 100%; background: none; border: none; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: left; cursor: pointer; font: inherit; }
+.night__sleep--btn { width: 100%; background: none; border: none; border-top: 1px solid var(--night-divider); text-align: left; cursor: pointer; font: inherit; }
 .night__sleep-body { flex: 1; min-width: 0; }
-.night__sleep-chev { flex: none; opacity: 0.6; transition: transform 0.15s ease, opacity 0.15s ease; }
+.night__sleep-chev { flex: none; color: var(--night-link); opacity: 0.6; transition: transform 0.15s ease, opacity 0.15s ease; }
 .night__sleep--btn:hover .night__sleep-chev, .night__sleep--btn:focus-visible .night__sleep-chev { opacity: 1; transform: translateX(2px); }
+/* "Add a birthday in settings to see a score sooner": a quiet text button, shown only when a missing birthday is why a night
+   has no score (SleepSummaryCard.jsx). 44px tall to be a real target; no fill so it never competes with the question below. */
+.night__nudge { display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 0; background: none; border: none; cursor: pointer; text-align: left; font: inherit; font-size: 13px; color: var(--night-link); text-decoration: underline; }
+
+/* The morning question, INSIDE the card (components/MorningReviewCard.jsx): a divider, the question, two equal buttons. The
+   primary is the card's periwinkle with dark text (--night-action on --night-on-action, measured in paletteTokens.test.jsx);
+   the other is an outline. ⚠️ Not the app's .btn-primary colours: those follow the THEME (white text on #5663d6 by day), and this
+   card is the same navy in both themes. Both are 44px tall. */
+.night__review { position: relative; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--night-divider); }
+.night__review-q { font-size: 14px; line-height: 1.35; color: var(--night-text); padding-right: 36px; min-height: 20px; }
+.night__review-dismiss { position: absolute; top: 3px; right: -12px; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 50%; cursor: pointer; color: var(--night-muted); }
+.night__review-dismiss:hover { color: var(--night-text); }
+.night__review-dismiss:focus-visible { outline: 2px solid var(--night-link); outline-offset: -4px; }
+.night__review-actions { display: flex; gap: 10px; margin-top: 12px; }
+.night__review-actions .btn { flex: 1 1 0; padding: 10px 12px; }
+.night__review .night__review-yes { background: var(--night-action); color: var(--night-on-action); }
+.night__review .night__review-no { background: transparent; border: 1px solid rgba(238, 240, 255, 0.5); color: var(--night-text); }
+.night__review .btn:focus-visible, .night__review .review-card__body:focus-visible { outline: 2px solid var(--night-link); outline-offset: 2px; }
+.night__review-err { margin-top: 10px; font-size: 13px; font-weight: 600; color: var(--night-text); }
+/* The answered state (ReviewReceipt with `embedded`): the same words as the sleep page's receipt, in the card's own colours. */
+.night__review .review-card__body { width: 100%; min-height: 44px; padding: 0; gap: 12px; color: inherit; font: inherit; }
+.night__review .review-card__icon--done { color: var(--night-link); background: var(--night-divider); }
+.night__review .card-title { margin: 0; color: var(--night-text); font-size: 14px; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.night__review .camera-tile__sub { color: var(--night-muted); }
+.night__review .review-card__go { color: var(--night-link); padding-right: 0; }
 
 /* --- Sleep detail page --- */
-/* Timeline segment colours (theme-aware) */
-:root { --sleep-asleep: #5b63c4; --sleep-stir: #a7ade4; --sleep-wake: #e0894a; --sleep-awake: #d2d0e2; --sleep-visit: #2fa39a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; }
-:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #4a4f86; --sleep-wake: #e89a5c; --sleep-awake: #3c3f60; --sleep-visit: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5a5c6e; }
+/* Timeline segment colours (theme-aware; the 2026-11-12 accents on the original navy surfaces, design v3, 2026-11-13).
+   asleep   #4b53b5 day / #7c85e6 night: 6.55:1 / 4.78:1 on the card.
+   stir     #7279c6 day / #a7ade4 night (design v3.1, 2026-11-13; v3 had #a7ade4 / #4a4f86). Day: 3.99:1 on the card, 3.20:1 on
+            the inset, both clear of 3:1. Night: 7.33:1 on the card, 8.80:1 on the inset. Against asleep it is only 1.64:1 by day
+            and 1.53:1 at night (the same pair the 2026-11-12 trial dropped for reading as a second "asleep"), and that is
+            ACCEPTED: v3.1 tells the two apart by SHAPE, not colour (stirring is a half-height block with a gap each side,
+            asleep is the full-height bar; see the timeline rules below), which is why the colour is free to be a clear
+            mark on the card instead of a dim one.
+   wake     the "Awake" segment, out-of-bed dot and wake-up duration: amber #f0a257 day / #f6c899 night.
+   wake-text  the same hue where it is TEXT (a duration, a badge, an icon): by day #f0a257 is only 2.10:1 on a card, far short
+            of the 4.5:1 text needs, so text uses a deeper amber (#9a5410, 5.75:1 on the card, 4.61:1 on the inset, 5.21:1 on
+            its 14% badge); at night the segment colour already clears it (#f6c899, 10.26:1 card, 7.33:1 badge) and is reused.
+   awake    the neutral "before/after sleep" segment: the ORIGINAL lavender #d2d0e2 day / #3c3f60 night (a faint step from the
+            track either way; the warm greys of the trial are gone with the other warm neutrals).
+   visit    room activity, teal #279189 in BOTH themes (design v3.1, 2026-11-13; v3 had #2fa39a). Darker than v3 so that by
+            day it clears 3:1 on the card (3.82:1) AND on the lavender track (3.06:1), where #2fa39a was 2.47:1 on the track.
+            Night: 4.14:1 on the card, 4.97:1 on the inset. (The old night #3ec4b8 had the same lightness as the Good band's
+            #5cbfc6, ratio 1.01, which is why night is not that.) Bars and dots only, never text.
+   visit-text  the same teal where it is TEXT (a duration, a label, the "Movement outside the bed" tag): by day text uses
+            #17706a (5.90:1 on the card, 4.73:1 on the inset, 4.97:1 on the 15% tag). At night #279189 on the tag would be
+            only 3.46:1, so text keeps the brighter #3ec4b8 (7.37:1 card, 8.85:1 inset, 6.17:1 tag), which is why this
+            token differs from --sleep-visit there.
+   wake-gap  the 2px gap drawn beside the awake block and on the edge of asleep that touches it: the track colour AT NIGHT, where
+            awake against asleep is only 2.15:1 and the gap is what separates them; transparent BY DAY (v3.1 removed the 1px white
+            separators there: day asleep against awake is 3.12:1). Not a hex, so test/paletteTokens.test.jsx pins its two values
+            as text.
+   temp, gap unchanged. There is no token for the design's dashed "still to come" / "not counted" edge (#8c86ae at night, 4.62:1
+   on the night card): nothing draws it today, so it arrives with the element that does. */
+:root { --sleep-asleep: #4b53b5; --sleep-stir: #7279c6; --sleep-wake: #f0a257; --sleep-wake-text: #9a5410; --sleep-awake: #d2d0e2; --sleep-visit: #279189; --sleep-visit-text: #17706a; --sleep-temp: #cf5b39; --sleep-hr: #b8305a; --sleep-rr: #25689f; --sleep-gap: #c7c7c7; --sleep-wake-gap: transparent; }
+:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #a7ade4; --sleep-wake: #f6c899; --sleep-wake-text: #f6c899; --sleep-awake: #3c3f60; --sleep-visit: #279189; --sleep-visit-text: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-hr: #f08aa8; --sleep-rr: #7fb6ee; --sleep-gap: #5a5c6e; --sleep-wake-gap: var(--bg-elevated-2); }
 
-.sleep-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-.sleep-nav__arrow { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
-.sleep-nav__arrow:disabled { opacity: 0.35; cursor: default; }
-.sleep-nav__date { position: relative; flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; padding: 4px 0; }
-.sleep-nav__date-sub { order: -1; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
-.sleep-nav__date-label { font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.sleep-nav__date-input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+/* The sleep page's frame (UI refresh PR E): "Night of <date>" with a calendar button, then the seven-night strip. The
+   previous / next arrows that used to sit here are gone: the strip reaches the newest seven nights and the calendar the rest. */
+.sleep-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 12px; }
+.sleep-title__text { margin: 0; font-size: 20px; font-weight: 700; color: var(--text-primary); }
+/* A 44px button; the native date input is laid invisibly over it so a tap opens the platform's own picker. */
+.sleep-title__cal { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--accent-text); cursor: pointer; }
+.sleep-title__cal:focus-within { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.sleep-title__cal-input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+
+/* The seven-night strip. Right-aligned flex (newest at the right edge, as drawn) so a child with fewer than seven nights
+   gets items of the SAME width, not stretched ones: max-width is one seventh of the row less the gaps. min-height 64px
+   keeps every button over 44px tall. The bar is a mark, never text, and uses the day --band-* tokens (the strip sits on a
+   themed --bg-elevated surface, which is what their contrast was measured on, see the --band-* comment in :root); the number
+   above it carries the meaning. 'none' (no score) is the neutral border colour; 'early' is the early-estimate neutral. */
+.sleep-strip { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 14px; }
+.sleep-strip__item { flex: 1 1 0; min-width: 0; max-width: calc((100% - 36px) / 7); min-height: 64px; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); color: var(--text-primary); font: inherit; cursor: pointer; }
+.sleep-strip__item[aria-current='date'] { border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-line); }
+.sleep-strip__day { font-size: 11px; color: var(--text-secondary); }
+.sleep-strip__date { font-size: 17px; font-weight: 700; line-height: 1.2; }
+.sleep-strip__score { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.sleep-strip__bar { width: 70%; height: 4px; margin-top: 3px; border-radius: 2px; background: var(--border); }
+.sleep-strip__bar--great { background: var(--band-great); }
+.sleep-strip__bar--good { background: var(--band-good); }
+.sleep-strip__bar--fair { background: var(--band-fair); }
+.sleep-strip__bar--low { background: var(--band-low); }
+.sleep-strip__bar--early { background: var(--band-early); }
 
 .sleep-detail__summary { display: flex; flex-direction: column; gap: 12px; }
-.sleep-detail__big { font-size: 26px; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
-.sleep-detail__big span { font-size: 15px; font-weight: 500; color: var(--text-secondary); }
 .sleep-detail__stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
 .sleep-stat__label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
 .sleep-stat__value { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-top: 1px; }
-/* Canonical in-card title — the Room-climate card-title style, reused across cards, drill-down
-   sections, and settings tiles so titles are consistent everywhere. Sits as the first line inside a card. */
+/* Small captions remain on sleep cards; settings cards use the stronger .card-heading below. */
 .card-title,
 .sensor-card__title,
 /* Which camera the night was scored from. Only one camera is analysed, so when a child has several this says which. */
 .sleep-detail__source { font-size: 12px; color: var(--text-secondary); }
+.card-heading { margin: 0 0 12px; color: var(--text-primary); font: 800 16px var(--font-display); }
+/* UI consistency (PR-C): the one dialog action row. Equal-width buttons (flex 1 1 0, so a long confirm label wraps instead of making one
+   button wider than the other) and a single action fills the row. The buttons themselves keep .btn (44px, PR-A). */
+.modal-actions { display: flex; gap: 8px; width: 100%; }
+.modal-actions > .btn { flex: 1 1 0; min-width: 0; }
+.seg-track--tabs { width: 100%; }
+/* The sleep detail tabs sit on a card, where the shared night track (--bg-elevated-2, #100f1c) is near-black against the card
+   (#221f3c, 1.20:1): the owner rejected exactly that look on these tabs on 2026-11-13. In the dark theme they keep the accent-tinted
+   track they had before the shared look (same token mix as the old .sleep-events__tabs). Measured from the token values: inactive
+   label (--text-secondary) on it 6.5:1, selected label (--on-accent on --accent) 6.7:1. The light theme keeps the shared track. */
+:root[data-theme='dark'] .seg-track--tabs { background: color-mix(in srgb, var(--accent-line) 12%, var(--bg-elevated)); }
+.seg-track--tabs .seg-track__btn { text-align: center; }
+/* UI consistency (PR-C): the Logs toolbars (Recent alerts, Camera history, Recent logs) are a SwitchRow plus two text buttons. At
+   phone width they do not fit on one line, so the row wraps and each control keeps its own 44px target (`--tap`) instead of
+   shrinking; the 6px/8px padding of a bare .icon-btn is far under a thumb (audit pattern 8). */
+.log-viewer__toolbar { flex-wrap: wrap; gap: 4px 12px; }
+.log-viewer__toolbar .switch-row { flex: 1 1 160px; }
+.log-viewer__toolbar .icon-btn { min-height: var(--tap); min-width: var(--tap); }
+.page-intro { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px; }
+.form-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+.form-actions > .btn { width: 100%; }
+.switch-row__line { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; }
+.switch-row__copy { min-width: 0; }
+.switch-row__label { display: block; color: var(--text-primary); font-size: 16px; font-weight: 600; cursor: pointer; }
+.switch-row__sub, .switch-row__note { display: block; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.switch-row__line .switch { flex: none; width: var(--tap); height: var(--tap); align-items: center; justify-content: center; }
+.switch-row__line .switch__track { width: 42px; height: 24px; }
+.switch-row__line .switch__thumb { top: 13px; }
+.switch-row__note { margin: 0 0 12px; }
+.switch-row__sub { cursor: pointer; }
 .sleep-detail__source strong { font-weight: 600; color: var(--text-primary); }
-/* #361 PR 4a: which settings the night was worked out with (saved or today's), and the switch to the other. Secondary
-   text like the source line above; the switch is a real button sized like Recompute, allowed to wrap on a phone
-   because its longer label ("...the settings this night was saved with") is wider than a narrow card. */
+/* #361 PR 4a: which settings the night was worked out with (saved or today's). Secondary text like the source line
+   above. The switch to the other view is in the page's "⋯" menu since UI refresh PR E. */
 .sleep-settings-view { display: flex; flex-direction: column; gap: 10px; }
 .sleep-settings-view__text { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
-.sleep-settings-view__switch { width: auto; align-self: flex-start; white-space: normal; text-align: left; }
-/* Admin-only recompute control, and the before -> after table it shows. Every colour comes from a
-   token so both themes follow; `is-changed` is what the eye should land on, so only that row uses
-   the accent. Digits are tabular so the two columns line up. */
-.sleep-detail__recompute { width: auto; align-self: flex-start; margin-top: 2px; }
-.sleep-detail__recompute-error { font-size: 12px; color: var(--danger, #c0392b); margin-top: 6px; }
+/* Admin-only recompute (its menu item is .more-menu__item; its error line and dialog are here), and the before -> after
+   table the dialog shows. Every colour comes from a token so both themes follow; `is-changed` is what the eye should
+   land on, so only that row uses the accent. Digits are tabular so the two columns line up. */
+.sleep-detail__recompute-error { font-size: 12px; color: var(--offline); margin-top: 6px; }
 .recompute-diff { display: flex; flex-direction: column; gap: 2px; margin: 12px 0 16px; font-variant-numeric: tabular-nums; }
 .recompute-diff__row { display: grid; grid-template-columns: 1fr auto 16px auto; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13px; }
-.recompute-diff__row.is-changed { background: var(--surface-2, rgba(127, 127, 127, 0.08)); }
+.recompute-diff__row.is-changed { background: var(--bg-elevated-2); }
 .recompute-diff__label { color: var(--text-secondary); }
 .recompute-diff__was { color: var(--text-secondary); text-decoration: line-through; }
 .recompute-diff__arrow { color: var(--text-secondary); text-align: center; }
@@ -1335,35 +1745,109 @@ body.in-pip .tile-menu-backdrop {
 .recompute-choice__option:has(input:disabled) { cursor: default; opacity: 0.55; }
 .recompute-choice__help { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); margin-left: 28px; }
 .recompute-choice__help strong { font-weight: 600; color: var(--text-primary); }
-/* On a no-data / no-sleep card (SleepDetail), which has no padding of its own around this control. */
-.sleep-detail__recompute-unscored { padding: 0 14px 14px; }
+/* The small grey uppercase label. Still used by Settings ("Keeping readings"), which keeps it. */
 .sleep-detail__section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 12px; }
+/* The sleep page's card heading (the Timeline card): 15px bold in the primary text colour, like every other card heading (Timelapse,
+   Recent alerts, Recordings, Room climate). A class of its own so the Settings page's label above is untouched (owner, staging
+   phone 2026-11-13: the smallest thing in its card was the heading). */
+.sleep-card-title { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 0 0 12px; }
 
 .sleep-tl { padding-top: 2px; }
-.sleep-tl__visits { position: relative; height: 12px; margin-bottom: 3px; }
+/* THE TIMELINE TELLS ITS STATES APART BY MORE THAN COLOUR (design v3.1, 2026-11-13). Several neighbouring pairs are under 3:1
+   (named, with their ratios, in test/paletteTokens.test.jsx and docs/design-language.md), so each state also has its own
+   SHAPE and the neighbours are separated by GAPS, which a colour-blind viewer or a washed-out phone screen still sees:
+     asleep    the full-height bar (30px);
+     stirring  a HALF-height block for a wide run, or a short quiet dash; only wide runs have side gaps;
+     awake     a block that RISES 5px ABOVE the bar, so it breaks the bar's silhouette, with gaps at night.
+   Drawing segments keep their total width in the flex row (so the onset/wake marks stay exact); the stirring and
+   awake blocks are drawn by a ::before centred on that slot, with a 3px minimum width, so a one-minute stir is still
+   visible without pushing every later segment to the right. Hover reads the original segments. Because awake rises above the bar, the bar no longer clips
+   (no overflow: hidden): the end segments round their own outer corners instead. */
+.sleep-tl__visits { position: absolute; left: 0; right: 0; top: -20px; height: 12px; }
 .sleep-tl__visit { position: absolute; top: 2px; width: 9px; height: 9px; border-radius: 50%; background: var(--sleep-visit); border: 2px solid var(--bg-elevated); transform: translateX(-50%); box-shadow: 0 0 0 1px var(--sleep-visit); }
-.sleep-tl__bar { position: relative; display: flex; width: 100%; height: 30px; border-radius: 7px; overflow: hidden; background: var(--bg-elevated-2); }
+.sleep-tl__bar { position: relative; display: flex; width: 100%; height: 30px; border-radius: 7px; background: var(--bg-elevated-2); }
+.sleep-tl__bar > .sleep-seg:first-child { border-radius: 7px 0 0 7px; }
+.sleep-tl__bar > .sleep-seg:last-child { border-radius: 0 7px 7px 0; }
+.sleep-tl__bar > .sleep-seg:only-child { border-radius: 7px; }
 .sleep-seg { height: 100%; }
 .sleep-seg--asleep { background: var(--sleep-asleep); }
 .sleep-seg--stir { background: var(--sleep-stir); }
 .sleep-seg--wake { background: var(--sleep-wake); }
 .sleep-seg--awake { background: var(--sleep-awake); }
+/* Stirring and awake on the timeline: the slot itself is transparent and the ::before is the visible block. z-index 1 so the
+   block and its gaps paint over the segments after it in the row (a positioned element would otherwise be painted over by a
+   later sibling's background); awake is higher (2), and the onset/wake/now marks sit above both (3). The legend swatches use the same classes but
+   are not inside .sleep-tl__bar, so they keep the plain background and their own shapes (below). */
+.sleep-tl__bar .sleep-seg--stir, .sleep-tl__bar .sleep-seg--wake { position: relative; z-index: 1; background: none; }
+.sleep-tl__bar .sleep-seg--wake { z-index: 2; }
+.sleep-tl__bar .sleep-seg--stir::before, .sleep-tl__bar .sleep-seg--wake::before { content: ''; position: absolute; left: 50%; width: 100%; min-width: 3px; transform: translateX(-50%); }
+.sleep-tl__bar .sleep-seg--stir::before { top: 7px; height: 14px; background: var(--sleep-stir); box-shadow: -2px 0 0 var(--bg-elevated-2), 2px 0 0 var(--bg-elevated-2); }
+/* Short drawn stirs stay visible at the 3px floor but read as a small dash. The component
+   measures the actual bar width so the gaps appear only where there is room for them. */
+.sleep-tl__bar .sleep-seg--stir-quiet::before { top: 12px; height: 6px; box-shadow: none; }
+/* The quiet dash's slot is painted the asleep colour: left transparent it showed the track as a pale vertical sliver beside every
+   dash, and on a busy night those slivers were the barcode (seen in the render of a 40-stir night, 2026-11-13). The dash sits on
+   the bar like a tick; the hover still names the minute a stir. */
+.sleep-tl__bar .sleep-seg--stir-quiet { background: var(--sleep-asleep); }
+/* (The quiet dash's "no edge on the neighbouring asleep" rules sit after the edge rules below: they must come later to win.) */
+/* Awake: top -5px, 33px tall (it ends 2px above the bar's floor, as drawn in the design), 1px top corners. By DAY it is 2.10:1
+   on the white card and 1.68:1 on the track, and that is DELIBERATE (owner, design v3.1): a darker amber would sit next to the
+   Fair band's amber and look the same to a colour-blind reader, and the shape (it rises above the bar) is what carries it. */
+.sleep-tl__bar .sleep-seg--wake::before { top: -5px; height: 33px; background: var(--sleep-wake); border-radius: 1px 1px 0 0; box-shadow: -2px 0 0 var(--sleep-wake-gap), 2px 0 0 var(--sleep-wake-gap); }
+/* THE ENDS OF THE BAR (Codex review of #1057). A 3px block centred on a ~0.5px slot (a one-minute segment) pokes about 1.25px past
+   either side, so a stirring or awake segment that is the FIRST or LAST in the row would paint outside the bar's rounded end, and
+   so would its outer gap. The first block is therefore anchored to the bar's left edge (growing right), the last to the right edge
+   (growing left), and each draws its gap on the inner side only. A segment that is both (the only one) has no gap. A segment
+   second from the end can still overhang by about a pixel; that is not clamped (it stays inside the card's padding).
+   NEIGHBOURS OVERLAP, ACCEPTED: two tiny adjacent blocks can overlap, and the LATER one in the row paints over the earlier (they
+   share z-index 1, so tree order decides). Consequences: a stirring block never hides asleep or the before/after segment (those
+   are full height and only its middle 14px is covered), nor an awake block (that rises and sits above it); but an awake block or a stirring
+   block can hide a one-minute stirring block that sits just before it, and a later stirring block can hide an earlier tiny
+   stirring block. At night a covered neighbour also loses 2px to the gap. The bar's totals and hover time are unaffected, since
+   they come from the real slots. */
+.sleep-tl__bar > .sleep-seg--stir:first-child::before { left: 0; transform: none; box-shadow: 2px 0 0 var(--bg-elevated-2); }
+.sleep-tl__bar > .sleep-seg--wake:first-child::before { left: 0; transform: none; box-shadow: 2px 0 0 var(--sleep-wake-gap); }
+.sleep-tl__bar > .sleep-seg--stir:last-child::before { left: auto; right: 0; transform: none; box-shadow: -2px 0 0 var(--bg-elevated-2); }
+.sleep-tl__bar > .sleep-seg--wake:last-child::before { left: auto; right: 0; transform: none; box-shadow: -2px 0 0 var(--sleep-wake-gap); }
+.sleep-tl__bar > .sleep-seg--stir:only-child::before { left: 0; right: auto; transform: none; box-shadow: none; }
+.sleep-tl__bar > .sleep-seg--wake:only-child::before { left: 0; right: auto; transform: none; box-shadow: none; }
+/* The edge-anchoring rules above are more specific; a quiet edge dash still has no side gap. */
+.sleep-tl__bar > .sleep-seg--stir-quiet:first-child::before,
+.sleep-tl__bar > .sleep-seg--stir-quiet:last-child::before { box-shadow: none; }
+/* Asleep gets a 2px track-coloured edge only where it touches stirring (both themes) or awake (night only: --sleep-wake-gap is
+   transparent by day, where the 1px white separator it replaces is gone). Inset, so it costs no width. The edges are two custom
+   properties on the element, so an asleep slot between a stir and an awake keeps BOTH (a later box-shadow rule would replace an
+   earlier one, not add to it). */
+.sleep-seg--asleep { box-shadow: inset 2px 0 0 var(--tl-edge-l, transparent), inset -2px 0 0 var(--tl-edge-r, transparent); }
+.sleep-seg--stir + .sleep-seg--asleep { --tl-edge-l: var(--bg-elevated-2); }
+.sleep-seg--wake + .sleep-seg--asleep { --tl-edge-l: var(--sleep-wake-gap); }
+.sleep-seg--asleep:has(+ .sleep-seg--stir) { --tl-edge-r: var(--bg-elevated-2); }
+.sleep-seg--asleep:has(+ .sleep-seg--wake) { --tl-edge-r: var(--sleep-wake-gap); }
+/* A quiet dash has no side gaps, so the asleep slot beside it takes no inset either. These MUST follow the edge rules above (same
+   specificity, later wins): placed before them they were silently overridden, and on a busy night every narrow asleep slot between
+   two dashes lost 2px a side to a track-coloured inset, which read as a pale band with sparse dashes (found by looking at the render,
+   a jsdom test cannot see it). */
+.sleep-seg--stir-quiet + .sleep-seg--asleep { --tl-edge-l: transparent; }
+.sleep-seg--asleep:has(+ .sleep-seg--stir-quiet) { --tl-edge-r: transparent; }
 /* Striped, not flat — a flat gray sat too close to --sleep-awake's own light gray to reliably tell
    apart on a thin bar segment (found by adversarial review). A hatch pattern reads as "no data" on
    sight regardless of exact hue, the same convention used for a missing-image placeholder. */
 .sleep-seg--gap { background: repeating-linear-gradient(135deg, var(--sleep-gap), var(--sleep-gap) 4px, var(--bg-elevated-2) 4px, var(--bg-elevated-2) 8px); }
 .sleep-legend__sw--visit { background: var(--sleep-visit); border-radius: 50%; }
 .sleep-legend__sw--out { background: var(--sleep-wake); border-radius: 50%; }
-.sleep-wakes__dur--visit { color: var(--sleep-visit); }
-.sleep-wakes__dur--out { color: var(--sleep-wake); }
+.sleep-wakes__dur--visit { color: var(--sleep-visit-text); }
+.sleep-wakes__dur--out { color: var(--sleep-wake-text); }
 /* Room-activity rows now carry a type tag (child out of the crib vs someone else in the room), so the
    right-hand side groups the tag + duration together. */
 .sleep-visit-right { display: inline-flex; align-items: center; gap: 10px; }
-.sleep-visit-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit); background: color-mix(in srgb, var(--sleep-visit) 15%, transparent); padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
-.sleep-visit-tag--out { color: var(--sleep-wake); background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
+.sleep-visit-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit-text); background: color-mix(in srgb, var(--sleep-visit) 15%, transparent); padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
+.sleep-visit-tag--out { color: var(--sleep-wake-text); background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
 /* Out-of-crib room-activity dot on the timeline — the child themselves out (vs teal = someone in the room). */
 .sleep-tl__visit--out { background: var(--sleep-wake); box-shadow: 0 0 0 1px var(--sleep-wake); }
-.sleep-tl__mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
+/* The onset/wake marks and the "now" line are the bar's height (30px) on purpose. Before v3.1 they were declared taller (top and
+   bottom -2px / -4px) but the bar had overflow: hidden, so what was ever SEEN was clipped to 30px; the bar no longer clips, so the
+   declared size is now the real one and is set to what was always visible. z-index 3 keeps them above the stirring/awake blocks. */
+.sleep-tl__mark { position: absolute; z-index: 3; top: 0; bottom: 0; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
 /* Crib-boundary transition markers (out-of-bed detection): a triangle pointing DOWN at the bar = placed
    into the crib; pointing UP = climbed/lifted out. Sit in their own strip just above the timeline bar. */
 .sleep-tl__txs { position: relative; height: 9px; margin-bottom: 2px; }
@@ -1373,16 +1857,19 @@ body.in-pip .tile-menu-backdrop {
 /* "Refined" (transition-corrected) onset/wake shown under the summary while we validate it against the
    live estimate. Struck-through old value + the new one, clearly flagged as experimental. */
 .sleep-refined { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--border); }
-.sleep-refined__label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit); }
+.sleep-refined__label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit-text); }
 .sleep-refined__item { font-size: 13px; color: var(--text-secondary); }
 .sleep-refined__item b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sleep-refined__old { text-decoration: line-through; opacity: 0.55; margin-right: 5px; font-variant-numeric: tabular-nums; }
 .sleep-refined__note { flex-basis: 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.8; margin-top: 2px; }
-.sleep-tl__now { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent-line); transform: translateX(-1px); }
+.sleep-tl__now { position: absolute; z-index: 3; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--accent-line); transform: translateX(-1px); }
 /* Hover bubble over the timeline: a follow-the-cursor tooltip with the time, sleep status, and (if a
    sensor was present) the temperature at that moment. The wrap is the mouse/touch target; it must NOT
    clip (unlike the bar, which hides its segment corners). */
-.sleep-tl__barwrap { position: relative; }
+/* 6px above the bar: the awake block rises 5px, which would otherwise touch whatever is above. With room activity the markers sit
+   at top -20px (see .sleep-tl__visits), so the wrapper makes room for them, 22px, and nothing is clipped. */
+.sleep-tl__barwrap { position: relative; margin-top: 6px; }
+.sleep-tl__barwrap--room { margin-top: 22px; }
 .sleep-tl__cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text-primary); opacity: 0.5; transform: translateX(-1px); pointer-events: none; }
 .sleep-tl__tip {
   position: absolute; bottom: calc(100% + 8px); transform: translateX(-50%);
@@ -1397,17 +1884,53 @@ body.in-pip .tile-menu-backdrop {
 .sleep-tl__tip-time { font-size: 12.5px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-tl__tip-status { font-size: 11.5px; color: var(--text-secondary); text-transform: capitalize; }
 .sleep-tl__tip-temp { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--sleep-temp); font-variant-numeric: tabular-nums; }
+/* Heart rate and breathing at the scrubbed minute: two more rows of the same size as the temperature one, so the bubble grows
+   taller (about 28px) and no wider (the widest row is still the status or the temperature). */
+.sleep-tl__tip-hr, .sleep-tl__tip-rr { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.sleep-tl__tip-hr { color: var(--sleep-hr); }
+.sleep-tl__tip-rr { color: var(--sleep-rr); }
 .sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--on-accent); background: var(--accent); vertical-align: 2px; }
 .sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
 .sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
-.sleep-tl__tick-label { position: absolute; top: 5px; left: 0; transform: translateX(-50%); font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
+.sleep-tl__tick-label { position: absolute; top: 5px; left: 0; transform: translateX(-50%); font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+/* The first and last labels sit on the bar's ends: centred they poke half a label past the card's content edge (owner, real phone,
+   2026-11-13), so the first is left-aligned to the tick and the last right-aligned to it (see tickLabelAlign in lib/timelineEdges.js). */
+.sleep-tl__tick-label--start { left: 0.5px; transform: none; }
+.sleep-tl__tick-label--end { left: auto; right: 0.5px; transform: none; }
 .sleep-tl__ends { display: flex; justify-content: space-between; margin-top: 2px; font-size: 11px; color: var(--text-secondary); }
 
 .sleep-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 12px; color: var(--text-secondary); }
 .sleep-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sleep-legend__sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+/* The swatches match the shapes on the bar: stirring is a flat 14x5 block, awake a 4x14 tick. */
+.sleep-legend__sw.sleep-seg--stir { width: 14px; height: 5px; border-radius: 1px; }
+.sleep-legend__sw.sleep-seg--wake { width: 4px; height: 14px; border-radius: 1px 1px 0 0; }
 
 .sleep-wakes { list-style: none; margin: 0; padding: 0; }
+/* The Wake-ups | Room activity tabs. UI consistency (PR-C): they take the shared .seg-track look (theme and unit pickers, the camera
+   screens) so every segmented control reads as one; the markup stays a tablist (role="tab", aria-selected, arrow keys) because the
+   tabs switch a panel rather than set a pressed value. The earlier accent-tinted track with its own 3px indicator is gone with that.
+   The owner flagged the near-black night track (--bg-elevated-2) on THESE tabs on 2026-11-13, so in the dark theme they override the
+   track fill (see .seg-track--tabs above). NOT checked on a phone: look at it at night before release. */
+.sleep-events__tabs { margin-bottom: 12px; }
+.sleep-events__empty { padding: 2px 2px 4px; }
+/* Room activity: ONE caption line (the kind the plain rows stand for) and the "What is this?" button, 44px tall; the full explanation opens
+   under it. The dot is the timeline's room-activity teal (--sleep-visit), also the one on each plain row. */
+.sleep-events__explain { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 4px; font-size: 13px; color: var(--text-secondary); }
+.sleep-events__caption { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.sleep-events__what { flex: none; min-height: 44px; padding: 0 4px; background: none; border: 0; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-text); text-decoration: underline; }
+.sleep-events__explain-text { margin: 0 0 10px; line-height: 1.5; }
+.sleep-visit-dot { display: inline-block; vertical-align: middle; flex: none; width: 9px; height: 9px; margin-right: 8px; border-radius: 50%; background: var(--sleep-visit); }
+.sleep-events__caption .sleep-visit-dot { margin-right: 0; }
+/* An "Out of bed" row has its chip for the words; its amber dot (the timeline's awake colour) only keeps the times lined up with the teal-dot rows. */
+.sleep-visit-dot--out { background: var(--sleep-wake); }
+.sleep-events__morning { display: flex; justify-content: space-between; gap: 12px; align-items: center; border-top: 1px solid var(--border); padding: 12px 2px 2px; font-size: 13px; }
+.sleep-events__morning span { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text-primary); }
+.sleep-events__morning-list { border-top: 1px solid var(--border); }
+.sleep-events__morning-list .sleep-wakes__item { border-top: none; }
+.sleep-events__morning-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.sleep-events__morning-list .sleep-wakes__dur { color: var(--text-secondary); }
+.sleep-events__morning time { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .sleep-wakes__row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-top: 1px solid var(--border); }
 .sleep-wakes__row:first-child { border-top: none; }
 /* Wake-up rows that carry their correlated alerts beneath them (the item wraps the head + alert list). */
@@ -1420,8 +1943,8 @@ button.sleep-wakes__head { width: 100%; padding: 0; border: none; background: no
 button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 3px; }
 .sleep-wakes__time { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-wakes__headright { display: inline-flex; align-items: center; gap: 8px; flex: none; }
-.sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake); font-weight: 600; }
-.sleep-wakes__badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-wake); background: color-mix(in srgb, var(--sleep-wake) 14%, transparent); padding: 1px 7px 1px 5px; border-radius: 20px; }
+.sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake-text); font-weight: 600; }
+.sleep-wakes__badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-wake-text); background: color-mix(in srgb, var(--sleep-wake) 14%, transparent); padding: 1px 7px 1px 5px; border-radius: 20px; }
 .sleep-wakes__chev { color: var(--text-secondary); transition: transform 0.18s ease; flex: none; }
 .sleep-wakes__chev.is-open { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .sleep-wakes__chev { transition: none; } }
@@ -1430,10 +1953,10 @@ button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent-line); 
 .sleep-wakes__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
 button.sleep-wakes__thumbwrap { cursor: pointer; border-radius: 8px; }
 button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
-.sleep-wakes__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
+.sleep-wakes__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
 .sleep-wakes__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .sleep-wakes__play { position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff; }
-.sleep-wakes__alert-ico { color: var(--sleep-wake); flex: none; }
+.sleep-wakes__alert-ico { color: var(--sleep-wake-text); flex: none; }
 .sleep-wakes__alert-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sleep-wakes__alert-label { font-weight: 600; color: var(--text-primary); }
 .sleep-wakes__alert-meta { font-variant-numeric: tabular-nums; }
@@ -1448,9 +1971,15 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .sleep-climate__hi, .sleep-climate__lo { position: absolute; right: 2px; font-size: 10px; color: var(--text-secondary); font-variant-numeric: tabular-nums; background: var(--bg-elevated); padding: 0 3px; border-radius: 3px; }
 .sleep-climate__hi { top: 0; }
 .sleep-climate__lo { bottom: 0; }
+/* The heart-rate and breathing tracks reuse the temperature track's markup (LineTrack) in their own colours. They are thinner (the
+   chart height is set in the component), and the second sits close under the first, with no divider between the two. */
+.sleep-climate--hr .sleep-climate__label { color: var(--sleep-hr); }
+.sleep-climate--rr .sleep-climate__label { color: var(--sleep-rr); }
+.sleep-climate--next { margin-top: 10px; padding-top: 0; border-top: 0; }
+.sleep-vitals__note { margin-top: 8px; font-size: 11.5px; line-height: 1.4; color: var(--text-secondary); }
 
 /* Temperature ↔ sleep insight card (Phase 5) */
-.sleep-insight__title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px; }
+.sleep-insight__title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px; }
 .sleep-insight__title svg { color: var(--accent-line); }
 .sleep-insight__headline { font-size: 15px; font-weight: 600; color: var(--text-primary); line-height: 1.35; margin-bottom: 12px; text-wrap: balance; }
 .sleep-insight__body { font-size: 13px; color: var(--text-secondary); line-height: 1.45; }
@@ -1463,7 +1992,148 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .sleep-insight__sub { font-size: 11px; color: var(--text-secondary); margin-top: 3px; font-variant-numeric: tabular-nums; }
 .sleep-insight__foot { font-size: 11px; color: var(--text-secondary); line-height: 1.4; margin-top: 12px; }
 
-.sleep-detail__est { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 0 4px; font-size: 11px; color: var(--text-secondary); }
+/* Sleep score ring (components/ScoreRing.jsx). Band-coloured arc (below), no animation: see the component for why.
+   On a .card it uses the theme tokens. Measured (WCAG formula, 2026-11-12): the arc, --accent-line, is 5.06:1 on a
+   white card by day and 5.87:1 on a night card, and 3.57:1 / 4.40:1 against its own --border track (3:1 is the
+   target for a graphic); the number is --text-primary, 16.65:1 and 12.53:1. */
+.score-ring { display: block; flex: none; }
+.score-ring__track { stroke: var(--border); }
+.score-ring__arc { stroke: var(--accent-line); }
+.score-ring__num { fill: var(--text-primary); font-family: inherit; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* On the child's hero card (.night), which is the SAME navy gradient in both themes (#2c2f63 to #191b38), so a theme
+   token is wrong there: --accent-line by day (#5663D6) is only 2.45:1 on the gradient's lightest point. LITERALS,
+   measured against that lightest point (#2c2f63), where contrast is lowest; it only rises towards #191b38:
+     arc    #A7B1FF  6.13:1 on the card (3:1 needed), 7.60:1 against the track as it composites there (#202145);
+     number #FFFFFF  12.40:1 (4.5:1 needed), the same white as the duration beside it;
+     track  near-black at 35% (rgba(10, 8, 12, 0.35)): a groove darker than the card, so the arc reads as lit on it. It
+            composites to a navy (#202145) over the card, so it is not a charcoal; kept from the 2026-11-12 trial because the
+            design v3 ring ratios (--band-*-ring) are measured against exactly this track (white at 16% was the first
+            version, and it left the rose ring at 2.34:1). Decoration only: the number carries the value.
+   The arc stays this periwinkle when no band is passed (a caller that does not know the band is unchanged); with one it
+   takes the band colour below. */
+.score-ring--dark .score-ring__track { stroke: rgba(10, 8, 12, 0.35); }
+.score-ring--dark .score-ring__arc { stroke: #a7b1ff; }
+.score-ring--dark .score-ring__num { fill: #fff; }
+/* The band word under the number (ScoreRing `word`, the child card's 72px ring): the card's muted tint, 6.85:1 on the gradient's lightest
+   point (see .night above), set at 600 so 11px text holds up. Never in a band colour (text is never set in one). */
+.score-ring__word { fill: var(--text-secondary); font-family: inherit; font-weight: 600; }
+.score-ring--dark .score-ring__word { fill: var(--night-muted); }
+/* Band colours (owner approved the colour-scaled ring, 2026-11-12). ONLY the arc is coloured: the number stays
+   --text-primary / white, because text is never set in a band colour, and the band word and number always show, so colour
+   is never the only signal. On a themed card the arc is --band-<band> (switches with the theme); on the child page's fixed
+   dark card it is --band-<band>-ring (the same in both themes). Contrast of each pair is in the --band-* comment in :root
+   and pinned by paletteTokens.test.jsx. The 'early' ring is neutral and its track is dashed by ScoreRing.jsx (shape, not
+   colour, says "provisional"). Specificity: two classes beat the one-class arc rules above, so the order does not matter. */
+.score-ring--card.score-ring--great .score-ring__arc { stroke: var(--band-great); }
+.score-ring--card.score-ring--good .score-ring__arc { stroke: var(--band-good); }
+.score-ring--card.score-ring--fair .score-ring__arc { stroke: var(--band-fair); }
+.score-ring--card.score-ring--low .score-ring__arc { stroke: var(--band-low); }
+.score-ring--card.score-ring--early .score-ring__arc { stroke: var(--band-early); }
+.score-ring--dark.score-ring--great .score-ring__arc { stroke: var(--band-great-ring); }
+.score-ring--dark.score-ring--good .score-ring__arc { stroke: var(--band-good-ring); }
+.score-ring--dark.score-ring--fair .score-ring__arc { stroke: var(--band-fair-ring); }
+.score-ring--dark.score-ring--low .score-ring__arc { stroke: var(--band-low-ring); }
+.score-ring--dark.score-ring--early .score-ring__arc { stroke: var(--band-early-ring); }
+/* The ring's stand-in for "no score yet" (components/NightPendingRing.jsx): a dashed circle and a moon, both in the neutral
+   'early' colour of each surface, so it matches the early-estimate ring's neutral and is never a band colour (it says nothing
+   about how the night went). Dark surface: --band-early-ring on the fixed navy card; card surface: --band-early on the page's
+   own card. Decoration only (aria-hidden); the words beside it carry the meaning, so no contrast figure is claimed for it. */
+/* Both parts are STROKES, never `color`: paletteTokens.test.jsx forbids a band token on text, and the moon is a line drawing. */
+.score-ring--card .score-ring__pending-track, .score-ring--card .score-ring__pending-icon { stroke: var(--band-early); }
+.score-ring--dark .score-ring__pending-track, .score-ring--dark .score-ring__pending-icon { stroke: var(--band-early-ring); }
+.score-ring__pending-track { opacity: 0.8; }
+/* On the child's card the ring sits beside the heading and the duration line, not centred on the whole card. */
+.night__score { flex: none; align-self: flex-start; line-height: 0; }
+
+/* The sleep page uses the same navy card tokens as the child card. The ring is a mark on that
+   gradient, so it uses the fixed --band-*-ring colours; the sheet uses card-surface --band-* colours. */
+.sleep-night-card { display: flex; flex-direction: column; gap: 12px; }
+.sleep-night-card__main { display: flex; align-items: flex-start; gap: 16px; }
+.sleep-night-card__main .score-ring { flex: none; }
+.sleep-night-card__story { min-width: 0; }
+/* `text-wrap: balance`: at 320px "6h 13m asleep so far" broke as "6h 13m asleep so / far", one word on the second line (phone pass). */
+.sleep-night-card__duration { color: var(--night-number); font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; text-wrap: balance; }
+.sleep-night-card__qualifier { color: var(--night-muted); font-size: 13px; margin-top: 2px; }
+.sleep-night-card__blurb { color: var(--night-text); font-size: 14px; line-height: 1.5; margin: 8px 0 0; }
+.sleep-night-card .sleep-score__note { color: var(--night-muted); }
+/* "Score and night summary after 7:00 AM" under the so-far facts: the muted tint, as on the child's card (.night__pending-line). */
+.sleep-night-card .sleep-night-card__pending { color: var(--night-muted); }
+/* The no-data night (SleepDetail NightContent): a dashed moon ring over the explanation, centred, as drawn. */
+.sleep-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 14px; text-align: center; }
+.sleep-score__open { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 44px; padding: 4px 0; background: none; border: none; color: var(--night-link); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 10px; }
+.sleep-score__open:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.sleep-night-card__review { padding-top: 10px; border-top: 1px solid var(--night-divider); }
+.sleep-night-card__review a, .sleep-night-card__review button { min-height: 44px; }
+.sleep-night-card__review .btn, .sleep-night-card__review .camera-tile__sub { color: var(--night-text); }
+.sleep-night-card__review .sleep-detail__review { background: var(--night-action); color: var(--night-on-action); border: 0; }
+.sleep-night-card__review .sleep-detail__review:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.sleep-night-card__review .review-card__go { color: var(--night-link); }
+.sleep-night-card__review .card-title { color: var(--night-text); }
+/* The "Thanks, that's recorded" receipt is the same component the child page's card uses (`.night__review`), which draws its own
+   hairline and top spacing. Here the wrapper above already draws the one divider, so the receipt would add a SECOND line with an
+   empty gap between the two (owner screenshot, 2026-11-15, after correcting a night). Drop the receipt's own and keep a gap
+   before the button that follows it. */
+.sleep-night-card__review .night__review { margin-top: 0; padding-top: 0; border-top: 0; }
+.sleep-night-card__review .night__review--done { margin-bottom: 12px; }
+.sleep-score__note { font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin: 8px 0 0; }
+.sleep-detail__tools { display: flex; flex-direction: column; gap: 8px; }
+/* Spacing below the tools only when something rendered; a card gets its own margin, this plain div does not. */
+.sleep-detail__tools:not(:empty) { margin-bottom: 14px; }
+.score-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.score-part { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.score-part__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.score-part__name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.score-part__score { font-size: 13px; font-weight: 600; color: var(--text-primary); text-align: right; font-variant-numeric: tabular-nums; }
+/* Under the name: the bar and its short word on ONE line (the approved design's compact row), the explanatory
+   lines beneath in the muted size. The factor's number is read out, not drawn (screen readers only). */
+.score-part__line { display: flex; align-items: center; gap: 10px; margin-top: 8px; min-width: 0; }
+.score-part__num { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.score-part, .sleep-score__numbers li { overflow-wrap: anywhere; min-width: 0; }
+.score-part__bar { flex: none; width: 72px; height: 7px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.score-part__bar span { display: block; height: 100%; border-radius: 999px; }
+.score-part__bar--great span { background: var(--band-great); }
+.score-part__bar--good span { background: var(--band-good); }
+.score-part__bar--fair span { background: var(--band-fair); }
+.score-part__bar--low span { background: var(--band-low); }
+.score-part__bar--empty { box-sizing: border-box; border: 1px dashed var(--text-secondary); background: transparent; }
+.score-part__detail { font-size: 13px; line-height: 1.4; color: var(--text-secondary); min-width: 0; }
+.score-part__detail--extra { display: block; margin-top: 4px; font-size: 12px; line-height: 1.45; }
+.sleep-score__numbers { margin-top: 18px; }
+.sleep-score__numbers h3 { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.sleep-score__numbers ul { margin: 8px 0; padding-left: 20px; font-size: 13px; line-height: 1.6; }
+.sleep-score__note-box { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--bg-elevated-2); color: var(--text-primary); font-size: 12px; line-height: 1.5; }
+/* The dialog is nested under the navy card for focus restoration, but paints the normal card surface. */
+.sleep-night-card .modal-card { color: var(--text-primary); }
+/* (The sheet's 44px close button is now every Modal's: `.modal-card__close`, with the other modal rules.) */
+/* On a phone the ring and the time asleep share the top row and the blurb takes the card's full width underneath
+   (beside the ring it wrapped to five narrow lines); from 521px up the blurb sits beside the ring as designed. */
+@media (max-width: 520px) {
+  .sleep-night-card__main { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 16px; row-gap: 6px; align-items: center; }
+  .sleep-night-card__story { display: contents; }
+  .sleep-night-card__main .score-ring { grid-row: 1 / span 2; }
+  .sleep-night-card__duration { grid-column: 2; align-self: end; }
+  .sleep-night-card__qualifier { grid-column: 2; align-self: start; margin-top: 0; }
+  .sleep-night-card__blurb, .sleep-night-card .sleep-score__note { grid-column: 1 / -1; }
+  .sleep-night-card__main:not(:has(.score-ring)) { grid-template-columns: minmax(0, 1fr); }
+  .sleep-night-card__main:not(:has(.score-ring)) .sleep-night-card__duration,
+  .sleep-night-card__main:not(:has(.score-ring)) .sleep-night-card__qualifier { grid-column: 1; }
+}
+@media (min-width: 1024px) {
+  .sleep-night-card .modal-overlay--wide .modal-card { max-width: min(620px, 92vw); }
+  .sleep-night-card .score-part { display: grid; grid-template-columns: 112px minmax(0, 1fr) 72px 150px; align-items: center; gap: 8px; }
+  .sleep-night-card .score-part__head { display: contents; }
+  .sleep-night-card .score-part__score { text-align: left; }
+  .sleep-night-card .score-part__line { display: contents; }
+  .sleep-night-card .score-part__detail { font-size: 12px; }
+  .sleep-night-card .score-part__detail--extra { grid-column: 2 / -1; }
+  .sleep-night-card .sleep-score__numbers ul { columns: 2; column-gap: 20px; }
+  .sleep-night-card .sleep-score__numbers li { break-inside: avoid; }
+}
+
+/* The estimate line at the foot of the sleep page. Breathing room on every side (it was flush with the bottom nav and its text ran to
+   the card edges), and the moon is pinned to the FIRST line: centred, it floated beside the middle of a wrapped line. */
+.sleep-detail__est { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 12px 8px 20px; font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
+.sleep-detail__est svg { flex: none; margin-top: 2px; }
 
 /* Crib-zone picker: a rectangle drawn over a live still to scope motion + sleep tracking to the crib. */
 .crib { margin-top: 4px; }
@@ -1486,14 +2156,17 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
    <textarea>, which would otherwise render as the browser's light default box in the dark theme. Monospace
    because the text is JSON a person may need to read; vertical resize only so it cannot widen the card. */
 .crib__text { width: 100%; box-sizing: border-box; background: var(--field-bg); border: 1px solid var(--border); color: var(--text-primary); border-radius: 10px; padding: 10px 12px; font: 12px/1.4 monospace; resize: vertical; }
-.btn-sm { padding: 6px 14px; font-size: 12.5px; white-space: nowrap; }
 .linkbtn { background: none; border: none; color: var(--accent-text); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
 
 /* Room-climate sensor history (Child detail). Temp + humidity sparklines from sensor_readings. */
 .sensor-card { margin-bottom: 14px; }
 /* Room climate inherits the canonical title style above, but its chart starts right below the title;
    Cameras and Recent alerts have padded rows that supply their own space. */
-.sensor-card__title { margin-bottom: 10px; }
+.sensor-card__title { margin-bottom: 12px; }
+/* The same heading as the Timelapse card (.timelapse-card .card-title): flex so the icon sits level with the word, 15px bold, the
+   accent-line icon. Declared after the canonical .card-title rule so it wins. */
+.sensor-card .sensor-card__title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: var(--text-primary); text-transform: none; letter-spacing: 0; }
+.sensor-card .sensor-card__title svg { color: var(--accent-line); }
 .sensor-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
 @media (min-width: 560px) { .sensor-grid { grid-template-columns: 1fr 1fr; } }
 .sensor-series__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
@@ -1505,47 +2178,72 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 /* Children tab — one card per child. Light mode: a clean white card (the dark hero gradient of the
    detail screen reads too heavy repeated down a list on a light background). Dark mode: the same
    gradient as the detail hero, so the two feel of a piece there. */
-.child-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(30, 30, 70, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
-.child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(30, 30, 70, 0.45); }
+.child-card { display: flex; flex-direction: column; align-items: stretch; gap: 0; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(30, 30, 70, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.child-card__top { display: flex; align-items: center; gap: 14px; min-width: 0; }
+@media (hover: hover) {
+  .child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(30, 30, 70, 0.45); }
+}
 .child-card:active { transform: translateY(0); }
 .child-card:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .child-card__id { flex: 1; min-width: 0; }
 .child-card__name { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 800; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.child-card__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; }
+.child-card__meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 .child-card__chev { color: var(--accent-line); opacity: 0.6; flex-shrink: 0; }
+.child-card__sleep { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; border-top: 1px solid var(--border); margin-top: 14px; padding-top: 12px; }
+.child-card__sleep-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.child-card__sleep-caption { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.3; }
+.child-card__sleep-caption svg { flex: none; }
+.child-card__sleep-duration { font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+/* Children list sleep: the fixed ring slot keeps the copy width steady across score states. */
+.child-card__score { width: 44px; flex: 0 0 44px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.child-card__score-word { color: var(--text-secondary); font-size: 11px; line-height: 1.2; font-weight: 600; }
 
-:root[data-theme='dark'] .child-card { border-color: var(--border); color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.8); }
-:root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.9); }
+/* Only the shadows differ at night: border, colour and background already come from tokens in the base rule. */
+:root[data-theme='dark'] .child-card { box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.8); }
+@media (hover: hover) {
+  :root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.9); }
+}
 
-/* Alert list — one card, one row per alert: thumbnail, camera name, motion/sound icon + label, time.
-   Shared by the Live "Recent activity" list and each child's detail screen. */
-.alert-item { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--border); }
+/* Recent alerts on a child's page (components/AlertList.jsx; UI refresh PR D): one card, one row per alert: thumbnail, kind
+   (icon + word) with the clock time under it, and a chevron on a row that opens a clip. The card has NO padding of its own so
+   the dividers run edge to edge; the title and the rows pad themselves. A row is 56px or more (a 40px thumbnail plus padding),
+   past the 44px a touch target needs, and a row with a clip is ONE button, not a thumbnail button inside a row. */
+.alert-list { padding: 0; overflow: hidden; }
+.alert-list__title { display: flex; align-items: center; gap: 8px; margin: 0; padding: 14px 16px 6px; }
+.alert-list__body { padding: 0 16px 16px; }
+.alert-item { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
 .alert-item:last-child { border-bottom: none; }
-.alert-item__thumb { width: 64px; height: 46px; border-radius: 9px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
+/* The whole row is the button when there is a clip: reset the button chrome and keep the row's own look. */
+.alert-item--btn { width: 100%; background: none; border-top: none; border-left: none; border-right: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+@media (hover: hover) { .alert-item--btn:hover { background: var(--child-action-hover); } }
+.alert-item--btn:active { background: var(--child-action-active); }
+.alert-item--btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.alert-item__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
 .alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
-.alert-item__body { flex: 1; min-width: 0; }
-.alert-item__name { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; gap: 7px; }
+.alert-item__body { flex: 1; min-width: 0; display: block; }
+.alert-item__name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
 .alert-item__nametext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* "REC" badge shown to the right of the camera name while a clip is being captured. */
+/* "REC" badge shown to the right of the kind while a clip is being captured. */
 .rec-badge { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: #e0556b; background: rgba(224, 85, 107, 0.13); padding: 1px 6px 1px 5px; border-radius: 20px; }
 .rec-dot { width: 7px; height: 7px; border-radius: 50%; background: #e0556b; animation: recpulse 1.2s ease-in-out infinite; }
 @keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
-.alert-item__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
+.alert-item__meta { display: block; font-size: 13px; color: var(--text-secondary); margin-top: 1px; }
 .alert-item__ico { color: var(--accent-line); flex-shrink: 0; }
-.alert-item__time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; }
-/* Thumbnail wrapper carries the play/recording overlay. As a <button> (clip ready) it's a bare,
-   tappable frame. */
-.alert-item__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
-button.alert-item__thumbwrap { cursor: pointer; border-radius: 9px; }
-button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.alert-item__time { font-variant-numeric: tabular-nums; }
+.alert-item__chev { flex: none; color: var(--text-secondary); }
+/* The thumbnail's frame carries the play overlay (shown when a clip is ready). */
+.alert-item__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; line-height: 0; }
 .alert-item__play {
   position: absolute; inset: 0; margin: auto; width: 26px; height: 26px;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff;
 }
-.alert-item__play--pending { background: rgba(10, 13, 28, 0.5); color: var(--accent-soft); }
-.alert-item__clipflag { color: var(--accent-line); }
+/* "See all alerts": a full-width quiet row under the list, 44px or more. The divider above it is the last alert row's own. */
+.alert-list__more { display: block; width: 100%; min-height: 44px; padding: 0 16px; border: none; background: none; color: var(--accent-text); font: inherit; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer; }
+@media (hover: hover) { .alert-list__more:hover { background: var(--child-action-hover); } }
+.alert-list__more:active { background: var(--child-action-active); }
+.alert-list__more:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Modal clip player */
@@ -1557,7 +2255,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 .clip-protection-note { color: var(--text-secondary); font-size: 12px; line-height: 1.4; margin: -4px 0 12px; text-align: center; }
 .btn-block { display: block; width: 100%; text-align: center; }
 .icon-btn--danger { color: var(--offline); }
-/* Clip Management (Settings → Camera and Recording) */
+/* Clip management (Settings → Camera and recording) */
 .clip-day-select { width: auto; min-width: 140px; padding: 7px 10px; font-size: 13px; }
 
 /* Clip date filter — popup calendar */
@@ -1580,7 +2278,9 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   width: 30px; height: 30px; border-radius: 8px; border: none; background: none;
   color: var(--text-primary); cursor: pointer;
 }
-.clip-cal__nav:hover:not(:disabled) { background: var(--bg-elevated-2); }
+/* The calendar's hover fills use the light state token for the same reason as .more-menu__item (the inset colour is near-black at
+   night), and only under a real pointer (a phone keeps the fill after a tap). */
+@media (hover: hover) { .clip-cal__nav:hover:not(:disabled) { background: var(--child-action-hover); } }
 .clip-cal__nav:disabled { opacity: 0.3; cursor: default; }
 .clip-cal__dow, .clip-cal__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .clip-cal__dow { margin-bottom: 4px; }
@@ -1596,7 +2296,9 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
   width: 4px; height: 4px; border-radius: 50%; background: var(--accent-line);
 }
-.clip-cal__day.has-clips:hover { background: var(--bg-elevated-2); }
+/* :not(.is-sel): the selected day keeps its accent fill under the pointer (it has clips, so it matched, and its white-on-accent
+   text sat on the hover fill). */
+@media (hover: hover) { .clip-cal__day.has-clips:not(.is-sel):hover { background: var(--child-action-hover); } }
 .clip-cal__day.is-sel { background: var(--accent); color: var(--on-accent); }
 .clip-cal__day.is-sel::after { background: var(--on-accent); }
 .clip-cal__foot { display: flex; gap: 8px; margin-top: 10px; }
@@ -1604,7 +2306,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   flex: 1; padding: 8px; border-radius: 9px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .clip-cal__all { border: 1px solid var(--border); background: none; color: var(--accent-text); }
-.clip-cal__all:hover:not(:disabled) { background: var(--bg-elevated-2); }
+@media (hover: hover) { .clip-cal__all:hover:not(:disabled) { background: var(--child-action-hover); } }
 .clip-cal__all:disabled { opacity: 0.4; cursor: default; }
 .clip-cal__done { border: none; background: var(--accent); color: var(--on-accent); }
 .clip-selectall { background: none; border: none; color: var(--accent-text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
@@ -1615,7 +2317,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 .clip-row__check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .clip-row__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: pointer; line-height: 0; border-radius: 8px; }
 .clip-row__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
-.clip-row__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; background: linear-gradient(135deg, #23264d, #14162f); }
+.clip-row__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
 .clip-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .clip-row__body { flex: 1; min-width: 0; cursor: pointer; }
 .clip-row__name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1625,7 +2327,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 /* In-player "delete this clip?" confirm row */
 .clip-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13.5px; }
 .clip-confirm > span { color: var(--text-secondary); }
-/* Recording storage readout (Settings → Camera and Recording → Recording) */
+/* Recording storage readout (Settings → Camera and recording → Recording) */
 .storage-readout { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
 .storage-readout code { font-size: 12px; background: var(--field-bg); padding: 1px 5px; border-radius: 5px; }
 /* Full-screen fallback shown by ErrorBoundary when a render throw would otherwise blank
@@ -1672,43 +2374,6 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   margin-top: 8px;
 }
 
-/* Camera management card (Cameras page) */
-.cam-card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.cam-card__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0; /* let the name ellipsis instead of pushing the actions out of line */
-  flex: 1 1 auto;
-}
-.cam-card__name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cam-card__actions {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.cam-card__addr {
-  word-break: break-all;
-  margin-top: 8px;
-}
-/* A disabled camera reads as dimmed, but its actions (to re-enable) stay fully legible. */
-.cam-card--off .cam-card__addr,
-.cam-card--off .cam-badge-row,
-.cam-card--off .field {
-  opacity: 0.55;
-}
-
 /* ONVIF auto-fill box in the Add-camera modal */
 .onvif-box {
   border: 1px solid var(--border);
@@ -1734,7 +2399,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 .onvif-box__err {
   margin-top: 8px;
   font-size: 12px;
-  color: var(--offline, #e08585);
+  color: var(--offline);
 }
 .onvif-box__title {
   font-weight: 600;
@@ -1789,6 +2454,15 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 .camera-tile__video-wrap:fullscreen .pip-btn {
   right: calc(max(10px, env(safe-area-inset-right, 0px)) + 44px);
 }
+/* The status dot follows the mic button's inset in fullscreen: same offsets from the (inset-aware) 10px edge as in
+   the tile (+8 down, +4 across in the corner, +38 across when it sits after the mic). */
+.camera-tile__video-wrap:fullscreen .camera-tile__video-dot {
+  top: calc(max(10px, env(safe-area-inset-top, 0px)) + 8px);
+  left: calc(max(10px, env(safe-area-inset-left, 0px)) + 4px);
+}
+.camera-tile__video-wrap:fullscreen .camera-tile__video-dot--after-mic {
+  left: calc(max(10px, env(safe-area-inset-left, 0px)) + 38px);
+}
 
 .camera-tile__video-wrap:fullscreen .whep-video {
   width: 100%;
@@ -1801,6 +2475,8 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  min-height: 56px;
   padding: 10px 14px 9px;
 }
 
@@ -1808,7 +2484,19 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
+.camera-tile__identity { min-width: 0; }
+/* The name row. The status dot is no longer here: it sits on the video next to the mic (.camera-tile__video-dot),
+   and the child's name now starts at the same left edge as the camera name. The status word is not printed here
+   either (visually hidden below, printed in the camera sheet, .tile-menu__state). */
+.camera-tile__title { display: flex; align-items: center; gap: 8px; position: relative; min-width: 0; }
+/* The dot's fixed 14px box (neutral 8px and breathing 14px share one footprint). Used by the camera sheet and, with
+   the .camera-tile__video-dot modifiers, on the video. */
+.camera-tile__dot { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; }
+/* Visually hidden, still read by a screen reader: ", Online" after the name. Same recipe as .child-cam__sr; position:
+   absolute so it is not a flex item and adds no gap to the row. */
+.camera-tile__sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 .drag-handle {
   display: flex;
@@ -1832,6 +2520,11 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   content: '';
   position: absolute;
   inset: -10px;
+  /* z-index: 1 on purpose. The camera name's row (.camera-tile__title) is position: relative, so it paints over any positioned
+     element that comes BEFORE it in the page and has no z-index, and the next flex item starts only 8px after the handle, so it
+     covered the last 2px of this 10px reach: a tap 21px from the handle's centre landed on the name, not the handle
+     (e2e 14-touch-targets.spec.js, which runs only on PRs to main: found on the 0.48.0 release PR). */
+  z-index: 1;
 }
 
 .drag-handle:active {
@@ -1841,6 +2534,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 .camera-tile__name {
   font-size: 15px;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .camera-tile__sub {
@@ -1863,8 +2557,10 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 
 .status-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: none;
 }
 
 .camera-tile__reading {
@@ -1875,6 +2571,9 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated-2);
 }
 
 .camera-tile__reading-icon {
@@ -1927,12 +2626,17 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   font-size: 15px;
 }
 
+/* UI consistency (PR-A): a switch's hidden checkbox must not grow across neighbouring controls. */
+.field select, .field input:not([type=checkbox]):not([type=radio]):not([type=range]) { min-height: var(--tap); }
+
 .field input:focus, .field select:focus, button:focus-visible, a:focus-visible {
   outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
 
 .btn {
+  min-height: var(--tap);
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1945,6 +2649,9 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   cursor: pointer;
   width: 100%;
 }
+
+/* UI consistency (PR-A): compact actions in rows deliberately override the standard tap height. */
+.btn-sm { min-height: 0; padding: 6px 14px; font-size: 12.5px; white-space: nowrap; }
 
 .btn-primary {
   background: var(--accent);
@@ -1968,6 +2675,15 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 .btn:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+/* Press feedback for every .btn variant at once, a touch lighter than the generic fallback near the top (it would give 0.9).
+   A background tint cannot be the one rule: primary is filled, secondary and danger are transparent outlines, and
+   --bg-elevated-2 (the inset) is off limits as a pressed fill (#1064). brightness deepens a filled button and only dims the
+   ink on an outline. NO transform: scale(0.98) lost clicks within about 2px of the edge of a full-width button (it shrinks
+   under the finger). Not on a disabled button, and no transition, so there is nothing for prefers-reduced-motion to opt out of. */
+.btn:not(:disabled):active {
+  filter: brightness(0.92);
 }
 
 /* Red "box outline" — transparent fill, red border + text. Used for destructive/stop actions. */
@@ -1999,36 +2715,6 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   border-radius: 10px;
   font-size: 13px;
   margin-bottom: 14px;
-}
-
-.preset-row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-
-.unit-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  border-radius: 12px;
-  padding: 10px 14px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  min-width: 84px;
-}
-
-.unit-btn--active {
-  border-color: var(--accent-line);
-  color: var(--text-primary);
-}
-
-.unit-btn__label {
-  font-size: 11px;
 }
 
 .empty-state {
@@ -2101,8 +2787,8 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 .list-row__title { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .list-row .icon-btn { flex-shrink: 0; white-space: nowrap; }
 
-/* Detection rows (Motion / Sound / Alert schedule) with a tinted periwinkle icon chip — shared
-   between Camera settings (drill-in) and the camera cog sheet (quick toggle) so they match. */
+/* .det-row: the plain 14px-padded row the Recording and alerts panel (RecordingScopePanel) is built from. The
+   Detection drill-in rows on Edit camera are NavRow (.nav-row below), not this (#1076). */
 .det-row {
   display: flex;
   align-items: center;
@@ -2127,21 +2813,81 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 }
 .scope-group:first-child { border-top: none; }
 .scope-row__value { text-align: right; max-width: 55%; font-size: 15px; color: var(--text-secondary); }
-.det-row--clickable { cursor: pointer; }
-.det-row__left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .det-row__label { font-size: 16px; font-weight: 500; }
-.det-row__right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text-secondary); }
-.det-chip {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent-text);
-  display: inline-flex;
+
+/* #1076: NavRow, the 56px "go deeper" row (icon chip, label, optional sub line, current value, chevron) used by the
+   Detection group on Edit camera. A real <button> / <a>, so it needs the resets below: a button is not full width,
+   centred text or transparent by default. Replaces DetectionRow's .det-row--clickable / .det-chip, which nothing else
+   used (RecordingScopePanel keeps .det-row and .det-row__label). No transition, so nothing to opt out of for
+   prefers-reduced-motion; hover only where a pointer can hover (touch has no hover and would leave it stuck). */
+.nav-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
 }
+.nav-row:last-child { border-bottom: 0; }
+.nav-row__left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.nav-row__right { display: flex; align-items: center; gap: 6px; flex: none; color: var(--text-secondary); font-size: 14px; }
+.nav-row__chip { width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent-text); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.nav-row__leading { display: inline-flex; flex: none; }
+.nav-row__copy { min-width: 0; }
+.nav-row__label, .nav-row__sub { display: block; overflow-wrap: anywhere; }
+.nav-row__label { font-size: 15px; font-weight: 600; }
+.nav-row__sub { font-size: 13px; color: var(--text-secondary); }
+.nav-row:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.nav-row:active { background: var(--child-action-active); }
+@media (hover: hover) { .nav-row:hover { background: var(--child-action-hover); } }
+
+/* #1076: Edit camera in groups. Every <input>/<select> below sits inside a `.field` wrapper, which is where the page's
+   field look lives (.field input, .field select: background, border, radius, padding); a control outside `.field`
+   renders as a bare browser control (the Cameras list's "Assigned to" select shipped that way). The 44px minimum is a
+   touch target, set on the inputs themselves because .field input's own padding gives about 42px. */
+.camera-form__card { padding: 14px; }
+.camera-form__card .field input, .camera-form__card .field select,
+.camera-form__advanced .field input { min-height: 44px; }
+.camera-form__last-field { margin-bottom: 0; }
+/* Address + port, and username + password, side by side. A grid (not the flex .onvif-box__row, whose 140px minimum
+   made the port as wide as the address and wrapped both on a phone). Address gets twice the port's width. The login
+   pair stacks below 360px: "•••••• (unchanged)" does not fit half of a 320px card. */
+.camera-form__pair { display: grid; gap: 10px; }
+.camera-form__pair--host { grid-template-columns: 2fr 1fr; }
+.camera-form__pair--login { grid-template-columns: 1fr 1fr; }
+.camera-form__pair > .field { min-width: 0; }
+@media (max-width: 359px) { .camera-form__pair--login { grid-template-columns: 1fr; gap: 0; } }
+.camera-form__onvif { margin-top: 2px; }
+.camera-form__fetch { min-height: 44px; }
+.camera-form__hint { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-secondary); }
+.camera-form__nav-card { padding: 0; overflow: hidden; }
+.camera-form__advanced { padding: 0; overflow: hidden; }
+.disclosure-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 56px; padding: 8px 14px; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.disclosure-row__text { min-width: 0; }
+.disclosure-row__text > * { display: block; }
+.disclosure-row__text > strong { font-size: 15px; }
+.disclosure-row__text > span { font-size: 13px; color: var(--text-secondary); }
+.disclosure-row > svg { flex: none; color: var(--text-secondary); }
+.disclosure-row[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.disclosure-row:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.disclosure-row:active { background: var(--child-action-active); }
+@media (hover: hover) { .disclosure-row:hover { background: var(--child-action-hover); } }
+.remote-advanced summary.disclosure-row, .tailscale-advanced summary.disclosure-row { padding: 8px 14px; }
+.remote-advanced summary.disclosure-row::after, .tailscale-advanced summary.disclosure-row::after { content: '⌄'; color: var(--text-secondary); }
+.remote-advanced[open] summary.disclosure-row::after, .tailscale-advanced[open] summary.disclosure-row::after { transform: rotate(180deg); }
+.camera-form__advanced-fields { padding: 14px 14px 14px; border-top: 1px solid var(--border); }
+.camera-form__advanced-fields > .field:last-child, .camera-form__advanced-fields > .onvif-box:last-child { margin-bottom: 0; }
+/* The read-only "Recording and alerts" summary sits at the end of Advanced (#1076): clear of the last field above it. */
+.camera-form__scope { margin-top: 8px; }
 
 .tag {
   display: inline-block;
@@ -2166,17 +2912,6 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   margin-bottom: 2px;
 }
 
-.about-link {
-  text-decoration: none;
-  color: var(--text-primary);
-  font-size: 14px;
-}
-
-.about-link svg {
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
 /* --- Log viewer --- */
 .log-viewer__toolbar {
   display: flex;
@@ -2194,6 +2929,49 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 }
 
 /* Detection screens (DetectionSettings.jsx): enable-toggle row, slider legend, save flag. */
+.detection-card { padding: 14px; border-radius: 12px; }
+.detection-card--switch { padding: 0; overflow: hidden; }
+.detection-card .field:last-child { margin-bottom: 0; }
+.detection-card .field input { min-height: 44px; }
+.detection-card .field-row { grid-template-columns: 1fr 1fr; }
+.detection-card .field-row > .field { min-width: 0; }
+.detection-card .detection-slider label { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.detection-card .camera-tile__sub { line-height: 1.45; }
+/* Detection's switch card keeps its standard row inside the card surface. */
+.detection-card .detection-switch { border: 0; border-radius: 0; background: transparent; margin: 0; }
+.detection-card--switch .detection-switch { padding: 0 14px; }
+/* The switch card's label is its title (not a heading: see EnableToggle), so it takes the title weight. */
+.detection-card--switch .switch-row__label { font-size: 16px; font-weight: 800; }
+.detection-card--switch .detection-switch { padding-top: 6px; padding-bottom: 8px; }
+.detection-card:not(.detection-card--switch) .detection-switch { padding: 0; }
+.detection-status__dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--text-secondary); }
+.detection-status__dot--live { background: var(--accent); }
+/* --offline, not --night-error: that token is only defined inside .night, and this card is not one (Codex review of #1081: the dot was transparent). */
+.detection-status__dot--error { background: var(--offline); }
+.detection-disclosure { display: block; min-height: 44px; margin-top: 8px; padding: 0 4px; border: 0; background: transparent; color: var(--accent-text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.detection-disclosure:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.detection-disclosure:active { background: var(--child-action-active); }
+@media (hover: hover) { .detection-disclosure:hover { background: var(--child-action-hover); } }
+/* Settings selectors share one inset track. */
+.seg-track { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated-2); }
+.seg-track__btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; min-height: var(--tap); padding: 8px 5px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
+.seg-track__btn--active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+.seg-track__btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.seg-track__btn:active:not(.seg-track__btn--active) { background: var(--child-action-active); }
+@media (hover: hover) { .seg-track__btn:hover:not(.seg-track__btn--active) { background: var(--child-action-hover); } }
+@media (prefers-reduced-motion: reduce) { .seg-track__btn { transition: none; } }
+
+/* #1076: global camera controls use the setting itself as the card title. The switch is still
+   tied to that visible title, while numeric inputs keep the shared field styling. */
+/* A label that IS the card title must look like the title. Camera controls' "PTZ step size" heading sits inside a
+   `.field`, so the generic `.field label` rule (12px grey caption, block, 6px below) restyled it and it no longer matched the
+   other two cards' headings. `.field .card-heading label` outranks `.field label` on specificity, not on source order, so
+   moving either rule cannot bring the caption look back. SwitchRow's heading label is not inside a `.field`, so it never
+   hit this; the rule covers both. */
+.card-heading label,
+.field .card-heading label { font: inherit; color: inherit; margin: 0; display: inline; cursor: pointer; }
+/* The shared Switch draws a 42×24 pill inside a 44px target. */
+.camera-controls .field input { min-height: 44px; }
 .tgl-row {
   display: flex;
   align-items: center;
@@ -2229,41 +3007,8 @@ input[type='range'] {
   accent-color: var(--accent);
 }
 
-/* Segmented control (e.g. the Light / Dark / System theme picker in Account). */
-.segmented {
-  display: flex;
-  gap: 4px;
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 4px;
-}
-
-.segmented__btn {
-  flex: 1;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  background: none;
-  border: none;
-  border-radius: 9px;
-  padding: 10px 6px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-family: inherit;
-}
-
-.segmented__btn--active {
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
 /* Camera tile detection quick-toggles — Motion / Sound / Alerts as three icon-over-label buttons
-   on one row. Off = dim outline; on = filled peri (matches .segmented__btn--active). */
+   on one row. Off = dim outline; on = filled peri (matches .seg-track__btn--active). */
 .detect-toggles {
   display: flex;
   gap: 8px;
@@ -2325,23 +3070,45 @@ input[type='range'] {
   flex: 1;
 }
 
-/* "Memories" timelapse card on child detail (see components/TimelapseCard.jsx). */
-/* These media sections start directly below their titles; Cameras and Recent alerts have padded rows,
-   so only these in-card titles need extra space. */
+/* Timelapse card on child detail (see components/TimelapseCard.jsx). The title is 15px bold with an accent icon, like the
+   Recent alerts title (UI refresh PR D): the canonical 12px grey .card-title is too quiet for the one heading of a card
+   whose body is a picture. Flex centring keeps the icon level with the word (owner screenshot, 2026-11-01). */
 .timelapse-card .card-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
 }
-/* Same centring as the Timelapse title above: without it the Video icon sat on the text baseline,
-   higher than the word (owner screenshot, 2026-11-01). */
-.recordings-card .card-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
+.timelapse-card .card-title svg, .alert-list__title svg { color: var(--accent-line); }
+.alert-list__title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+/* The Recordings card is ONE row (components/RecordingsCard.jsx): icon, title, the newest recording's time, a chevron that
+   turns down while the thumbnails below it are open. The row is the whole card's top, so the card carries no padding of
+   its own and the row is 56px high (past the 44px touch target). */
+.recordings-card { padding: 0; overflow: hidden; }
+.recordings-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 0 16px;
+  border: none; background: none; font: inherit; color: var(--text-primary); text-align: left; cursor: pointer;
 }
+@media (hover: hover) { .recordings-row:hover { background: var(--child-action-hover); } }
+.recordings-row:active { background: var(--child-action-active); }
+.recordings-row:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.recordings-row__icon { flex: none; color: var(--accent-line); }
+.recordings-row__title { font-size: 15px; font-weight: 700; }
+/* One line at any width: at 320px the time wrapped ("4:14" over "AM") and broke the 56px row's rhythm; it now truncates instead. */
+/* The zone suffix an away-from-home viewer sees ("GMT+11") is its own item and is never cut off. When time and zone do not both fit
+   beside the title (320px) the zone drops under the time, right-aligned, inside the row's 56px, rather than the time being
+   truncated to "Fri 4:1..." (the first attempt: the time shrank first, and lost its AM/PM, which is worse than a second line).
+   Only the time ends in an ellipsis, and only when it alone is wider than the room. */
+.recordings-row__latest { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 0.3em; text-align: right; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+.recordings-row__when { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.recordings-row__zone { flex: none; }
+.recordings-row__chev { flex: none; color: var(--text-secondary); transition: transform 0.15s ease; }
+.recordings-row[aria-expanded='true'] .recordings-row__chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .recordings-row__chev { transition: none; } }
+.recordings-card .rec-strip { padding: 4px 16px 16px; scroll-padding-inline: 16px; }
 .timelapse-hero {
   position: relative;
   display: block;
@@ -2360,6 +3127,7 @@ input[type='range'] {
   object-fit: cover;
   display: block;
 }
+.timelapse-hero:focus-visible, .timelapse-strip__item:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .timelapse-play {
   position: absolute;
   top: 50%;
@@ -2393,14 +3161,20 @@ input[type='range'] {
   overflow-x: auto;
   padding-bottom: 2px;
 }
+/* The strip: small thumbnails, four in view (scrolling for the rest), each labelled with its WEEKDAY over the picture. The label
+   sits on a dark chip because a thumbnail can be any brightness, and the tile is positioned so that chip stays inside it. */
 .timelapse-strip__item {
-  flex: 0 0 auto;
-  width: 84px;
+  position: relative;
+  flex: 0 0 calc((100% - 24px) / 4);
+  aspect-ratio: 3 / 2;
   padding: 0;
   border: 2px solid transparent;
   border-radius: 8px;
   overflow: hidden;
   background: var(--bg-elevated-2);
+  /* The 2px transparent border would otherwise show this inset fill through it: a near-black outline round every unselected
+     tile on the dark theme (owner, 11-13). Clipping the fill to the padding box leaves the border the card's own colour. */
+  background-clip: padding-box;
   cursor: pointer;
   color: var(--text-secondary);
 }
@@ -2410,15 +3184,20 @@ input[type='range'] {
 }
 .timelapse-strip__item img {
   width: 100%;
-  height: 48px;
+  height: 100%;
   object-fit: cover;
   display: block;
 }
 .timelapse-strip__item span {
-  display: block;
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
   font-size: 11px;
-  padding: 3px 2px;
-  text-align: center;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
 }
 /* Pill toggle switch (see components/Switch.jsx) — for immediate-apply settings only.
    The real checkbox is stretched over the track and made invisible so it stays the hit
@@ -2491,11 +3270,12 @@ input[type='range'] {
 .log-viewer__chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
 .log-chip {
+  min-height: var(--tap);
   font-size: 12px;
   line-height: 1;
   padding: 6px 11px;
@@ -2527,6 +3307,7 @@ input[type='range'] {
 
 .log-viewer__filter {
   flex: 1;
+  min-height: var(--tap);
   background: var(--bg-elevated-2);
   border: 1px solid var(--border);
   color: var(--text-primary);
@@ -2760,33 +3541,36 @@ input[type='range'] {
 }
 
 
-/* Recordings strip on a child's page. Deliberately its OWN classes rather than reusing the timelapse
-   ones: .timelapse-play is absolutely positioned and .timelapse-strip__item never established a
-   containing block, so a recordings thumbnail's play badge escaped and anchored itself to the
-   timelapse card above instead. */
-.rec-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+/* The strip previews the next recording at phone width and snaps each picture into view. Its own positioned
+   tile keeps the play badge on the recording (the timelapse strip has different geometry). */
+.rec-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x mandatory; }
 .rec-strip__item {
-  position: relative; /* the containing block the play badge needs */
-  flex: 0 0 auto; width: 108px; padding: 0;
+  position: relative; /* the containing block for the play glyph and time chip */
+  flex: 0 0 min(72%, 224px); aspect-ratio: 16 / 9; scroll-snap-align: start; padding: 0;
   border: 2px solid transparent; border-radius: 8px; overflow: hidden;
-  background: var(--bg-elevated-2); color: var(--text-secondary); cursor: pointer;
+  background: var(--bg-elevated); color: var(--text-primary); cursor: pointer;
 }
-.rec-strip__item:hover { border-color: var(--accent-line); color: var(--text-primary); }
-.rec-strip__item img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
-.rec-strip__item span:last-child { display: block; padding: 5px 6px; font-size: 11px; line-height: 1.25; }
+@media (hover: hover) { .rec-strip__item:hover { border-color: var(--accent-line); } }
+.rec-strip__item:active { border-color: var(--accent-line); }
+.rec-strip__item:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.rec-strip__item img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+.rec-strip__label {
+  position: absolute; left: 5px; bottom: 5px; max-width: calc(100% - 10px); padding: 2px 6px;
+  border-radius: 6px; background: rgba(0, 0, 0, 0.66); color: #fff; font-size: 11px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 /* A recording that couldn't be saved (issue #276). It has no thumbnail to show, so the tile keeps the
    same footprint as its neighbours — a shorter tile would make the strip ragged — and fills the image
    area with a warning glyph instead. Muted rather than alarming: it is an explanation, not an alert. */
 .rec-strip__item--failed { border-style: dashed; border-color: var(--border); }
-.rec-strip__item--failed:hover { border-color: var(--offline); }
+@media (hover: hover) { .rec-strip__item--failed:hover { border-color: var(--offline); } }
 .rec-strip__failed {
-  display: flex; align-items: center; justify-content: center;
-  width: 100%; aspect-ratio: 16 / 9;
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: var(--bg-elevated); color: var(--offline);
 }
 
 .rec-strip__play {
-  position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%);
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; background: rgba(0, 0, 0, 0.5); color: #fff; pointer-events: none;
 }
@@ -2864,6 +3648,12 @@ input[type='range'] {
 }
 .modal-card__head h2 { font-size: 18px; }
 .modal-card__actions { display: flex; align-items: center; gap: 4px; }
+/* Every Modal's close button: a bare `.icon-btn` is a 6x8px padding round a 13px glyph, far under a thumb. 44px square (the floor in
+   design-language.md section 9), still centred in the header row, whose title stays vertically centred beside it. It is the Modal's
+   own class, so the other `.icon-btn` uses (list-row actions, "Refresh now") keep their text-button look. Was scoped to the sleep
+   night card's sheet only (review of PR #1063); the review of #1062/#1064/#1065/#1066 found the rest of the dialogs the same. */
+.modal-card__close { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; border-radius: 10px; font-size: 16px; }
+.modal-card__close:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 
 /* Desktop: a `wide` modal (the video player) stops being a phone sheet and becomes a centred dialog
    sized to its content. A 440px sheet wastes most of a desktop window on a video. Only opted-in
@@ -2892,8 +3682,27 @@ input[type='range'] {
 /* A Room activity row (#907, reshaped to expand like a wake-up row). The head is time on the left and tag + duration + arrow on the
    right; "Movement outside the bed" is a long non-breaking tag, so on a narrow phone the right group drops under
    the time instead of pushing the page sideways. margin-left:auto keeps it right-aligned on either line. */
-.sleep-wakes__head--visit { flex-wrap: wrap; row-gap: 4px; }
-.sleep-wakes__head--visit .sleep-visit-right { margin-left: auto; }
+/* UI refresh follow-up (Codex review of #1065): one row, one line, at 320px. The head no longer wraps its right group under the time
+   (the old rule above, which put the "Out of bed" chip on a line of its own): the right group (chip, duration, arrow) is a fixed
+   block at the row's right edge and the TIME is what gives way, by wrapping inside its own cell, never by being cut (a phone rule:
+   text that carries meaning wraps). That only happens for a viewer away from home, whose times each carry a zone suffix; a
+   home viewer's rows measured 254px of room at 320px against 142-161px of time. On a phone under 380px the "Out of bed" chip
+   reads "Out" (the rest stays in the DOM, visually hidden, so a screen reader still hears "Out of bed"), and the amber dot beside the
+   time, which only repeats the chip's colour, goes: the worst home-time row ("5:48 am - 6:36 am", "Out", "1h 48m", an arrow) is
+   then 239px of 254. Measured in a browser at 320 and 375px, both themes (not a pixel pin in a test). */
+.sleep-wakes__head--visit { flex-wrap: nowrap; }
+.sleep-wakes__head--visit .sleep-wakes__time { min-width: 0; }
+.sleep-wakes__head--visit .sleep-visit-right { margin-left: auto; flex: none; }
+@media (max-width: 379px) {
+  .sleep-wakes__head--visit { gap: 6px; }
+  .sleep-wakes__head--visit .sleep-visit-right { gap: 6px; }
+  .sleep-wakes__head--visit .sleep-visit-dot--out { display: none; }
+  /* The caption above the list ("Movement outside the bed" beside "What is this?") wrapped to two lines at 320px: a smaller gap, no
+     side padding on the button and a 12px caption give the words the room they were short of. */
+  .sleep-events__explain { gap: 4px; font-size: 12px; }
+  .sleep-events__what { padding: 0; font-size: 12px; }
+  .sleep-visit-tag__more { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 /* The saved frame inside an expanded row: larger than an alert's 56x40 thumbnail, because the point is to see
    what the camera saw. Same 16:9-ish shape as the camera stream. */
 .sleep-wakes__thumb--frame { width: 96px; height: 54px; }
@@ -2916,37 +3725,75 @@ input[type='range'] {
 .review-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .review-card__go { color: var(--accent-line); font-size: 20px; padding-right: 12px; }
 
-.review-card__dismiss {
-  order: 2; align-self: flex-start; flex-shrink: 0;
-  padding: 10px 12px; background: none; border: 0; cursor: pointer; color: var(--text-secondary);
-}
-.review-card__dismiss:hover { color: var(--text-primary); }
-
 /* The review screen (pages/NightReview.jsx): one question, one primary action, everything else quiet.
    Tokens only; the focus ring is the global :focus-visible one. */
 .review-question { font-size: 17px; font-weight: 600; line-height: 1.35; margin: 2px 0 14px; }
 
-/* The disclosure for the two rarely-wrong times. A plain text button with a chevron, like the sleep
-   page's wake rows; aria-expanded carries the state for assistive tech, the chevron for the eye. */
-.review-more { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 6px; }
-.review-more__toggle {
-  display: inline-flex; align-items: center; gap: 6px; padding: 8px 0;
-  background: none; border: 0; cursor: pointer; font: inherit; font-size: 13.5px; color: var(--text-secondary);
-}
-.review-more__toggle:hover { color: var(--text-primary); }
-.review-more__chev { transition: transform 0.18s ease; flex: none; }
-.review-more__chev.is-open { transform: rotate(180deg); }
-.review-more__body { padding-top: 6px; }
-
-/* "No one was in the bed": a small text link, not a button, so it reads as the exception it is. */
+/* The one quieter answer is a row in a card of its own (UI refresh PR H, as drawn; PR I made it ONE row, "Something else was
+   off", which opens the "Edit sleep times" sheet): icon, words, chevron, a full-width 44px target. The card has no padding of its
+   own so the row's hit area runs edge to edge. */
+.review-rows { padding: 0; overflow: hidden; }
 .review-link {
-  display: block; margin: 6px 0 0; padding: 8px 0; background: none; border: 0; cursor: pointer;
-  font: inherit; font-size: 13.5px; color: var(--text-secondary); text-decoration: underline;
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 10px 16px; text-align: left;
+  background: none; border: 0; cursor: pointer; font: inherit; font-size: 14.5px; color: var(--text-primary);
 }
-.review-link:hover { color: var(--text-primary); }
+/* Pointer devices only: on a phone :hover sticks to the row after a tap and left the opened row tinted dark (phone pass). */
+@media (hover: hover) { .review-link:hover { background: var(--child-action-hover); } }
+.review-row__icon { flex: none; color: var(--accent-line); }
+.review-row__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.review-row__sub { display: block; margin-top: 2px; font-size: 12.5px; color: var(--text-secondary); }
+.review-row__go { flex: none; color: var(--text-secondary); }
+/* The sentence above a field ("We had 6:20 AM...") had no space under it and ran into the next label (phone pass). */
+.review-hint { margin: 0 0 12px; }
 .review-link:disabled { opacity: 0.55; cursor: default; }
 
-@media (prefers-reduced-motion: reduce) { .review-more__chev { transition: none; } }
+/* The correcting step's -5m / time / +5m stepper (UI refresh PR I). The side buttons and the time are all at least 44px tall;
+   the time is a real <input type="time"> drawn large, so typing still works and a screen reader reads a time field. */
+.review-stepper { display: flex; align-items: stretch; gap: 8px; margin-bottom: 8px; }
+.review-stepper__btn {
+  flex: none; min-width: 56px; min-height: 52px; padding: 0 10px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-elevated); color: var(--accent-text); font: inherit; font-size: 15px; font-weight: 700;
+}
+.review-stepper__btn:disabled { opacity: 0.5; cursor: default; }
+.review-stepper__time { flex: 1; min-width: 0; display: block; }
+.review-stepper__time input {
+  width: 100%; min-height: 52px; box-sizing: border-box; border-radius: 12px; padding: 0 12px; text-align: center;
+  border: 1px solid var(--border); background: var(--field-bg); color: var(--text-primary); font: inherit; font-size: 22px; font-weight: 700;
+}
+/* At 320px the 22px time (with its clock icon) was clipped to "06:3"; a smaller time and narrower side buttons make it fit (checked in screenshots). */
+@media (max-width: 360px) {
+  .review-stepper { gap: 6px; }
+  .review-stepper__btn { min-width: 46px; padding: 0 6px; }
+  .review-stepper__time input { font-size: 18px; padding: 0 6px; }
+}
+/* Visually hidden, still the accessible name of the time field (the question above already says what it is). */
+.review-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* The logged out-of-bed times offered under the stepper, one tap each. Wraps on a narrow phone; 44px targets. */
+.review-suggest { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.review-suggest__btn {
+  min-height: 44px; padding: 0 14px; border-radius: 22px; cursor: pointer; font: inherit; font-size: 14px;
+  border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary);
+}
+.review-suggest__btn:disabled { opacity: 0.5; cursor: default; }
+/* Press feedback for the controls that had none once the default tap highlight went (see the -webkit-tap-highlight-color rule
+   near the top). It is --child-action-active, the pressed tint of the child page's rows (#1064), NOT --bg-elevated-2: that is the
+   INSET colour, near-black in the dark theme, and using it as a pressed or open fill is what drew the black bars #1064 removed
+   (test/paletteTokens.test.jsx fails any :active rule that does). */
+.review-link:not(:disabled):active, .review-stepper__btn:not(:disabled):active, .review-suggest__btn:not(:disabled):active,
+.sleep-strip__item:active { background: var(--child-action-active); }
+
+/* "+ Add a note": a plain text action, 44px tall. */
+.review-add {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0; margin-bottom: 8px;
+  background: none; border: 0; cursor: pointer; font: inherit; font-size: 14.5px; font-weight: 600; color: var(--accent-text);
+}
+
+/* The "Edit sleep times" sheet's body. The "We had ..." line sits under its field; the sheet's "No one was in the bed" is a
+   full-width row with no side padding of its own (the sheet card already has it). */
+.review-sheet__had { margin: -8px 0 12px; font-size: 12.5px; color: var(--text-secondary); }
+.review-sheet .review-actions { margin-top: 4px; }
+.review-link--sheet { padding-left: 0; padding-right: 0; margin-top: 8px; border-top: 1px solid var(--border); }
 
 /* The review card's answered state, and the confirm-or-correct block on the review screen. */
 .review-card--done .review-card__body { padding-right: 4px; }
@@ -2954,7 +3801,7 @@ input[type='range'] {
 .review-card__icon--done { color: var(--live); background: rgba(127, 191, 163, 0.14); }
 
 .review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.review-actions .btn { flex: 1 1 auto; }
+.review-actions .btn { flex: 1 1 auto; } /* every answer on the review screen is a 44px target (PR I) */
 
 /* "You corrected this" — shown wherever a night's times came from a person rather than the detector.
    Owner 2026-11-05: hard to read. It is only used on the sleep card (`.night`), which is a dark indigo gradient in BOTH themes,
@@ -2962,7 +3809,7 @@ input[type='range'] {
    light veil reads on that card in either theme. If this pill is ever used on a light surface, scope these colours to `.night`. */
 .sleep-corrected {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; font-weight: 600; color: #D9CDF4;
+  font-size: 11.5px; font-weight: 600; color: var(--night-text);
   background: rgba(255, 255, 255, 0.14); padding: 2px 9px; border-radius: 999px;
 }
 
@@ -2971,14 +3818,77 @@ input[type='range'] {
   color: var(--text-secondary);
 }
 
-/* ESPHome settings page (#506). `.btn` is width:100%, so a wrapping group of buttons needs `.btn { width: auto }` or
-   each one takes a whole line (the same trap as the bed-zone buttons). The head wraps its badge under a long name
-   rather than widening the page on a phone. */
-.esphome-device__head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
-.esphome-device__title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
-.esphome-device .camera-tile__sub { overflow-wrap: anywhere; }
-.esphome-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.esphome-actions .btn { width: auto; }
+/* #1074: discovery is the page's main action; saved devices keep their actions in a menu. */
+.esp-about { margin-bottom: 14px; }
+.esp-about p { margin: 0 0 4px; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.esp-about button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 2px; border: 0; background: none; color: var(--accent-text); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+.esp-about button svg { margin-left: auto; color: var(--text-secondary); transition: transform 0.15s ease; }
+.esp-about button[aria-expanded="true"] svg { transform: rotate(180deg); }
+.esp-about button:focus-visible, .esp-add button:focus-visible, .dev-card__sensors:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.esp-about [hidden] { display: none; }
+.find-card__head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.find-card__icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--night-divider); color: var(--night-link); }
+.find-card h2 { margin: 0; color: var(--night-text); font: 800 18px var(--font-display); }
+.find-card__head p, .find-card__note { margin: 2px 0 0; color: var(--night-muted); font-size: 13px; line-height: 1.5; }
+.find-card__action, .find-card__manual { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 44px; border: 0; border-radius: 10px; background: var(--night-action); color: var(--night-on-action); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.find-card__action:disabled { background: var(--night-divider); color: var(--night-link); cursor: default; }
+.find-card__manual { margin-top: 10px; border: 1px solid var(--night-link); background: transparent; color: var(--night-link); }
+.find-card__action:focus-visible, .find-card__manual:focus-visible, .find-card__result:focus-visible { outline: 2px solid var(--night-link); outline-offset: 2px; }
+.find-card__action:active:not(:disabled), .find-card__manual:active, .find-card__result:active:not([aria-disabled="true"]) { filter: brightness(0.9); }
+.find-card__busy-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--night-action); animation: find-card-breathe 1.4s ease-in-out infinite; }
+@keyframes find-card-breathe { 50% { box-shadow: 0 0 0 5px var(--night-divider); } }
+.find-card__progress { height: 3px; margin-top: 10px; border-radius: 2px; background: var(--night-divider); overflow: hidden; }
+.find-card__progress span { display: block; height: 100%; background: var(--night-action); }
+.find-card__note { margin-top: 10px; }
+.find-card__error { margin: 10px 0 0; color: var(--night-error); font-size: 13px; }
+.find-card__sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.find-card__results { list-style: none; margin: 14px 0 0; padding: 0; border-top: 1px solid var(--night-divider); }
+.find-card__results li + li { border-top: 1px solid var(--night-divider); }
+.find-card__result { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 8px 0; border: 0; background: none; color: var(--night-text); font: inherit; text-align: left; cursor: pointer; }
+.find-card__result[aria-disabled="true"] { cursor: default; }
+.find-card__result--selected { outline: 2px solid var(--night-link); outline-offset: -2px; border-radius: 10px; }
+.find-card__tile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--night-divider); color: var(--night-link); }
+.find-card__result-text { display: grid; gap: 2px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.find-card__result-text strong { font-size: 15px; }
+.find-card__result-text span { color: var(--night-muted); font-size: 13px; }
+.find-card__side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; color: var(--night-link); }
+.find-card__chip, .find-card__availability { display: inline-flex; align-items: center; gap: 4px; color: var(--night-link); font-size: 11px; font-weight: 600; }
+.find-card__chip { padding: 2px 8px; border: 1px solid var(--night-link); border-radius: 999px; }
+.find-card__availability { color: var(--night-muted); font-size: 12px; }
+.dev-card { position: relative; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
+.dev-card__main { display: flex; align-items: flex-start; gap: 10px; padding: 14px 4px 12px 14px; }
+.dev-card__body { flex: 1; min-width: 0; }
+.dev-card__state { display: flex; align-items: center; gap: 6px; min-height: 18px; margin-bottom: 2px; font-size: 13px; font-weight: 600; }
+.dot--neutral { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); }
+.dev-card__name { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.dev-card__line { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+.dev-card__encryption { display: flex; align-items: center; gap: 5px; margin-top: 2px; color: var(--text-secondary); font-size: 13px; }
+.dev-card__error { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--bg-elevated-2); font-size: 13px; }
+.more-menu--card { flex: none; }
+.more-menu--card .more-menu__btn { width: 44px; height: 44px; margin-top: -8px; border-radius: 10px; color: var(--text-secondary); }
+.more-menu--card .more-menu__panel { top: calc(100% + 2px); right: 0; z-index: 50; min-width: 220px; }
+.more-menu--card .more-menu__btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.dev-card__menu-divider { height: 1px; margin: 4px 8px; background: var(--border); }
+.more-menu__item.dev-card__delete { color: var(--offline); }
+.dev-card__sensors { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 0 14px; border: 0; border-top: 1px solid var(--border); border-radius: 0 0 12px 12px; background: none; color: var(--text-primary); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.dev-card__sensors span { color: var(--text-secondary); font-size: 13px; font-weight: 400; }
+.dev-card__sensors svg { margin-left: auto; color: var(--text-secondary); transition: transform 0.15s ease; }
+.dev-card__sensors[aria-expanded="true"] svg { transform: rotate(90deg); }
+.dev-card .esphome-entities { margin: 0; padding: 8px 14px; border-top: 1px solid var(--border); }
+.dev-card .esphome-entities li { padding: 8px 0; }
+.esp-add { margin: 14px 0; }
+
+.esp-add .camera-tile__sub { margin-top: 8px; }
+.esp-retention { margin-top: 22px; }
+
+.esp-from-search { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px; padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-text); font-size: 12px; font-weight: 600; } /* the .cam-chip recipe: --accent-text on a 12% tint; --accent-soft is light in BOTH themes, so accent text on it fails at night */
+.esp-encryption-callout { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; padding: 9px 11px; border-radius: 10px; background: var(--bg-elevated-2); font-size: 13px; }
+.esp-encryption-callout svg { flex: none; margin-top: 2px; }
+@media (hover: hover) {
+  .find-card__action:hover:not(:disabled), .find-card__manual:hover, .find-card__result:hover:not([aria-disabled="true"]) { filter: brightness(1.1); }
+  .more-menu--card .more-menu__btn:hover, .dev-card__sensors:hover { background: var(--child-action-hover); }
+}
+@media (prefers-reduced-motion: reduce) { .find-card__busy-dot { animation: none; } .esp-about button svg, .dev-card__sensors svg { transition: none; } }
 .esphome-warn { color: var(--offline); }
 .esphome-entities { list-style: none; margin: 10px 0 0; padding: 8px 0 0; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .esphome-entities li { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
@@ -2987,7 +3897,7 @@ input[type='range'] {
 .setup-main { width: min(100%, 760px); margin-inline: auto; }
 .setup-card { padding: clamp(20px, 5vw, 36px); }
 .setup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: 13px; }
-.setup-wordmark { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 800 19px var(--font-display); }
+.setup-wordmark { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 800 20px var(--font-display); }
 /* One row however many steps there are (owner, 2026-11-06: with seven steps a fixed six columns wrapped the last one onto a second
    line). Columns are created per segment, equal width. */
 .setup-progress { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin: 24px 0; }
@@ -3001,9 +3911,9 @@ input[type='range'] {
 .setup-content > p { margin: 0; }
 .setup-card .app-main { padding: 0; }
 .setup-card select, .setup-card input { min-height: 44px; }
-.setup-card .btn { min-height: 44px; }
+
 .setup-actions { display: flex; gap: 10px; margin-top: 24px; }
-.setup-actions .btn { min-height: 44px; flex: 1; }
+.setup-actions .btn { flex: 1; }
 .setup-exit { display: block; margin: 12px auto 0; padding: 12px; min-height: 44px; background: none; border: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
 .logo-tile.setup-welcome-icon { display: flex; margin: 0 auto; }
 /* The guide's own caregiver form (SetupCaregivers); the first-run account form (FirstRun) uses the same classes so the two look alike. */
@@ -3019,47 +3929,58 @@ input[type='range'] {
 .logo-tile { display: inline-flex; flex-shrink: 0; background: var(--bar); border-radius: 25%; overflow: hidden; }
 .logo-tile img { display: block; width: 100%; height: 100%; }
 .logo-tile--glow { box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent); }
-.setup-checklist { list-style: none; padding: 0; margin: 8px 0; }
-.setup-checklist li { padding: 9px 0 9px 30px; position: relative; }
-.setup-checklist li::before { content: '✓'; position: absolute; left: 2px; color: var(--accent-text); font-weight: 800; }
-/* Add a camera (#950): the search card, one card per camera found, the login card, the manual card. The camera
-   cards follow the 12px card of the design language and the saved-server rows of the mobile app: a full-width
-   tappable row, name bold on the left, address muted under it, a small badge and a chevron on the right. */
-.camera-discovery { padding: 14px; margin-bottom: 12px; }
-.camera-discovery__title { margin: 0 0 10px; font-size: 16px; font-weight: 700; }
-.camera-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
-.camera-card {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  width: 100%; min-height: 44px; padding: 12px 14px; box-sizing: border-box;
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
-  color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
-}
-.camera-card.is-selected { border-color: var(--accent-line); }
-/* An already-saved camera: greyed and not tappable. It is still listed so it does not look like a missed camera. */
-.camera-card.is-added { opacity: 0.55; cursor: default; }
-/* min-width 0 lets the text column shrink inside the flex row, so a long product string ends in an ellipsis
-   instead of pushing the badge off the card or wrapping in the middle of a word. */
-.camera-card__text { display: grid; gap: 2px; min-width: 0; flex: 1; }
-.camera-card__name { font-size: 15px; font-weight: 700; }
-.camera-card__line { font-size: 13px; color: var(--text-secondary); }
-.camera-card__name, .camera-card__line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.camera-card__side { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text-secondary); }
-.camera-card__chevron { opacity: 0.45; }
-.camera-card__chevron.is-open { transform: rotate(90deg); }
+/* First-run welcome: plain bullets, not check marks. A tick means "done" everywhere else in the app and none of these steps is. */
+.setup-checklist { list-style: disc; padding-left: 24px; margin: 8px 0; }
+.setup-checklist li { padding: 9px 0; }
 .camera-connect { padding: 14px; }
 .camera-connect__title { margin: 0; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
 .camera-connect__address { margin: 2px 0 12px; font-size: 13px; color: var(--text-secondary); }
+.camera-connect__credentials { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.camera-connect__error, .camera-connect__confirm { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+.camera-connect__error { color: var(--offline); background: var(--bg-elevated-2); }
+.camera-connect__confirm { color: var(--text-primary); background: var(--bg-elevated-2); }
+.camera-connect__error svg, .camera-connect__confirm svg { flex: none; margin-top: 1px; }
 .camera-connect__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .camera-connect__actions .btn { width: auto; flex: 1 1 140px; }
 /* Owner 2026-11-05: "Advanced settings" looked too big. It is a `.linkbtn` (`font: inherit`), so it took the card's size, about
    20px next to a 15px button. 14px is the design scale's button size; the 44px height keeps the touch target. */
 .camera-connect__advanced { min-height: 44px; padding: 0 8px; font-size: 14px; }
 .camera-manual { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; }
-.camera-manual .camera-card { border: 0; background: none; }
+.camera-manual__trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 56px; padding: 8px 14px; border: 0; border-radius: 12px; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.camera-manual__trigger:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.camera-manual__text { display: grid; gap: 2px; min-width: 0; }
+.camera-manual__text strong { font-size: 15px; }
+.camera-manual__text span { color: var(--text-secondary); font-size: 13px; }
+.camera-manual__side { color: var(--text-secondary); }
+.camera-manual__side svg { transition: transform 0.15s ease; }
+.camera-manual__side svg.is-open { transform: rotate(90deg); }
 .camera-manual__form { padding: 0 14px 14px; }
 .camera-manual__form .app-main { padding: 0; max-width: none; }
-.setup-summary { display: grid; gap: 10px; }
-.setup-summary div { display: flex; justify-content: space-between; gap: 10px; padding: 12px; background: var(--bg-elevated-2); border-radius: 10px; }
+/* #1076: camera cards reuse the ESPHome surface while keeping the assignment control visible. */
+.cameras-title { display: flex; justify-content: space-between; align-items: baseline; }
+.cameras-title span { font-weight: 600; text-transform: none; letter-spacing: 0; }
+.camera-device__detection { margin-top: 4px; }
+.camera-device__chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.camera-device__chips span { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--accent-line); border-radius: 999px; color: var(--accent-text); font-size: 11px; font-weight: 600; }
+.camera-device__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 56px; padding: 8px 14px; border-top: 1px solid var(--border); font-size: 13px; }
+.camera-device__foot label, .camera-device__foot > span { color: var(--text-secondary); }
+/* The page's field look (.field input, .field select) only applies inside a `.field` wrapper, and this row has none, so the select
+   fell back to the browser's default white box with a square black border (found on the owner's phone, 2026-11-14, PR #1078).
+   The same values as `.field select`, copied here rather than wrapping the row in `.field` (its 14px margin and label style are
+   not wanted in a card's foot row). */
+.camera-device__foot select { width: min(60%, 260px); min-height: 44px; box-sizing: border-box; background: var(--field-bg); border: 1px solid var(--border); color: var(--text-primary); border-radius: 10px; padding: 11px 12px; font-size: 15px; }
+.camera-device__foot select:focus { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.cameras-add { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.cameras-empty { padding: 18px; margin-bottom: 14px; }
+.cameras-empty h2 { margin: 0; color: var(--night-text); font: 800 18px var(--font-display); }
+.cameras-empty p { color: var(--night-muted); font-size: 13px; }
+.cameras-empty .btn { display: flex; align-items: center; justify-content: center; gap: 8px; }
+@media (hover: hover) { .camera-manual__trigger:hover { background: var(--child-action-hover); } }
+@media (prefers-reduced-motion: reduce) { .camera-manual__side svg { transition: none; } }
+/* Setup finish: the Child and Camera lines are two label/value rows inside one .card (rules between them), not two tinted pills. */
+.setup-summary { display: grid; gap: 0; }
+.setup-summary div { display: flex; justify-content: space-between; gap: 10px; padding: 12px 0; }
+.setup-summary div + div { border-top: 1px solid var(--border); }
 .setup-main--terminal { width: 100%; }
 /* Owner testing 2026-11-05 (Android app), two rounds. The banner is rendered by SetupGate ABOVE the page's header, so:
    1. it sat under the status bar (the header's env(safe-area-inset-top) padding does not cover it), and
@@ -3073,7 +3994,7 @@ input[type='range'] {
 .app-shell > .app-header { order: -1; }
 .setup-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: calc(10px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-left)) 10px; background: var(--bg-elevated-2); color: var(--text-primary); border-bottom: 1px solid var(--border); }
 .app-shell:has(> .app-header) > .setup-banner { padding-top: 10px; }
-.setup-banner .btn { width: auto; min-height: 44px; }
+.setup-banner .btn { width: auto; }
 /* The in-progress wizard has no AppHeader (a focused card with its own wordmark; owner's choice, 2026-11-05), so the space the
    header normally takes is reserved here instead: clear the status bar on a phone, a little more room on a wide screen. The
    finished-setup view (--terminal) renders the real header and needs neither. */
@@ -3093,14 +4014,42 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
 .setup-player { max-width: 520px; margin-block: 16px; }
 @media (max-width: 600px) { .setup-banner { flex-wrap: wrap; } }
 .esphome-dates .field { flex: 1 1 140px; min-width: 0; }
-/* AvatarEditor (child settings, account): the avatar with a camera badge at its bottom-right. The invisible file input covers
-   the whole avatar so a tap lands on it; the badge is a rounded square in the card colour with a brand-violet border (the
-   reference image's border is green). Size is set inline from the avatar size, so the badge scales with it. */
+/* AvatarEditor (child settings, account, caregiver form, setup): the avatar with a camera badge at its bottom-right. The invisible
+   file input covers the whole avatar so a tap lands on it. The badge is a round disc (owner, 2026-11-15: the look the child's card
+   used to have, replacing the rounded square with the gold border): the text colour as the disc, the card colour as the camera
+   and as a 2px ring that separates it from the avatar. By tokens, so it reads in both themes: a light disc with a dark camera at
+   night, the inverse by day. Glyph on disc is 12.53:1 at night and 16.65:1 by day, and the disc against the card it sits on is
+   the same pair. Size is set inline from the avatar size, so the badge scales with it. */
 .avatar-editor { position: relative; display: inline-block; flex: none; border-radius: 50%; cursor: pointer; }
 .avatar-editor__input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border-radius: 50%; }
-.avatar-editor__badge { position: absolute; right: -4px; bottom: -4px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); border: 2px solid var(--complement); border-radius: 9px; color: var(--accent-text); pointer-events: none; }
+.avatar-editor__badge { position: absolute; right: -4px; bottom: -4px; display: flex; align-items: center; justify-content: center; background: var(--text-primary); color: var(--bg-elevated); box-shadow: 0 0 0 2px var(--bg-elevated); border-radius: 50%; pointer-events: none; }
 /* Owner 2026-11-05: clicking the camera drew a second box around the badge. Cause: the ring was on `:focus-within`, and a click
    focuses the (invisible) file input. A keyboard user still needs to see where focus is (docs/design-language.md, accessibility
    floor), so the ring is now only for `:focus-visible` (the browser's own test for "focus arrived by keyboard"; a mouse or touch
    click does not match it) and goes around the whole avatar, not the badge. */
 .avatar-editor:has(.avatar-editor__input:focus-visible) { outline: 2px solid var(--accent-line); outline-offset: 3px; }
+/* A child's photo wears a 3px colour ring (Avatar.jsx), outside the avatar's box: the keyboard outline moves out past it. */
+.avatar-editor:has([data-child-ring]):has(.avatar-editor__input:focus-visible) { outline-offset: 6px; }
+
+/* Users screen: one account row = the open-account area and, when the account has signed-in devices, a separate down-arrow
+   button, as siblings (a button inside a role=button row is invalid nesting). The sessions sit in a panel under the row. */
+.user-row { border-bottom: 1px solid var(--border); }
+.user-row__line { display: flex; align-items: center; gap: 4px; }
+.user-row__open { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0 12px 14px; cursor: pointer; font-size: 16px; font-weight: 500; }
+/* The open area has no right padding because, on a row with sessions, the toggle's own margin supplies the gap. A row WITHOUT
+   a toggle has the open area as its last child, so it would put its arrow flush against the card edge. Give that case the
+   distance the toggle's chevron sits from the edge (margin 6px + the centring inside the --tap wide button around an 18px
+   icon), so the arrows line up down the list whether or not an account has sessions. */
+.user-row__open:last-child { padding-right: calc(6px + (var(--tap) - 18px) / 2); }
+.user-row__open:focus-visible, .user-row__toggle:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.user-row__toggle { flex: none; width: var(--tap); height: var(--tap); display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.user-row__toggle:active { background: var(--child-action-active); }
+/* Hover only where a pointer can hover: on a phone a tapped control stays in :hover and would keep the fill (design-language states). */
+@media (hover: hover) { .user-row__toggle:hover { background: var(--child-action-hover); } }
+.user-row__toggle-chev { transition: transform 0.15s ease; }
+.user-row__toggle[aria-expanded='true'] .user-row__toggle-chev { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .user-row__toggle-chev { transition: none; } }
+/* Inset from the row's edges and tinted like the other nested panels so it reads as belonging to the row above. */
+.user-row__sessions { padding: 0 14px 8px; background: color-mix(in srgb, var(--accent-line) 6%, var(--bg-elevated)); border-radius: 10px; margin-bottom: 8px; }
+.user-row__sessions[hidden] { display: none; }
+.user-row__sessions .list-row:last-child { border-bottom: none; }

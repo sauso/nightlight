@@ -28,6 +28,8 @@ Each row on **Settings → Integrations → Push notifications** carries a badge
 
 There is no badge for the moment between opening the page and the answer arriving.
 
+Each provider page starts with an introduction above its **Connection** card. Its enable switch and fields are saved with **Save changes** at the bottom. Where **Send test with saved settings** is offered, it sits below Save and stays unavailable until the saved configuration is ready.
+
 ---
 
 ## What gets sent, and what each provider receives
@@ -41,8 +43,8 @@ choice of kind: a provider gets all of them or none. What can be switched off se
 |---|---|---|---|
 | **Motion alert** | **Off.** Motion detection is off on a new camera | Motion detection on for that camera. Not sent while the camera is [silenced](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what), outside its [Alert schedule](#alert-schedule-quiet-hours), or under [Hold alerts until asleep](#hold-alerts-until-asleep), including outside the sleep window when that setting is on | Every enabled provider; with Firebase, every device that is registered and signed in, caregivers included |
 | **Sound alert** | **Off.** Sound detection is off on a new camera | Sound detection on for that camera. Same silence, schedule and hold rules as motion alerts | The same |
-| **Camera offline**, and **back online** | **Off** | **Settings → Camera and Recording → Camera controls → Notify when a camera goes offline** (default threshold 5 minutes, 1–1440); "back online" is sent only after an offline notification was. See [Camera controls](camera-controls.md#camera-offline-alerts) | The same |
-| **Long silence** (a camera's alerts kept silenced) | **On**, 60 minutes (1–719) | **Settings → Camera and Recording → Camera controls → Long silence alerts**. See [Camera controls](camera-controls.md#long-silence-alerts) | Meant for admins: on Firebase only admins' devices, and not the person who set the silence; Pushover, ntfy and Gotify cannot address one person, so everyone on them gets it |
+| **Camera offline**, and **back online** | **Off** | **Settings → Camera and recording → Camera controls → Notify when a camera goes offline** (default threshold 5 minutes, 1–1440); "back online" is sent only after an offline notification was. See [Camera controls](camera-controls.md#camera-offline-alerts) | The same |
+| **Long silence** (a camera's alerts kept silenced) | **On**, 60 minutes (1–719) | **Settings → Camera and recording → Camera controls → Notify admins when a camera's alerts stay silenced for a long time**. See [Camera controls](camera-controls.md#long-silence-alerts) | Meant for admins: on Firebase only admins' devices, and not the person who set the silence; Pushover, ntfy and Gotify cannot address one person, so everyone on them gets it |
 | **Sleep report** (and one **Sleep report updated** follow-up) | **On for every child**, with the child's name shown. Two switches per child (admin only, on the child's page), see below | A child with **Track sleep** on, **Send this child's sleep report** on, and at least one provider enabled. See [Sleep report notifications](#sleep-report-notifications) | The same as motion alerts |
 | **Test message** | Only when you press **Send test** (Pushover, ntfy and Gotify; Firebase has no test button) | That provider's settings **saved**: the test uses what was last saved, not what is typed on screen, so **Send test** (labelled "Send test with saved settings") is greyed out, with a hint, while a field or secret has been changed and not yet saved. Save first, then test | That one provider |
 
@@ -291,7 +293,7 @@ About that one shared address:
   like any other server setting that only an admin can change.
 - **What counts as an address.** A plain `http://` or `https://` address with an optional port — the
   same thing your browser shows before the first `/` — such as `https://nightlight.example.com` or
-  `http://192.168.1.100:8080`. Anything else (another scheme, a login name or password, a path, a
+  `http://192.168.1.20:8080`. Anything else (another scheme, a login name or password, a path, a
   `?query` or `#fragment`, or spaces or unusual characters inside it) is ignored. The phone still
   registers and still receives its alerts; it just contributes no address. Only the *shape* is
   checked — the server cannot know whether an address is actually reachable from outside, or that it
@@ -315,6 +317,13 @@ About that one shared address:
 **Cameras → edit** a camera. Motion and sound are independent detectors — either can be enabled
 without the other, and each has its own sensitivity, confirmation delay and cooldown.
 
+Each of the three screens starts with its on/off switch. When on, Motion shows **Detection source**,
+**Timing**, **Alert image**, **Bed area**, then **Recording**. Sound shows **Sensitivity**,
+**Calibration**, **Timing**, **Recording**, then **What this detector can and can't do**.
+Alert schedule shows **Active hours** with the **From** and **To** fields. When off, each screen
+shows its short explanation in place of the settings cards. The source buttons for Motion select
+Nightlight, MQTT or, where supported, ONVIF; choosing MQTT shows its topic and value fields.
+
 The camera's page also carries a read-only **Recording and alerts** summary of what the camera alerts on,
 whether alerts save a clip, and whether it is ready right now; see
 [the panel](recording.md#the-recording-and-alerts-panel-per-camera-read-only).
@@ -324,6 +333,10 @@ whether alerts save a clip, and whether it is ready right now; see
 The Motion, Sound and Alert schedule screens have no Save button — every change (a slider, a switch,
 a typed number) saves itself about a second after you stop moving it, and applies immediately: the
 camera's detector restarts to match.
+
+On Sound, the first limit, **It measures loudness, not crying**, stays visible. **Show the other four**
+opens the remaining limits. The first Timing sentence stays visible, while **More about timing**
+opens its longer explanation. These rows only reveal text; they do not change detection settings.
 
 A small flag above the settings says **Saving…**, then **Saved ✓**. Leaving the screen right away —
 tapping Back the instant you make a change — still saves it; you don't need to wait for the flag.
@@ -654,7 +667,7 @@ stops being refined, which is the other half of why no later wake time is pushed
 ## Long-silence notifications (admins)
 
 Separate again: when a camera's alerts are kept silenced, on and off, for longer than the admins allow (on by
-default, 60 minutes, under **Settings → Camera and Recording → Camera controls → Long silence alerts**), one notification goes out for
+default, 60 minutes, under **Settings → Camera and recording → Camera controls → Notify admins when a camera's alerts stay silenced for a long time**), one notification goes out for
 that silence. It says how long, never who: no username goes to any provider. Unlike everything above, it is
 meant for the **admins**, not the person who silenced the camera, and only the Nightlight app's own push
 (Firebase) can do that: Pushover, ntfy and Gotify cannot address one person, so everyone on them receives it

@@ -3,11 +3,16 @@ import { api } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
+import ModalActions from '../components/ModalActions.jsx';
 import Switch from '../components/Switch.jsx';
 import { saveTextDownload } from '../lib/saveTextDownload.js';
+import EsphomeDiscovery from '../components/EsphomeDiscovery.jsx';
+import MoreMenu from '../components/MoreMenu.jsx';
+import BreathingDot from '../components/BreathingDot.jsx';
+import { ChevronDown, ChevronRight, Download, Lock, LockOpen, Pencil, Plus, Trash2, Wifi } from 'lucide-react';
 import {
   MAX_DEVICES, RETENTION_DEFAULT_DAYS, RETENTION_MAX_DAYS, RETENTION_MIN_DAYS, validRetention,
-  stateBadge, encryptionNote, relativeAge, exportRange, dayString, EXPORT_MAX_DAYS,
+  stateBadge, stateDot, encryptionNote, relativeAge, exportRange, dayString, EXPORT_MAX_DAYS,
 } from '../lib/esphomeUi.js';
 
 // How often the device list (and an open entity list) is re-read. Status changes on the order of seconds to minutes,
@@ -76,6 +81,7 @@ export default function SettingsEsphome() {
   const [childrenFailed, setChildrenFailed] = useState(false);
   const [dialog, setDialog] = useState(null); // { kind: 'form', device? } | { kind: 'delete', device } | { kind: 'export', device }
   const [saved, setSaved] = useState('');
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [cardVersion, setCardVersion] = useState({}); // device id -> how many times it was edited; part of its card's key
   const later = useLater();
 
@@ -114,8 +120,11 @@ export default function SettingsEsphome() {
       <main className="app-main">
         {saved && <div className="saved-banner">{saved}</div>}
 
-        <div className="card">
-          <div className="camera-tile__sub">
+        <div className="esp-about">
+          <p>Reads sensor data straight from your ESPHome devices. For comparison only: it changes no wake time, figure or alert.</p>
+          <button type="button" aria-expanded={aboutOpen} aria-controls="esp-about-detail"
+            onClick={() => setAboutOpen((open) => !open)}>About this data <ChevronDown size={16} aria-hidden="true" /></button>
+          <div id="esp-about-detail" className="camera-tile__sub" hidden={!aboutOpen}>
             Connects straight to an ESPHome device (its Native API, port 6053 unless you change it) and records what
             its sensors report, so you can see whether the readings are useful. Nightlight only reads: it never sends
             anything to the device. A sensor-based wake time is stored beside each night for comparison only; it
@@ -124,6 +133,15 @@ export default function SettingsEsphome() {
             device a fixed IP address; names ending in <code>.local</code> do not work from inside the container.
           </div>
         </div>
+
+        <EsphomeDiscovery full={full} loading={list === null && !devices.error}
+          onAddManually={() => { if (!full && (list || devices.error)) setDialog({ kind: 'form' }); }} onPick={(candidate) => {
+            if (!full && (list || devices.error)) setDialog({ kind: 'form', prefill: { name: candidate.name, host: candidate.ip,
+              port: candidate.port, encrypted: candidate.encrypted === true } });
+          }} />
+
+        {/* No "n of 8" counter (owner, 2026-11-15): it read as "2 of 8 devices found were added". The limit is still stated when it is reached (below). */}
+        <h2 className="section-title">Your devices</h2>
 
         {list === null && !devices.error && <div className="camera-tile__sub" role="status">Loading…</div>}
         {list === null && devices.error && (
@@ -138,20 +156,21 @@ export default function SettingsEsphome() {
           </div>
         )}
         {list && list.length === 0 && (
-          <div className="card camera-tile__sub">No devices yet. Add one to start collecting readings.</div>
+          <div className="card camera-tile__sub">No devices yet. Search above, or add one by IP address.</div>
         )}
         {list && list.map((device) => (
-          <DeviceCard key={`${device.id}:${cardVersion[device.id] || 0}`} device={device} childName={childName(device.child_id)}
+          <DeviceCard key={device.id} version={cardVersion[device.id] || 0} device={device} childName={childName(device.child_id)}
             onEdit={() => setDialog({ kind: 'form', device })}
             onDelete={() => setDialog({ kind: 'delete', device })}
             onExport={() => setDialog({ kind: 'export', device })} />
         ))}
 
         {list && (
-          <div style={{ marginBottom: 14 }}>
-            <button type="button" className="btn btn-primary" disabled={full} onClick={() => setDialog({ kind: 'form' })}>
-              Add a device
+          <div className="esp-add">
+            <button type="button" className="btn btn-secondary" disabled={full} onClick={() => setDialog({ kind: 'form' })}>
+              <Plus size={18} aria-hidden="true" /> Add by IP address
             </button>
+            {!full && <div className="camera-tile__sub">Use this if the search finds nothing.</div>}
             {full && <div className="camera-tile__sub" style={{ marginTop: 6 }}>You have reached the limit of {MAX_DEVICES} devices.</div>}
           </div>
         )}
@@ -159,7 +178,7 @@ export default function SettingsEsphome() {
         <RetentionCard flash={flash} />
 
         {dialog?.kind === 'form' && (
-          <DeviceFormModal device={dialog.device} childOptions={children} childrenFailed={childrenFailed}
+          <DeviceFormModal device={dialog.device} prefill={dialog.prefill} childOptions={children} childrenFailed={childrenFailed}
             onClose={() => setDialog(null)} onSaved={afterSave} />
         )}
         {dialog?.kind === 'delete' && (
@@ -171,10 +190,15 @@ export default function SettingsEsphome() {
   );
 }
 
-function DeviceCard({ device, childName, onEdit, onDelete, onExport }) {
+function DeviceCard({ device, version, childName, onEdit, onDelete, onExport }) {
   const [entitiesOpen, setEntitiesOpen] = useState(false);
   const [test, setTest] = useState(null);
+  // An edit changes the address or key that a Test result described, so the result is dropped when `version` changes. The
+  // card is NOT remounted for it (it used to be, through its key): a remount destroys the ⋯ button that the Edit dialog
+  // returns focus to, and focus fell to the top of the page after every save (found in the #1075 review).
+  useEffect(() => { setTest(null); }, [version]);
   const badge = stateBadge(device);
+  const dot = stateDot(device);
   const enc = encryptionNote(device);
   const status = device.status || {};
   const age = relativeAge(status.last_row_at);
@@ -191,26 +215,32 @@ function DeviceCard({ device, childName, onEdit, onDelete, onExport }) {
   }
 
   return (
-    <div className="card esphome-device">
-      <div className="esphome-device__head">
-        <div className="esphome-device__title">{device.name}</div>
-        <span className={`status-badge ${badge.cls}`}>{badge.text}</span>
+    <div className="dev-card esphome-device">
+      <div className="dev-card__main">
+        <div className="dev-card__body">
+          <div className="dev-card__state">
+            {dot === 'off' ? <span className="dot--neutral" aria-hidden="true" /> : <BreathingDot status={dot} />}
+            {badge.text}
+          </div>
+          <div className="dev-card__name">{device.name}</div>
+          <div className="dev-card__line">{hostLabel(device.host)}:{device.port} · {childName}</div>
+          <div className={`dev-card__encryption${enc.warn ? ' esphome-warn' : ''}`}>
+            {enc.warn ? <LockOpen size={14} aria-hidden="true" /> : <Lock size={14} aria-hidden="true" />}{enc.text}
+          </div>
+          {showError && <div className="dev-card__error" role="status">{status.error}</div>}
+          <div className="dev-card__line">Last reading: {age || 'none yet'} · {status.rows_last_hour ?? 0} in the last hour</div>
+          {test && <TestResult result={test} />}
+        </div>
+        <MoreMenu className="more-menu--card" label={`More for ${device.name}`} menuLabel={`Actions for ${device.name}`}>
+          <button type="button" role="menuitem" className="more-menu__item" onClick={onEdit}><Pencil size={16} aria-hidden="true" />Edit</button>
+          <button type="button" role="menuitem" className="more-menu__item" onClick={runTest} disabled={test === 'running'}><Wifi size={16} aria-hidden="true" />Test connection</button>
+          <button type="button" role="menuitem" className="more-menu__item" onClick={onExport}><Download size={16} aria-hidden="true" />Download CSV</button>
+          <div className="dev-card__menu-divider" />
+          <button type="button" role="menuitem" className="more-menu__item dev-card__delete" onClick={onDelete}><Trash2 size={16} aria-hidden="true" />Delete device</button>
+        </MoreMenu>
       </div>
-      <div className="camera-tile__sub">{hostLabel(device.host)}:{device.port} · {childName}</div>
-      <div className={`camera-tile__sub${enc.warn ? ' esphome-warn' : ''}`}>{enc.text}</div>
-      {showError && <div className="error-banner" role="status" style={{ marginTop: 8 }}>{status.error}</div>}
-      <div className="camera-tile__sub">
-        Last reading: {age || 'none yet'} · {status.rows_last_hour ?? 0} in the last hour · {status.entity_count ?? 0} sensors
-      </div>
-      <div className="esphome-actions">
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}>Edit</button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={runTest} disabled={test === 'running'}>Test</button>
-        <button type="button" className="btn btn-secondary btn-sm" aria-expanded={entitiesOpen}
-          onClick={() => setEntitiesOpen((o) => !o)}>{entitiesOpen ? 'Hide sensors' : 'Sensors'}</button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onExport}>Download CSV</button>
-        <button type="button" className="btn btn-danger btn-sm" onClick={onDelete}>Delete</button>
-      </div>
-      {test && <TestResult result={test} />}
+      <button type="button" className="dev-card__sensors" aria-expanded={entitiesOpen}
+        onClick={() => setEntitiesOpen((o) => !o)}>Sensors <span>{status.entity_count ?? 0}</span><ChevronRight size={18} aria-hidden="true" /></button>
       {entitiesOpen && <Entities device={device} />}
     </div>
   );
@@ -272,11 +302,11 @@ function Entities({ device }) {
 // Add or edit one device. The encryption key is the one secret here, so it lives ONLY in this component's state while
 // the dialog is open: never in a stored draft (the MQTT page keeps its password out of browser storage the same way),
 // never in a URL, never read back (the server returns `key_set`, not the key), and gone when the dialog closes.
-function DeviceFormModal({ device, childOptions, childrenFailed, onClose, onSaved }) {
+function DeviceFormModal({ device, prefill, childOptions, childrenFailed, onClose, onSaved }) {
   const editing = !!device;
-  const [name, setName] = useState(device?.name || '');
-  const [host, setHost] = useState(device ? hostLabel(device.host) : '');
-  const [port, setPort] = useState(device ? String(device.port) : '');
+  const [name, setName] = useState(device?.name || prefill?.name || '');
+  const [host, setHost] = useState(device ? hostLabel(device.host) : prefill?.host || '');
+  const [port, setPort] = useState(device ? String(device.port) : prefill?.port !== 6053 && prefill?.port ? String(prefill.port) : '');
   const [key, setKey] = useState('');
   const [clearKey, setClearKey] = useState(false);
   const [childId, setChildId] = useState(device?.child_id || '');
@@ -339,6 +369,7 @@ function DeviceFormModal({ device, childOptions, childrenFailed, onClose, onSave
   return (
     <Modal title={editing ? 'Edit device' : 'Add a device'} onClose={onClose} error={error}>
       <form onSubmit={submit}>
+        {prefill && <span className="esp-from-search"><Wifi size={12} aria-hidden="true" />From your search</span>}
         <div className="field">
           <label htmlFor="esphome-name">Name</label>
           <input id="esphome-name" maxLength={100} placeholder="Your own label for it" data-autofocus
@@ -356,6 +387,7 @@ function DeviceFormModal({ device, childOptions, childrenFailed, onClose, onSave
         </div>
         <div className="field">
           <label htmlFor="esphome-key">Encryption key (optional)</label>
+          {prefill?.encrypted && <div className="esp-encryption-callout"><Lock size={16} aria-hidden="true" />This device says it uses encryption. Paste its key below; you'll find it in the device's configuration.</div>}
           <input id="esphome-key" type="password" autoComplete="off" spellCheck={false}
             placeholder={editing && device.key_set ? 'Leave blank to keep the stored key' : 'Paste the key from the device’s configuration'}
             value={key} onChange={(e) => setKey(e.target.value)} />
@@ -393,10 +425,10 @@ function DeviceFormModal({ device, childOptions, childrenFailed, onClose, onSave
             {test && <TestResult result={test} />}
           </div>
         )}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn" style={{ width: 'auto' }} type="button" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ width: 'auto' }} type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-        </div>
+        <ModalActions>
+          <button className="btn btn-secondary" type="button" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+        </ModalActions>
       </form>
     </Modal>
   );
@@ -422,12 +454,12 @@ function DeleteModal({ device, onClose, onDeleted }) {
         This stops collecting from “{device.name}” and <strong>deletes all the readings stored for it</strong>. This
         cannot be undone. Download a CSV first if you want to keep them.
       </p>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button className="btn" style={{ width: 'auto' }} type="button" data-autofocus onClick={onClose}>Cancel</button>
-        <button className="btn btn-danger" style={{ width: 'auto' }} type="button" disabled={busy} onClick={confirm}>
+      <ModalActions>
+        <button className="btn btn-secondary" type="button" data-autofocus onClick={onClose}>Cancel</button>
+        <button className="btn btn-danger" type="button" disabled={busy} onClick={confirm}>
           {busy ? 'Deleting…' : 'Delete device and readings'}
         </button>
-      </div>
+      </ModalActions>
     </Modal>
   );
 }
@@ -489,13 +521,13 @@ function ExportModal({ device, onClose }) {
       )}
       {!range.ok && <div className="camera-tile__sub" role="status" style={{ marginBottom: 10 }}>{range.error}</div>}
       {message && <div className="camera-tile__sub" role="status" style={{ marginBottom: 10 }}>{message}</div>}
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button className="btn" style={{ width: 'auto' }} type="button" onClick={onClose}>Close</button>
-        <button className="btn btn-primary" style={{ width: 'auto' }} type="button" data-autofocus
+      <ModalActions>
+        <button className="btn btn-secondary" type="button" onClick={onClose}>Close</button>
+        <button className="btn btn-primary" type="button" data-autofocus
           disabled={state !== 'idle' || !range.ok} onClick={download}>
           {state === 'busy' ? 'Preparing…' : state === 'done' ? 'Downloaded ✓' : 'Download'}
         </button>
-      </div>
+      </ModalActions>
     </Modal>
   );
 }
@@ -530,8 +562,8 @@ function RetentionCard({ flash }) {
   }
 
   return (
-    <form className="card" onSubmit={save}>
-      <div className="sleep-detail__section-title">Keeping readings</div>
+    <form className="card esp-retention" onSubmit={save}>
+      <h2 className="card-heading">Keeping readings</h2>
       <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
         Older readings are deleted automatically. A device with 5 numeric sensors and 1 on/off sensor adds roughly 0.4 MB
         a day (an estimate, not a measurement of your sensors).

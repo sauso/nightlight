@@ -84,7 +84,7 @@ wrong password or code on the sign-in screen).
 
 Lost your authenticator? Use a **backup code** at login. If you're also out of backup codes:
 
-- **Any admin** can clear another user's two-factor: **Settings → Caregivers → (that user) → Reset
+- **Any admin** can clear another user's two-factor: **Settings → Users → (that user) → Reset
   two-factor**. Their next login is password-only, and they can set it up again.
 
 - **Locked-out admin (no other admin to help): console failsafe.** Run the reset script against the
@@ -128,7 +128,9 @@ docker exec nightlight node src/scripts/promote-admin.js -- <username>
 ```
 
 It never picks an account on its own — there is no "promote whoever was created first" option — an
-operator has to name the specific account being trusted with admin.
+operator has to name the specific account being trusted with admin. It also refuses an account that is still
+waiting on its [caregiver invite](caregivers.md#invite-a-caregiver-with-a-link) (whoever holds that link would
+choose an admin's password): ask that person to use their link first, or name another account.
 
 ## Optional: strengthening a pre-0.26.0 secret
 
@@ -179,7 +181,7 @@ again in every 15-minute window, so the block lasts **for as long as they keep d
 not end it. **Changing the password does**: without it no new sign-in token can be obtained, and the
 budget comes back when its 15 minutes are up (a sign-in token already issued stays usable for up to 5
 minutes). The password can be changed from a device that is still signed in (Account) or by an admin
-(Settings → Caregivers). An admin resetting two-factor for the account also empties the budget at once,
+(Settings → Users). An admin resetting two-factor for the account also empties the budget at once,
 and so does a restart of the container (the limits are held in memory); neither stops someone who still
 has the password from using it up again. ⚠️ **Never reset two-factor on its own in this situation:** a
 reset turns two-factor **off**, so someone who has the password could then sign in with the password
@@ -276,7 +278,7 @@ as they keep at it. They cannot guess any faster. Ways out:
 
 - Wait. The wait never exceeds 15 minutes.
 - **Change the password** from a device that is still signed in (**Account**), or ask an admin
-  (**Settings → Caregivers**). That empties the count at once.
+  (**Settings → Users**). That empties the count at once.
 - Restart the container. The counts are kept in memory, so a restart resets them (as it resets every limit on
   this page).
 

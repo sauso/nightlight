@@ -23,7 +23,7 @@ import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
-const { computeNight, computeAndStoreNight, SCORING_ALGO, parseScoringContext, currentScoringContext } =
+const { computeNight, computeAndStoreNight, SCORING_ALGO, parseScoringContext, currentScoringContext, parseSummaryFacts } =
   await import('../src/lib/sleepAnalysis.js');
 const { TRANSITION } = await import('../src/lib/bedTransitions.js');
 
@@ -48,6 +48,14 @@ const NOON_AFTER = at(12, 0, 1).getTime();
 const NUMBER_KEYS = ['status', 'onset_at', 'wake_at', 'asleep_minutes', 'awake_minutes', 'wake_count', 'coverage_minutes'];
 const numbers = (n) => Object.fromEntries(NUMBER_KEYS.map((k) => [k, n[k]]));
 const omit = (n, ...keys) => Object.fromEntries(Object.entries(n).filter(([k]) => !keys.includes(k)));
+// `summary_facts` (sleep score plan, phase 1a) carries the night's temperature range, which follows TODAY's cameras
+// exactly as `climate` does (the stated limit). Where a test sets `climate` aside, the climate part of the facts is
+// set aside with it, and the sleep part (the counted wakes) is still compared: that part follows the replay.
+const sleepFactsOnly = (n) => {
+  const facts = parseSummaryFacts(n.summary_facts);
+  return { ...n, summary_facts: facts && { v: facts.v, sleep: facts.sleep } };
+};
+const omitClimate = (n, ...keys) => omit(sleepFactsOnly(n), 'climate', ...keys);
 
 const insertSample = db.prepare(
   `INSERT INTO activity_samples (camera_id, bucket_start, motion_level, motion_peak, sound_level,
@@ -108,7 +116,8 @@ function assertReplayed(original, ctx, { except = [] } = {}) {
   const replay = json(computeNight(CHILD, DATE, { context: ctx }));
   assert.notDeepEqual(numbers(plain), numbers(original), 'precondition: the change really moves a plain recompute');
   assert.deepEqual(numbers(replay), numbers(original), 'the replay reproduces the original numbers');
-  assert.deepEqual(omit(replay, 'scoring', ...except), omit(original, ...except), 'and the rest of the original answer');
+  const rest = except.includes('climate') ? omitClimate : omit;
+  assert.deepEqual(rest(replay, 'scoring', ...except), rest(original, ...except), 'and the rest of the original answer');
   assert.deepEqual(replay.scoring, { source: 'stored', algo: SCORING_ALGO, current_algo: SCORING_ALGO, algo_differs: false, problem: null });
   return { plain, replay };
 }
@@ -160,7 +169,8 @@ test('the stored scoring_context string is byte-identical to step 1, key order i
 // #914 (the settling-tail witness stops at the next departure) bumped it to '5' with no change here: the night has no
 // `into_bed`, so no exit is a settling tail and that guard's witness is never asked. #917 (the ESPHome sensor shadow)
 // added `wake_at_sensor: null` and `sensor_rejects: null` (added keys: this child has no ESPHome rows, so no shadow
-// runs and nothing else moves) and bumped SCORING_ALGO to '6'.
+// runs and nothing else moves) and bumped SCORING_ALGO to '6'. The sleep score plan's phase 1a added `stir_minutes: 0`
+// and `summary_facts` (added keys: stored facts about the night, read by no scoring rule, so SCORING_ALGO stays '6').
 const GOLDEN = {
   night_date: '2026-07-01',
   window_start: '2026-07-01 09:30:00',
@@ -186,6 +196,8 @@ const GOLDEN = {
   sound_discounted_minutes: 0,
   wake_at_sensor: null,
   sensor_rejects: null,
+  stir_minutes: 0,
+  summary_facts: '{"v":1,"climate":{"temp_min":18,"temp_max":21.5},"sleep":{"wakes":[],"room_activity_wakes":0}}',
   climate: {
     temp_avg: 19.8, temp_min: 18, temp_max: 21.5, temp_samples: 2,
     humidity_avg: 54, humidity_min: 48, humidity_max: 60, humidity_samples: 2,
@@ -204,6 +216,9 @@ const GOLDEN = {
 // Re-captured for #917: the JSON gained `"wake_at_sensor":null,"sensor_rejects":null` (after `sound_discounted_minutes`).
 // With those two keys removed it hashes to the #904 value, 63f6a463e99c9e7d9fd5eb580059e4062bc9a62604d4f68c29ace872e342b060
 // (checked when this was updated), so the added keys are the whole of the change.
+// NOT re-captured for the sleep score plan's phase 1a (`stir_minutes`, `summary_facts`): the test below removes those
+// two keys and requires the #917 hash unchanged, so "the added keys are the whole of the change" is asserted on
+// every run instead of stated here.
 const GOLDEN_TIMELINE_SHA256 = '0cbd5b0813c4ffb0b39352bef547a0876a10bfe2075ce31cd64dd9109cfb3023';
 
 test('golden: without a context computeNight returns exactly what it did before #361 PR 2, with no scoring key', (t) => {
@@ -220,7 +235,11 @@ test('golden: without a context computeNight returns exactly what it did before 
   }
   const timeline = computeNight(CHILD, DATE, { includeTimeline: true });
   assert.ok(!('scoring' in timeline));
-  assert.equal(createHash('sha256').update(JSON.stringify(timeline)).digest('hex'), GOLDEN_TIMELINE_SHA256);
+  // The two phase 1a keys are the same on the detail shape as on the plain one, and with them removed (the rest
+  // keeps its order) the JSON is byte for byte what it was before them.
+  assert.equal(timeline.stir_minutes, GOLDEN.stir_minutes);
+  assert.equal(timeline.summary_facts, GOLDEN.summary_facts);
+  assert.equal(createHash('sha256').update(JSON.stringify(omit(timeline, 'stir_minutes', 'summary_facts'))).digest('hex'), GOLDEN_TIMELINE_SHA256);
   assert.deepEqual(json(computeNight(CHILD, DATE, { includeTimeline: true, context: null })), json(timeline));
 });
 
@@ -546,5 +565,5 @@ test('known limit: a camera that moved to another child within the night\'s span
   t.mock.timers.setTime(at(14, 0, 1).getTime());
   const after = json(computeNight(CHILD, DATE, { context: ctxAfter }));
   // Climate follows today's cameras (the limit above): the child has none now.
-  assert.deepEqual(omit(after, 'scoring', 'climate'), omit(original, 'climate'));
+  assert.deepEqual(omitClimate(after, 'scoring'), omitClimate(original));
 });

@@ -179,6 +179,8 @@ test('deleting a recording through the UI removes it for good', async ({ page })
 
   await page.goto(`/#/children/${childId}`);
   await expect(page.getByText('Recordings')).toBeVisible();
+  // The card is one row now (UI refresh PR D); the thumbnails only exist once it is opened.
+  await page.getByRole('button', { name: /^Recordings/ }).click();
 
   // Open the recording, then delete it — deliberately two steps behind a confirm, since a recording
   // has no retention and nothing else can bring it back.

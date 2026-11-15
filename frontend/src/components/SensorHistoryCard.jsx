@@ -85,7 +85,9 @@ export default function SensorHistoryCard({ camera }) {
 
   return (
     <div className="card sensor-card">
-      <div className="sensor-card__title">Room climate · last 24h</div>
+      {/* Icon and 15px bold title, the same heading as Timelapse, Recent alerts and Recordings (owner, staging phone 2026-11-13: this
+          one was still the 12px grey label). */}
+      <div className="sensor-card__title"><Thermometer size={16} aria-hidden="true" /> Room climate · last 24h</div>
       {!hasData ? (
         <div className="camera-tile__sub" style={{ padding: '6px 2px' }}>
           Collecting data — temperature and humidity will chart here once a few readings come in from

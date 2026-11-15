@@ -264,7 +264,9 @@ export function enumerateRouter(router, mount, label) {
   for (const layer of router.stack) {
     if (!layer.route) {
       if (layer.handle?.stack) throw new Error(`${label}: a nested router is mounted inside it; enumerateRouter does not walk those yet.`);
-      if (!layer.regexp?.fast_slash) throw new Error(`${label}: a router.use() with a path; enumerateRouter only understands a router-wide use().`);
+      // Express 5's router marks a router-wide `use(fn)` (no path, so '/' matching as a prefix) with `layer.slash`;
+      // Express 4 gave it a `regexp.fast_slash` flag instead, which no longer exists. A use() WITH a path has neither.
+      if (layer.slash !== true) throw new Error(`${label}: a router.use() with a path; enumerateRouter only understands a router-wide use().`);
       before.push(layer.handle);
       continue;
     }

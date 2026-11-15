@@ -338,13 +338,13 @@ describe('the route table', () => {
   test('each settings sub-route lands on its own screen', async () => {
     for (const [route, heading] of [
       ['/settings', 'Settings'],
-      ['/settings/camera-recording', 'Camera and Recording'],
+      ['/settings/camera-recording', 'Camera and recording'],
       ['/settings/camera', 'Camera controls'],
       ['/settings/recording', 'Recording'],
-      ['/settings/clips', 'Clip Management'],
+      ['/settings/clips', 'Clip management'],
       ['/settings/integrations', 'Integrations'],
       ['/settings/integrations/mqtt', 'MQTT'],
-      ['/settings/remote-access', 'Remote Access'],
+      ['/settings/remote-access', 'Remote access'],
       ['/settings/integrations/esphome', 'ESPHome'],
       ['/settings/integrations/notifications', 'Push notifications'],
       ['/settings/logs', 'Logs'],
@@ -435,7 +435,7 @@ describe('the route table', () => {
       ['/children', 'Children'],
       ['/cameras', 'Cameras'],
       ['/settings/integrations/mqtt', 'MQTT'],
-      ['/settings/remote-access', 'Remote Access'],
+      ['/settings/remote-access', 'Remote access'],
       ['/family', 'Children'], // retired, redirects: must still redirect, not fall through to `*`
     ]) {
       const { unmount } = await openAt(route);
@@ -456,11 +456,11 @@ describe('the route table', () => {
   });
 
   test.each([
-    ['/settings/camera-recording', 'Camera and Recording'],
+    ['/settings/camera-recording', 'Camera and recording'],
     ['/settings/integrations', 'Integrations'],
     ['/settings/integrations/mqtt', 'MQTT'],
     ['/settings/integrations/esphome', 'ESPHome'],
-    ['/settings/remote-access', 'Remote Access'],
+    ['/settings/remote-access', 'Remote access'],
   ])('admin-only %s sends a CAREGIVER home without showing it', async (route, heading) => {
     setToken('a-token');
     mockApi(CAREGIVER);
@@ -481,7 +481,7 @@ describe('the route table', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByText('About')).toBeInTheDocument();
     expect(screen.queryByText('MQTT')).not.toBeInTheDocument();
-    expect(screen.queryByText('Remote Access')).not.toBeInTheDocument();
+    expect(screen.queryByText('Remote access')).not.toBeInTheDocument();
   });
 });
 

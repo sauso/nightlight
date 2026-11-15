@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
 import {
   subscribeServerSwitchPrompt,
   getServerSwitchPrompt,
@@ -40,7 +41,6 @@ export default function ServerSwitchPrompt() {
 
 // Long host names must wrap inside the sheet rather than push it wider than a phone screen.
 const ORIGIN_STYLE = { overflowWrap: 'anywhere' };
-const ACTIONS_STYLE = { display: 'flex', gap: 8, justifyContent: 'flex-end' };
 
 function ConfirmSwitch({ prompt }) {
   const [busy, setBusy] = useState(false);
@@ -66,12 +66,12 @@ function ConfirmSwitch({ prompt }) {
       <p className="muted">Switching stops anything playing here, including background listening.</p>
       {/* Stay first in the row AND the one focused when the dialog opens: the safe answer is the default
           one, so a stray Enter or a tap through does not change server. */}
-      <div style={ACTIONS_STYLE}>
-        <button type="button" className="btn" data-autofocus onClick={stay} disabled={busy}>Stay</button>
+      <ModalActions>
+        <button type="button" className="btn btn-secondary" data-autofocus onClick={stay} disabled={busy}>Stay</button>
         <button type="button" className="btn btn-primary" onClick={doSwitch} disabled={busy}>
           {busy ? 'Switching…' : 'Switch'}
         </button>
-      </div>
+      </ModalActions>
     </Modal>
   );
 }
@@ -88,9 +88,9 @@ function TailscaleAdded({ prompt }) {
         nothing changes.
       </p>
       <p className="muted">It needs the Tailscale app on this phone, signed in to the same Tailscale network as your server.</p>
-      <div style={ACTIONS_STYLE}>
+      <ModalActions>
         <button type="button" className="btn btn-primary" onClick={close}>OK</button>
-      </div>
+      </ModalActions>
     </Modal>
   );
 }
@@ -104,9 +104,9 @@ function RefusedSwitch({ prompt }) {
       <p style={{ marginTop: 0 }}>An alert or link is from a server this app hasn’t been connected to:</p>
       <p><strong style={ORIGIN_STYLE}>{prompt.origin}</strong></p>
       <p>Nothing has changed. If it’s your server, add it first from Settings → Change server.</p>
-      <div style={ACTIONS_STYLE}>
-        <button type="button" className="btn" onClick={close}>OK</button>
-      </div>
+      <ModalActions>
+        <button type="button" className="btn btn-primary" onClick={close}>OK</button>
+      </ModalActions>
     </Modal>
   );
 }

@@ -172,9 +172,15 @@ const touchSession = db.prepare(
 // The lifetime check (#562) is in this WHERE clause, not a test after it, so a session past its lifetime
 // returns no row and liveSession below never reaches touchSession: a client that keeps retrying with a
 // dead token must not keep refreshing last_seen_at, which is what the idle purge keys on.
+//
+// `u.password_set = 1` (#1094, Codex plan review C1): an account waiting on its invite (password_set = 0) can
+// never be signed in, whatever token it holds. No route makes an existing account pending today, so a session
+// can only meet this through a database edit or a restored backup; the rule is here, on the one query every
+// request, media token and talk socket goes through, so that "a pending account cannot authenticate" does not
+// depend on every sign-in route remembering it.
 const requestAge = sessionAgeCondition('s');
 const sessionWithUser = db.prepare(
-  `SELECT s.id AS sid, s.user_id AS user_id, u.role AS role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND ${requestAge.sql}`
+  `SELECT s.id AS sid, s.user_id AS user_id, u.role AS role FROM sessions s JOIN users u ON u.id = s.user_id AND u.password_set = 1 WHERE s.id = ? AND ${requestAge.sql}`
 );
 function liveSession(sessionId) {
   if (!sessionId) return null;
@@ -213,6 +219,23 @@ export function purgeExpiredSessions() {
   purgePushTokens.run(...purgeAge.params);
   const { changes } = purgeSessions.run(...purgeAge.params);
   if (changes > 0) logger.info(`Purged ${changes} expired session(s).`);
+  return changes;
+}
+
+// Housekeeping for #1094's invites, run at start and daily beside purgeExpiredSessions (index.js). An invite is
+// dead once used or expired; the row is kept a further 30 days so a recent one can still be told apart from
+// "never invited" (the Users list shows a redeemed invite as "joined" for 7 days), then it goes. A row that can
+// still be redeemed (unused, unexpired) is never touched. 30 is a judgement, not a measurement: a month of
+// history for an admin to look back on, against rows that otherwise pile up one per invite forever. Lives here,
+// not in index.js, for the same reason as the session purge (index.js cannot be imported by a test).
+const INVITE_KEEP_DAYS = 30;
+const purgeInvites = db.prepare(
+  'DELETE FROM user_invites WHERE expires_at < datetime(\'now\', ?) OR used_at < datetime(\'now\', ?)'
+);
+export function purgeOldInvites() {
+  const keep = `-${INVITE_KEEP_DAYS} days`;
+  const { changes } = purgeInvites.run(keep, keep);
+  if (changes > 0) logger.info(`Purged ${changes} old invite(s).`);
   return changes;
 }
 

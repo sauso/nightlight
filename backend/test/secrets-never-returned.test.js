@@ -72,6 +72,9 @@ const NOT_A_SECRET = {
   'cameras.onvif_profile_token':
     "an ONVIF media-profile NAME (e.g. 'Profile_1') picked from the camera's own GetProfiles answer; it " +
     'authorises nothing, and GET /api/cameras returns it to every role by design',
+  'users.password_set':
+    'a 0/1 flag, "has this account chosen its password" (#1094); GET /api/auth/users answers it to admins on ' +
+    'purpose, as a boolean. Planting a marker in it would also make every account pending, so nobody could sign in',
 };
 
 // A floor, not the list: the credentials that existed when this file was written (2026-10-09). If the
@@ -190,9 +193,19 @@ const ROW_MAKERS = {
     db.prepare("INSERT INTO push_tokens (token, user_id, platform, session_id) VALUES ('placeholder', 'u-admin', 'android', NULL)").run();
     return [{ where: "token = 'placeholder'", params: [], label: 'push_tokens' }];
   },
+  // #1094 (Codex plan review C4): an unused, unexpired invite, so token_hash and placeholder_hash hold a marker every
+  // GET route is asked about (the Users list reads this table for its invite keys). On u-carer, so the plant needs no
+  // account of its own (a new one would hold a real password hash the plant check below would rightly call unplanted).
+  user_invites: () => {
+    db.prepare(
+      `INSERT INTO user_invites (id, user_id, token_hash, placeholder_hash, created_by, created_at, expires_at)
+       VALUES ('inv-planted', 'u-carer', 'placeholder', 'placeholder', 'u-admin', datetime('now'), datetime('now', '+7 days'))`
+    ).run();
+    return [{ where: "id = 'inv-planted'", params: [], label: 'user_invites' }];
+  },
 };
-// Order matters only for push_tokens' user_id; derived tables are planted in this order when present.
-const PLANT_ORDER = ['settings', 'users', 'cameras', 'esphome_devices', 'push_tokens'];
+// Order matters only for push_tokens' and user_invites' user_id; derived tables are planted in this order when present.
+const PLANT_ORDER = ['settings', 'users', 'cameras', 'esphome_devices', 'push_tokens', 'user_invites'];
 
 describe('the secret columns are derived from the schema', () => {
   test('the derivation still finds every credential that existed when this was written', () => {
@@ -477,8 +490,11 @@ describe('every API response, for every role', () => {
       assert.equal(res.status, 200);
       assert.equal(leakIn(res.body), null, `GET /users: ${leakIn(res.body)}`);
       assert.ok(res.body.length >= 4);
+      // The list, and only the list, also says where each account's invite stands (#1094): three keys, a flag and two
+      // times, never the token or its hash (the planted token_hash marker is in the sweep above).
+      const LIST_USER_KEYS = [...PUBLIC_USER_KEYS, 'invite_accepted_at', 'invite_expires_at', 'password_set'].sort();
       for (const u of res.body) {
-        assert.deepEqual(Object.keys(u).sort(), PUBLIC_USER_KEYS, `${u.username}: the user shape changed`);
+        assert.deepEqual(Object.keys(u).sort(), LIST_USER_KEYS, `${u.username}: the user shape changed`);
         assert.equal(u.mfa_enabled, userRow(u.id).mfa_enabled === 1, `${u.username}: mfa_enabled does not match the database`);
       }
       // Both values of the flag are present, so a constant cannot pass.
@@ -501,6 +517,33 @@ describe('every API response, for every role', () => {
         assert.doesNotMatch(JSON.stringify(res.body), /\$2[aby]\$/, `${name} returned something shaped like a bcrypt hash`);
         assert.deepEqual(Object.keys(res.body).sort(), PUBLIC_USER_KEYS, `${name}: the user shape changed`);
       }
+    });
+
+    test('an invite (#1094): the token is answered once, to the admin; no answer on the way carries a stored hash', async () => {
+      // The create answer carries the token ON PURPOSE (it is the link), like /me/mfa/setup's secret; what must never
+      // come back is a STORED credential: the token's sha256, the account's placeholder or chosen bcrypt hash.
+      const created = await api('/api/auth/users', { method: 'POST', token: adminToken, body: { username: 'invitee', invite: true } });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const { token } = created.body.invite;
+      const stored = db.prepare('SELECT token_hash FROM user_invites WHERE user_id = ?').get(created.body.id).token_hash;
+      REAL_SECRETS.push(stored, userRow(created.body.id).password_hash);
+      const check = await api('/api/auth/invite/check', { method: 'POST', body: { token } });
+      assert.equal(check.status, 200, JSON.stringify(check.body));
+      const redeem = await api('/api/auth/invite/redeem', { method: 'POST', body: { token, password: 'chosen-by-invitee' } });
+      assert.equal(redeem.status, 200, JSON.stringify(redeem.body));
+      REAL_SECRETS.push(userRow(created.body.id).password_hash);
+      const list = await api('/api/auth/users', { token: adminToken });
+      for (const [name, res] of [['POST /users (invite)', created], ['POST /invite/check', check], ['POST /invite/redeem', redeem], ['GET /users', list]]) {
+        assert.equal(leakIn(res.body), null, `${name}: ${leakIn(res.body)}`);
+        assert.doesNotMatch(JSON.stringify(res.body), /\$2[aby]\$/, `${name} returned something shaped like a bcrypt hash`);
+      }
+      // The token itself only in the create answer: never in the check, the redeem or the list.
+      for (const [name, res] of [['POST /invite/check', check], ['POST /invite/redeem', redeem], ['GET /users', list]]) {
+        assert.ok(!JSON.stringify(res.body).includes(token), `${name} echoed the invite token`);
+      }
+      assert.deepEqual(Object.keys(created.body).sort(), [...PUBLIC_USER_KEYS, 'invite'].sort());
+      assert.deepEqual(Object.keys(created.body.invite).sort(), ['expires_at', 'token']);
+      assert.deepEqual(Object.keys(redeem.body.user).sort(), PUBLIC_USER_KEYS);
     });
   });
 

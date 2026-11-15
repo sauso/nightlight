@@ -8,9 +8,9 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [What you need, and what has been tested](requirements.md) — hosts, what each camera starts, disk, browsers and apps, and what has not been measured
 - [How it works](how-it-works.md) — FFmpeg, MediaMTX, the backend and the app, and how video reaches your browser
 - [Cameras and caregivers](cameras.md) — add cameras and share access
-- [Adding caregivers](caregivers.md) — what caregivers and admins can each do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
+- [Adding caregivers](caregivers.md) — use Settings → Users to add logins (by password or a one-time invite link), see what caregivers and admins can do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
 - [Networking and remote access](networking.md) — LAN options, WebRTC, STUN, HTTPS and privacy
-- [Watch from anywhere](remote-access.md) — Tailscale, SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, Settings → Remote Access, watching away from home
+- [Watch from anywhere](remote-access.md) — Tailscale, SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, Settings → Remote access, watching away from home
 - [Troubleshooting](troubleshooting.md) — common problems and first checks
 - [Known issues](../KNOWN-ISSUES.md) — documented limitations and workarounds
 
@@ -22,7 +22,7 @@ On About, **Got an idea?** opens a GitHub issue; you need a GitHub account. The 
 after the next release to `main`; until then, the link opens a plain new issue.
 
 - [Visual walkthrough](#visual-walkthrough) — setup, live view, sleep, alerts, notifications and a caregiver's view
-- [Camera controls](camera-controls.md) — PTZ and offline alerts under Settings → Camera and Recording
+- [Camera controls](camera-controls.md) — PTZ, offline and long-silence alerts under Settings → Camera and recording
 - [Sleep tracking](sleep-tracking.md) — how nights are estimated, corrected and reviewed, and its known limits
 - [Recording](recording.md) — clips, wake events, manual recordings and retention
 - [Your home screen and the mobile apps](mobile.md) — install as an app, Android and iOS, push on the apps
@@ -53,7 +53,7 @@ The first time you open Nightlight, a welcome screen lists the setup steps. The 
 
 ### 2. Watch live
 
-The Live tab shows every camera. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left. The phone image was captured without a picture, so its tiles say "No signal"; a camera that is working shows its video there, as in the desktop image.
+The Live tab shows every enabled camera, with its status, name, assigned child and available room readings under the picture. The gear opens its controls; Camera settings in that sheet is for admins. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left. The picture in these images is a plain synthetic one, standing in for a camera's video.
 
 ![Live view on a phone](screenshots/live-mobile.png)
 
@@ -61,7 +61,7 @@ The Live tab shows every camera. On a wide screen the navigation moves from the 
 
 ### 3. A child's overview
 
-Each child has a page showing last night's sleep, a prompt to check it, the nightly timelapse, recordings and recent alerts. See [Sleep tracking](sleep-tracking.md) for how nights are estimated and what the limits are.
+Each child has a page showing last night's sleep with its score and a one-line summary, a prompt to check the wake time, the camera, the nightly timelapse, recent alerts and recordings. See [Sleep tracking](sleep-tracking.md) for how nights are estimated and what the limits are.
 
 ![A child's overview on a phone](screenshots/child-mobile.png)
 
@@ -69,7 +69,7 @@ Each child has a page showing last night's sleep, a prompt to check it, the nigh
 
 ### 4. Last night in detail
 
-Tap the summary to see the night as a timeline, with each wake-up. The numbers are an estimate from movement and sound, not a medical measurement.
+Tap the summary card to open the night. The strip at the top moves between nights; below it are the score, a short written summary, **Why this score?** and the timeline with each wake-up. The numbers are an estimate from movement and sound, not a medical measurement.
 
 ![A night's detail on a phone](screenshots/sleep-mobile.png)
 
@@ -87,9 +87,13 @@ Motion and sound alerts are listed on the child's page, each with a snapshot fro
 
 ### 7. Add a camera
 
-**Find cameras on my network** searches for cameras and offers each one it finds. To add a camera by hand, open **Add a camera manually**, enter its address and stream details, or use the ONVIF button to fill them in. This form holds example values and was not saved. See [Cameras and caregivers](cameras.md).
+**Find cameras on my network** searches in the navy card and lists cameras it finds. A saved camera reads **Added**. When none are found, **Add a camera manually** opens the same manual row below; enter its address and stream details, or use **Fetch from ONVIF** to fill them in. The stream path sits under **Advanced**, which opens by itself while it is empty. This form holds example values and was not saved. See [Cameras and caregivers](cameras.md).
 
 ![Add camera on a phone](screenshots/add-camera-mobile.png)
+
+The Motion, Sound and Alert schedule screens use matching cards for their switches and settings.
+Sound keeps its first detector limit in view and folds longer explanations behind two buttons.
+See [Detection settings](notifications.md#detection-settings-on-a-camera). These screenshots have not been updated for that layout.
 
 ### 8. Set up notifications
 

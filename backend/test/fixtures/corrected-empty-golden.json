@@ -266,7 +266,8 @@
       "algo_wake_at": "2026-07-01 20:00:00",
       "algo_in_bed_at": null,
       "wake_at_sensor": null,
-      "sensor_rejects": null
+      "sensor_rejects": null,
+      "wake_given": true
     }
   }
 }

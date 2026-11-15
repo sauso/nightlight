@@ -722,6 +722,8 @@ Keep cameras on their own network, as [cameras.md](cameras.md) says; that advice
 
 ## Logs
 
+Admins can also open **Settings → Logs** for recent alerts, camera history and the in-app log buffer. Its filter chips, search box, auto-refresh switches, and Refresh now and Clear log buttons have touch-sized controls. Clearing the in-app buffer does not clear Docker's logs. Inline links in explanatory paragraphs remain text links.
+
 Use Docker's logs to check what the app and MediaMTX are doing. Both log to stdout, which Docker captures:
 
 ```bash
@@ -749,7 +751,7 @@ browser you happen to be using.
   stays put sees no change. Clock format (12 or 24 hour) and date order follow the device's own language
   settings, not the timezone.
 - **Where it applies:** the alert and camera-history lists (the exact time is in the tooltip on each row
-  and in the clip player), **Settings → Camera and Recording → Clip management** (clips are grouped under their home-time **day**, and the
+  and in the clip player), **Settings → Camera and recording → Clip management** (clips are grouped under their home-time **day**, and the
   date filter and its "today" use home days, so two people never see the same clip on different days),
   the **Recordings** card, a camera tile's **silenced until** time, and the nightly timelapse dates (a
   night is a calendar date worked out in home time, so it never shifts).

@@ -1,29 +1,30 @@
 import { useEffect, useState } from 'react';
-import { ExternalLink, Heart } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Heart, Globe, GitBranch, Smartphone, FileText, Bug, Lightbulb, ClipboardList } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { getConnectionRoute } from '../lib/nativeBridge.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Logo from '../components/Logo.jsx';
+import NavRow from '../components/NavRow.jsx';
 import useSetupStatus from '../lib/useSetupStatus.js';
 
+// UI consistency (PR-C): each outside link is a NavRow (the shared row, with the external-link mark), so it needs an icon chip.
 const LINKS = [
-  { label: 'Website', url: 'https://nightlightbaby.app/' },
-  { label: 'GitHub — Nightlight', url: 'https://github.com/sauso/nightlight' },
-  { label: 'GitHub — Mobile app', url: 'https://github.com/sauso/nightlight-mobile' },
-  { label: 'Changelog', url: 'https://github.com/sauso/nightlight/blob/main/CHANGELOG.md' },
-  { label: 'Report an issue', url: 'https://github.com/sauso/nightlight/issues' },
+  { Icon: Globe, label: 'Website', url: 'https://nightlightbaby.app/' },
+  { Icon: GitBranch, label: 'GitHub — Nightlight', url: 'https://github.com/sauso/nightlight' },
+  { Icon: Smartphone, label: 'GitHub — Mobile app', url: 'https://github.com/sauso/nightlight-mobile' },
+  { Icon: FileText, label: 'Changelog', url: 'https://github.com/sauso/nightlight/blob/main/CHANGELOG.md' },
+  { Icon: Bug, label: 'Report an issue', url: 'https://github.com/sauso/nightlight/issues' },
   // GitHub loads issue forms from the default branch (main); this opens a plain new issue until the next release.
-  { label: 'Got an idea?', url: 'https://github.com/sauso/nightlight/issues/new?template=feature_request.yml' },
+  { Icon: Lightbulb, label: 'Got an idea?', url: 'https://github.com/sauso/nightlight/issues/new?template=feature_request.yml' },
 ];
 
 // Why the Android app has no Tailscale address saved, keyed by the outcome of its last ask (nativeBridge.js tailscaleOutcome).
 // No entry (not asked yet this run, or 'saved') shows no line: the app never guesses a cause. The shell's own refusal is not shown
-// word for word; each line is fixed text a person can act on. "Settings -> Remote Access" is the admin-only hub row.
+// word for word; each line is fixed text a person can act on. "Settings -> Remote access" is the admin-only hub row.
 const TAILSCALE_WHY = {
-  'server-none': "This server isn't offering one. An admin can turn it on in Settings → Remote Access.",
+  'server-none': "This server isn't offering one. An admin can turn it on in Settings → Remote access.",
   unknown: "The server couldn't say just now. The app asks again each time it starts.",
   unreachable: "The server offered one, but this phone couldn't reach it. Turn Tailscale on in the phone, then restart the app.",
   different: 'That address belongs to a different server, so it was not saved.',
@@ -107,15 +108,15 @@ export default function About() {
             is null there). An address that is neither of the server's two names nothing, only whether one is saved. */}
         {/* Owner 2026-11-07, after two layouts that read badly on a phone (label and value on one line broke the tailnet name
             mid-word; a label over each value looked unlike the rest of the app and the name outranked its card): laid out like
-            the Remote Access card (TailscaleCard.jsx): a 16px title with a badge, a 14px sub-heading, the address in the same
+            the Remote access card (TailscaleCard.jsx): a 16px title with a badge, a 14px sub-heading, the address in the same
             bold wrapping style, and a muted line under it saying what that means or, when none is saved, WHY, so "Not saved" is
             not a dead end. The badge is "which address this session is using". The address is on screen, so a screenshot of
             this card shows the person's tailnet name (docs/remote-access.md). The look lives in index.css next to the
-            Remote Access rules it shares. */}
+            Remote access rules it shares. */}
         {route && (
           <section className="card about-card" aria-label="Connection">
             <div className="about-card__heading">
-              <h2 className="card-title">Connection</h2>
+              <h2 className="card-heading">Connection</h2>
               {route.via !== 'other' && (
                 <span className="status-badge status-badge--off">
                   {route.via === 'tailscale' ? (route.kind === 'custom' ? 'Using your custom address' : 'Using Tailscale') : 'Using local address'}
@@ -139,23 +140,20 @@ export default function About() {
             While the status is unknown (loading, or the read failed) the row stays hidden, so a finished install never flashes it.
             The cost: a completed install has no menu path back to the picture check (the /setup address still works). */}
         {user?.role === 'admin' && setupStatus && setupStatus !== 'completed' && <div className="card">
-          <Link className="list-row about-link" to="/setup">Setup status and picture check</Link>
+          <NavRow Icon={ClipboardList} label="Setup status and picture check" to="/setup" />
         </div>}
 
         {/* Owner 2026-11-07: Links, Support and the safety notice take the Connection card's look (a 16px bold title, 14px
             text) so the cards on this page read as one set; before, they kept the small grey title and 16px rows. */}
         <section className="card about-card" aria-label="Links">
-          <div className="about-card__heading"><h2 className="card-title">Links</h2></div>
-          {LINKS.map(({ label, url }) => (
-            <a key={url} className="list-row about-link" href={url} target="_blank" rel="noreferrer">
-              <span>{label}</span>
-              <ExternalLink size={15} aria-hidden="true" />
-            </a>
+          <div className="about-card__heading"><h2 className="card-heading">Links</h2></div>
+          {LINKS.map(({ Icon, label, url }) => (
+            <NavRow key={url} Icon={Icon} label={label} external={url} />
           ))}
         </section>
 
         <section className="card about-card" aria-label="Support the project">
-          <div className="about-card__heading"><h2 className="card-title">Support the project</h2></div>
+          <div className="about-card__heading"><h2 className="card-heading">Support the project</h2></div>
           <p className="about-card__text">
             Nightlight is free and open source. If it helps you keep watch over your
             little ones, consider supporting its development.
@@ -167,7 +165,7 @@ export default function About() {
         </section>
 
         <section className="card about-card" aria-label="Not a safety device">
-          <div className="about-card__heading"><h2 className="card-title">Not a safety device</h2></div>
+          <div className="about-card__heading"><h2 className="card-heading">Not a safety device</h2></div>
           <p className="about-card__text">
             Nightlight is a convenience tool — not a medical device, and not certified for
             safety monitoring of any kind. Streams can drop, apps can be stopped by the

@@ -493,10 +493,14 @@ describe('★★ no response ever carries a secret column', () => {
   // unverified claim. The same PRAGMA tripwire caught a real unclassified column in
   // cameras-assign-exposure.test.js on its first run.
   const SECRET_COLUMNS = ['password_hash', 'mfa_secret', 'mfa_backup_codes'];
+  // Columns the tripwire matches that are classified as NOT secret, each with why. A stale entry fails below.
+  //   password_set (#1094): a 0/1 flag, "has this account chosen a password", answered on purpose in the Users list.
+  const NOT_SECRET = ['password_set'];
 
   test('the schema has no secret-looking column this test does not know about', () => {
     const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-    const suspicious = cols.filter((c) => /pass|secret|token|hash|code|key/i.test(c));
+    for (const c of NOT_SECRET) assert.ok(cols.includes(c), `${c} is classified as not secret but no longer exists`);
+    const suspicious = cols.filter((c) => /pass|secret|token|hash|code|key/i.test(c) && !NOT_SECRET.includes(c));
     assert.deepEqual(
       suspicious.sort(),
       [...SECRET_COLUMNS].sort(),
