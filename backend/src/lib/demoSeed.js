@@ -160,8 +160,10 @@ export async function seedDemo(clock = () => new Date()) {
     // 'completed', not 'legacy_completed': the demo is a finished household, and Settings -> About shows its
     // "Setup status and picture check" row for every status except 'completed' (About.jsx), so the public demo showed a
     // setup row as if setup were half done (owner, 2026-11-15).
+    // Both source statuses on purpose: in DEMO_MODE the database is created 'legacy_completed' (db.js ensureSetupState), so
+    // matching only 'not_started' left the real demo untouched (found by running the seed in demo mode, 2026-11-15).
     if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'setup_state'").get()) {
-      db.prepare("UPDATE setup_state SET status = 'completed', active_step = 'review' WHERE id = 'app' AND status = 'not_started'").run();
+      db.prepare("UPDATE setup_state SET status = 'completed', active_step = 'review' WHERE id = 'app' AND status IN ('not_started', 'legacy_completed')").run();
     }
     for (const table of resetTables) db.prepare(`DELETE FROM ${table}`).run();
     db.prepare(
