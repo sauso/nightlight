@@ -178,6 +178,28 @@ test('clear history retains protected alert and snapshot', async () => {
   for (const p of [locked.file, locked.thumb, locked.snapshot]) assert.ok(fs.existsSync(p));
 });
 
+test('#934 DELETE /api/cameras/alerts returns the clear count, refuses a caregiver, and retains protected media', async () => {
+  const open = alert('open');
+  const locked = alert('locked', { protectedClip: true });
+  const orphan = path.join(ev.DETECTION_SNAPSHOT_DIR, '999999.jpg');
+  fs.writeFileSync(orphan, 'orphan');
+  const url = `${cameras.url}/api/cameras/alerts`;
+  const refused = await call(url, { method: 'DELETE', token: caregiver });
+  assert.equal(refused.status, 403);
+  assert.ok(row(open.id), 'a refused request must leave the alert in place');
+  const cleared = await call(url, { method: 'DELETE', token: admin });
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(cleared.body, { cleared: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(row(open.id), undefined);
+  assert.equal(fs.existsSync(open.file), false);
+  assert.equal(fs.existsSync(open.thumb), false);
+  assert.equal(fs.existsSync(open.snapshot), false);
+  assert.equal(fs.existsSync(orphan), false);
+  assert.equal(row(locked.id).protected, 1);
+  for (const p of [locked.file, locked.thumb, locked.snapshot]) assert.ok(fs.existsSync(p));
+});
+
 test('wake retention deletes only unprotected old wake clips', () => {
   const open = wake('open', { age: 20 });
   const locked = wake('locked', { age: 20, protectedClip: true });

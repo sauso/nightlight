@@ -40,7 +40,7 @@ because a straight copy can only cut on a keyframe and the clip has to be exactl
 |---|---|---|---|
 | Pre-roll (seconds) | 5 | 0–30 | How much *before* the trigger is included |
 | Post-roll (seconds) | 15 | 5–120 | How much *after* the trigger is included |
-| Keep clips for (days) | 14 | 0–365 | 0 = no day limit |
+| Keep clips for (days) | 14 | 0–365 | Sets the day limit for unprotected alert videos; 0 turns that limit off. Whatever this is set to, Recent alerts keeps at most 30 days and 2,000 unprotected entries: older unprotected alerts, with their clips and pictures, are removed as new alerts are recorded. Protected alerts are kept. |
 | Storage cap (GB) | 5 | 0–2000 | 0 = no size limit; oldest deleted first |
 
 **Changing a limit can ask first.** Saving a different **Keep clips for** or **Storage cap** runs the
@@ -490,8 +490,11 @@ for the recent lists. Protect a clip before cleanup removes it: protection canno
 clip. Unprotecting one that is already older than your retention setting lets the next cleanup remove
 it, within 15 minutes for alert clips; wake clips wait for their own cleanup schedule.
 If a protected clip's video file has gone missing, an admin can still unprotect its entry and remove it.
-The **Clear recent alerts** confirmation says protected alerts stay. After clearing, they still appear
-in the alert list.
+**Clear recent alerts** removes unprotected alert history and its clips, thumbnails and pictures, including
+files for alerts still inside the usual retention limits. Protected alerts and their media stay and still
+appear in the alert list.
+The 30-day and 2,000-entry history limits are applied as new alerts are recorded; without a new alert,
+older unprotected alerts and their media can remain until the next alert or a manual clear.
 
 - **Automatic clips** are deleted once **either** limit is passed: older than *Keep clips for (days)*,
   or total clip size over *Storage cap (GB)* (oldest first). Set either to **0** to turn that limit off.

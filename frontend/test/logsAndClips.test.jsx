@@ -110,7 +110,7 @@ describe('recent alerts', () => {
     const { user } = renderAsAdmin(<RecentAlerts />);
     await user.click(await screen.findByRole('button', { name: 'Clear log' }));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/can't be undone/)).toBeTruthy();
+    expect(within(dialog).getByText(/clips and pictures/)).toBeTruthy();
     expect(delSpy).not.toHaveBeenCalled();
 
     await user.click(within(dialog).getByRole('button', { name: 'Clear log' }));
