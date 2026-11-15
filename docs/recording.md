@@ -157,7 +157,8 @@ that gap without making alerts noisier.
   has stalled (such a minute is not counted as seen, as on the sleep timeline). That is stricter than the
   sleep timeline's own rule, so after an outage in the evening recording can start later than the
   timeline's bedtime (a camera that drops a minute more often than about every 15 minutes never starts).
-  Once started, a gap does not stop it.
+  Once started, a gap does not stop it. If the server restarts during that sleep window, the saved
+  asleep result lets wake-clip recording resume at once, which may mean more wake clips after a restart.
 - Only for a real wake-up: a brief **stir is ignored**, using the same threshold the sleep timeline
   uses to decide what counts as a wake-up. Activity that pauses for up to **3 minutes** is still one
   wake-up, and a minute the camera reported nothing for counts as a pause, exactly as on the timeline; a

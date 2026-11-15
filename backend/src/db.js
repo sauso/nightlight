@@ -1189,6 +1189,19 @@ db.exec(`
   )
 `);
 
+// #1037, Opus/Codex plan review: the asleep latch belongs to both the camera and its child.
+// A camera can be reassigned, and its child_id becomes NULL on child deletion. These timestamps are epoch ms;
+// the window start, rather than the saved time, decides whether a latch is still valid after a restart.
+// CREATE IF NOT EXISTS upgrades existing databases; older versions simply ignore this table.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS wake_asleep_latch (
+    camera_id TEXT PRIMARY KEY REFERENCES cameras(id) ON DELETE CASCADE,
+    child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    window_start_ms INTEGER NOT NULL,
+    asleep_at INTEGER NOT NULL
+  )
+`);
+
 // Push a notification when a child's nightly sleep report is computed (window closed + row stored).
 // On by default; fires only for a freshly-closed night (a mid-day restart re-computing an old night
 // does not re-notify). See lib/sleepReportAlert.js.

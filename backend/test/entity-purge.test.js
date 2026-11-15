@@ -126,11 +126,25 @@ const uniq = (p) => `${p}-${++seq}`;
 // Fill every NOT NULL column that has no default, so any table can take a row without this file knowing it.
 function insertRow(table, cols, given) {
   const row = { ...given };
+  // #1037: wake_asleep_latch is the first table with two NOT NULL foreign keys, so the
+  // other side of a schema-driven fixture row must be a real parent, not an invented id.
+  const foreignKeys = new Map(db.prepare(`PRAGMA foreign_key_list(${table})`).all()
+    .map((fk) => [fk.from, fk]));
   for (const c of cols) {
     // A TEXT PRIMARY KEY is not NOT NULL in SQLite (a legacy quirk) and would silently take NULL.
     if (c.name in row || !(c.notnull || c.pk) || c.dflt_value != null) continue;
     if (c.pk && /^INT/i.test(c.type)) continue; // rowid alias
-    row[c.name] = /^(INT|REAL)/i.test(c.type) ? 0 : uniq(`${table}-${c.name}`);
+    const fk = foreignKeys.get(c.name);
+    if (fk?.table === 'cameras') row[c.name] = makeCamera(db, { id: uniq('cam') }).id;
+    else if (fk?.table === 'children') row[c.name] = makeChild(db, { id: uniq('child') }).id;
+    else if (fk) {
+      const parentCols = db.prepare(`PRAGMA table_info(${fk.table})`).all();
+      const parentRowid = insertRow(fk.table, parentCols, {});
+      const parentKey = fk.to || parentCols.find((parentCol) => parentCol.pk)?.name;
+      row[c.name] = parentKey
+        ? db.prepare(`SELECT ${parentKey} AS value FROM ${fk.table} WHERE rowid = ?`).get(parentRowid).value
+        : parentRowid;
+    } else row[c.name] = /^(INT|REAL)/i.test(c.type) ? 0 : uniq(`${table}-${c.name}`);
   }
   const names = Object.keys(row);
   const info = db.prepare(`INSERT INTO ${table} (${names.join(',')}) VALUES (${names.map(() => '?').join(',')})`)
