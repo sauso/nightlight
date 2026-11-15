@@ -13,6 +13,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - Child settings: **Remove child** is a red button at the bottom of the page again (it had moved into the ⋯ menu), and its confirmation says plainly that it permanently deletes everything for the child. The confirmation's list now also names the child's ESPHome sensor readings (heart rate and so on), which were already deleted with the child.
 
+### Fixed
+
+- The public demo no longer shows a **Setup status and picture check** row in Settings → About as if setup were half done: the demo's sample household is now marked as fully set up.
+
 ## [0.48.0] - 2026-11-15
 
 ### Added
