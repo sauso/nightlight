@@ -78,8 +78,8 @@ test('demo seed is deterministic, timezone-native, safe and stable throughout a 
   const midWindow = await seedDemo(() => new Date(midWindowBoot));
   seededDb = midWindow.db;
   assert.deepEqual(midWindow.db.prepare("SELECT status, active_step FROM setup_state WHERE id = 'app'").get(),
-    { status: 'legacy_completed', active_step: 'review' },
-    'seeding after a fresh boot must not send the demo into the setup guide');
+    { status: 'completed', active_step: 'review' },
+    'seeding after a fresh boot must not send the demo into the setup guide, and must read as finished: Settings -> About keeps its Setup status row for any status but completed');
   assertCompletedNightsAreOk(midWindow);
   assertSeededThroughDeadline(midWindow);
 

@@ -157,8 +157,11 @@ export async function seedDemo(clock = () => new Date()) {
   const seedDatabase = db.transaction(() => {
     // WHY: tooling can seed after the first boot already classified the empty database.
     // Keep an existing completion decision and tolerate older schemas without this table.
+    // 'completed', not 'legacy_completed': the demo is a finished household, and Settings -> About shows its
+    // "Setup status and picture check" row for every status except 'completed' (About.jsx), so the public demo showed a
+    // setup row as if setup were half done (owner, 2026-11-15).
     if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'setup_state'").get()) {
-      db.prepare("UPDATE setup_state SET status = 'legacy_completed', active_step = 'review' WHERE id = 'app' AND status = 'not_started'").run();
+      db.prepare("UPDATE setup_state SET status = 'completed', active_step = 'review' WHERE id = 'app' AND status = 'not_started'").run();
     }
     for (const table of resetTables) db.prepare(`DELETE FROM ${table}`).run();
     db.prepare(
