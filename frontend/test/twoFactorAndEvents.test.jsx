@@ -25,6 +25,20 @@ afterEach(() => vi.restoreAllMocks());
 describe('TwoFactorSection', () => {
   const SETUP = { secret: 'JBSWY3DPEHPK3PXP', otpauth_uri: 'otpauth://x', qr: 'data:image/png;base64,QR' };
   const CODES = ['aaa-111', 'bbb-222', 'ccc-333', 'ddd-444'];
+  let clipboardDescriptor;
+  let execCommandDescriptor;
+
+  beforeEach(() => {
+    clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    execCommandDescriptor = Object.getOwnPropertyDescriptor(document, 'execCommand');
+  });
+  afterEach(() => {
+    // userEvent and these tests replace browser APIs; restore the exact prior globals for the next test.
+    if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+    else delete navigator.clipboard;
+    if (execCommandDescriptor) Object.defineProperty(document, 'execCommand', execCommandDescriptor);
+    else delete document.execCommand;
+  });
 
   const withStatus = (status) => vi.spyOn(api, 'get').mockResolvedValue(status);
 
@@ -191,45 +205,46 @@ describe('TwoFactorSection', () => {
     expect(screen.getByRole('button', { name: 'Turn on' })).toBeEnabled();
   });
 
-  test('backup codes can be copied, and a clipboard that refuses does not break the dialog', async () => {
-    withStatus({ enabled: false });
-    vi.spyOn(api, 'post').mockResolvedValueOnce(SETUP).mockResolvedValueOnce({ backup_codes: CODES });
+  test('backup codes use the clipboard API when available', async () => {
+    const { user } = await openBackupCodesDialog();
     const writeText = vi.fn().mockResolvedValue(undefined);
-    const { user } = renderAsAdmin(<TwoFactorSection />);
-    // ⚠️ AFTER the render, not before. `userEvent.setup()` installs its own `navigator.clipboard`
-    // stub, so a clipboard defined earlier is silently replaced and the spy is never called — the
-    // assertion then fails against perfectly good code.
+    // AFTER render: userEvent.setup() replaces navigator.clipboard with its own stub.
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    await startSetup(user);
-    await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '123456');
-    await user.click(screen.getByRole('button', { name: 'Turn on' }));
-    await screen.findByText(CODES[0]);
+    document.execCommand = vi.fn();
 
     await user.click(screen.getByRole('button', { name: 'Copy codes' }));
     // One per line — pasted into a notes app they have to stay readable as separate codes.
     expect(writeText).toHaveBeenCalledWith(CODES.join('\n'));
     expect(await screen.findByRole('button', { name: 'Copied ✓' })).toBeInTheDocument();
-
-    // A rejected clipboard (permission denied, insecure context) must not throw — the codes are still
-    // on screen to copy by hand, which is the whole reason the failure is swallowed.
-    writeText.mockRejectedValue(new Error('denied'));
-    await user.click(screen.getByRole('button', { name: 'Copied ✓' }));
-    expect(screen.getByText(CODES[0])).toBeInTheDocument();
+    expect(document.execCommand).not.toHaveBeenCalled();
   });
 
-  test('a browser with NO clipboard API at all does not throw', async () => {
-    withStatus({ enabled: false });
-    vi.spyOn(api, 'post').mockResolvedValueOnce(SETUP).mockResolvedValueOnce({ backup_codes: CODES });
-    const { user } = renderAsAdmin(<TwoFactorSection />);
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); // after setup(), as above
-    await startSetup(user);
-    await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '123456');
-    await user.click(screen.getByRole('button', { name: 'Turn on' }));
-    await screen.findByText(CODES[0]);
-    // `navigator.clipboard?.writeText(...)` — the optional chain is load-bearing on http:// origins,
-    // which is exactly how this self-hosted app is usually reached on a LAN.
+  test('over plain http, Copy uses the selectable textarea fallback and confirms it', async () => {
+    const { user } = await openBackupCodesDialog();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    let copiedFrom;
+    document.execCommand = vi.fn((command) => {
+      copiedFrom = document.querySelector('textarea')?.value;
+      return command === 'copy';
+    });
+
     await user.click(screen.getByRole('button', { name: 'Copy codes' }));
-    expect(screen.getByText(CODES[0])).toBeInTheDocument();
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(copiedFrom).toBe(CODES.join('\n'));
+    expect(document.querySelector('textarea')).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Copied ✓' })).toBeInTheDocument();
+  });
+
+  test('when neither browser copy method works, the dialog gives a manual instruction', async () => {
+    const { user } = await openBackupCodesDialog();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    document.execCommand = vi.fn(() => false);
+
+    await user.click(screen.getByRole('button', { name: 'Copy codes' }));
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(await screen.findByRole('status')).toHaveTextContent("Couldn't copy. Select the codes above and copy them by hand.");
+    expect(screen.getByRole('button', { name: 'Copy codes' })).toBeInTheDocument();
+    for (const c of CODES) expect(screen.getByText(c)).toHaveStyle({ userSelect: 'all' });
   });
 
   test('turning two-factor OFF requires the password, and refreshes the status', async () => {

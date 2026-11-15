@@ -6,6 +6,7 @@ import ModalActions from './ModalActions.jsx';
 import { holdReload } from '../lib/reloadGuard.js';
 import { isNativeApp } from '../lib/nativeBridge.js';
 import { useLater } from '../lib/useLater.js';
+import { copyText } from '../lib/copyText.js';
 
 // A touch device, where the authenticator is likely on the same phone and a QR code cannot be scanned from
 // the screen it is on. Guarded because jsdom (and old browsers) have no matchMedia.
@@ -33,7 +34,7 @@ export default function TwoFactorSection() {
   const [setup, setSetup] = useState(null); // { secret, otpauth_uri, qr, resumed?, notContinued } while enrolling
   const [code, setCode] = useState('');
   const [backupCodes, setBackupCodes] = useState(null); // shown once after enabling
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState(null); // null | 'copied' | 'manual' (see lib/copyText.js)
 
   const [disabling, setDisabling] = useState(false);
   // Which set-up the password step is for: 'start' | 'resume' | 'restart' | null. Every set-up call needs the
@@ -93,7 +94,7 @@ export default function TwoFactorSection() {
       const res = await api.post('/auth/me/mfa/enable', { code: code.trim() });
       setSetup(null);
       setBackupCodes(res.backup_codes);
-      setCopied(false);
+      setCopied(null);
       await loadStatus();
     } catch (err) {
       setError(err.message);
@@ -115,11 +116,11 @@ export default function TwoFactorSection() {
     }
   }
 
-  function copyCodes() {
-    navigator.clipboard?.writeText(backupCodes.join('\n')).then(
-      () => { setCopied(true); later(() => setCopied(false), 2000); },
-      () => {},
-    );
+  async function copyCodes() {
+    // LAN http has no clipboard API; the shared helper tries a selectable textarea, then reports failure.
+    const result = await copyText(backupCodes.join('\n'));
+    setCopied(result);
+    if (result === 'copied') later(() => setCopied((current) => current === 'copied' ? null : current), 2000);
   }
 
   const enabled = !!status?.enabled;
@@ -230,12 +231,16 @@ export default function TwoFactorSection() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontFamily: 'var(--font-mono)', fontSize: 14, marginBottom: 12 }}>
             {backupCodes.map((c) => (
-              <div key={c} style={{ background: 'var(--bg-elevated-2)', padding: '8px 10px', borderRadius: 8, textAlign: 'center' }}>{c}</div>
+              <div key={c} style={{ background: 'var(--bg-elevated-2)', padding: '8px 10px', borderRadius: 8, textAlign: 'center', userSelect: 'all' }}>{c}</div>
             ))}
           </div>
+          {/* Keep the live region mounted so a failed copy is announced when its text changes. */}
+          <p role="status" aria-live="polite" style={{ margin: 0 }}>
+            {copied === 'manual' ? "Couldn't copy. Select the codes above and copy them by hand." : ''}
+          </p>
           <ModalActions>
             <button className="btn btn-secondary" onClick={copyCodes}>
-              {copied ? 'Copied ✓' : 'Copy codes'}
+              {copied === 'copied' ? 'Copied ✓' : 'Copy codes'}
             </button>
             <button className="btn btn-primary" onClick={() => setBackupCodes(null)}>I've saved them</button>
           </ModalActions>

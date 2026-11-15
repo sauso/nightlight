@@ -19,6 +19,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ### Fixed
 
 - Clearing alert history now also deletes the clips and pictures of cleared alerts; protected alerts and their media are kept (#934).
+- **Copy codes** now works when Nightlight is opened over plain http. If it can't copy the backup codes, the dialog tells you to copy them by hand.
 - The public demo no longer shows a **Setup status and picture check** row in Settings → About as if setup were half done: the demo's sample household is now marked as fully set up.
 
 ## [0.48.0] - 2026-11-15
