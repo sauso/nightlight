@@ -23062,8 +23062,8 @@
   {
     "label": "#589 M1: the sweep never disarms a silent camera whose window closed",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);",
-    "replace": "    if (false) reset(cameraId, st);",
+    "find": "    if (!watchedNow(cameraQ.get(cameraId))) {",
+    "replace": "    if (false) {",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#589:"
@@ -23071,11 +23071,56 @@
   {
     "label": "#589 M2: the sweep disarms every camera, window open or not",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);",
-    "replace": "    if (true) reset(cameraId, st);",
+    "find": "    if (!watchedNow(cameraQ.get(cameraId))) {",
+    "replace": "    if (true) {",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#589:"
+  },
+  {
+    "label": "#1037 hydration ignores the saved asleep latches",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "    for (const row of latchRowsQ.all()) {",
+    "replace": "    for (const row of []) {",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#1037 restart resumes sleep"
+  },
+  {
+    "label": "#1037 hydration accepts a latch from another window",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "      else if (childWindowKeyNow(row.child_id) !== row.window_start_ms) reason = 'window changed or closed';",
+    "replace": "      else if (false) reason = 'window changed or closed';",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#1037 hydrate discards another window start"
+  },
+  {
+    "label": "#1037 hydration accepts a latch from another child",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "      else if (camera.child_id !== row.child_id) reason = 'child changed';",
+    "replace": "      else if (false) reason = 'child changed';",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#1037 hydrate discards different child"
+  },
+  {
+    "label": "#1037 stop erases the saved asleep latch",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "  for (const [cameraId, st] of state) resetMemory(cameraId, st);",
+    "replace": "  for (const [cameraId, st] of state) reset(cameraId, st);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#1037 stop clears memory"
+  },
+  {
+    "label": "#1037 outside-window reset skips clearing a saved latch",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "  if (st.latched && clearLatch(cameraId)) st.latched = false;",
+    "replace": "  if (!st.latched && clearLatch(cameraId)) st.latched = false;",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#1037 a closed window clears once"
   },
   {
     "label": "#392 M1: the manual-recordings subtotal counts every ready recording (wake clips and other kinds included)",

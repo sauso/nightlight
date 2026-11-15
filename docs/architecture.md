@@ -216,11 +216,11 @@ panel falls back to guessing the reason from the camera row only if the field is
 condition, manual recording availability, mirrors `can_record` in `routes/cameras.js`, and
 `recording-readiness.test.js` fails if the two disagree.
 
-**Live alert hold (`backend/src/lib/alertHold.js`).** Motion and sound detectors call `shouldHold` after
+**Live alert hold (`backend/src/lib/alertHold.js`).** Motion and sound detectors, MQTT motion and ONVIF motion call `shouldHold` after
 schedule and cooldown checks. With Track sleep and Hold alerts until asleep on, alerts are dropped outside
 the sleep window because the watcher cannot detect sleep there; no cap clock starts. Inside the window,
 the first held alert starts a per-child, per-window 45-minute clock, after which alerts may pass even
-without detected sleep. Detected sleep allows alerts immediately. The hold does not affect the
+without detected sleep. Detected sleep allows alerts immediately, including after a restart in the same window: the watcher saves each camera's asleep result with its child and window start. A restart before sleep is detected starts a fresh cap. The hold does not affect the
 `alerting_now` readiness field or camera-offline, long-silence and sleep-report alerts.
 
 ## Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)

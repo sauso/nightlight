@@ -29,15 +29,16 @@ const emptyBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-nobin-'));
 process.env.PATH = emptyBinDir;
 
 const { default: db } = await import('../src/db.js');
-const { SLEEP_THRESHOLDS, childWindowActiveNow } = await import('../src/lib/sleepAnalysis.js');
+const { SLEEP_THRESHOLDS, childWindowActiveNow, childWindowKeyNow } = await import('../src/lib/sleepAnalysis.js');
 const { startSegmenter, stopAllSegmenters, isSegmenterRunning, ringDepthMs, setRingDepth, extractClip, clipCoverStartMs, ringOldestStartMs } =
   await import('../src/lib/clipRecorder.js');
 const { holdOwners, effectiveHold, RING_OWNER } = await import('../src/lib/ringHolds.js');
 const activity = await import('../src/lib/activityTracker.js');
 const { logger } = await import('../src/lib/logger.js');
 const { WAKE_CLIP_LEAD_SEC, getWakeClipSettings } = await import('../src/lib/recordings.js');
-const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, firstActiveFrameMs, wakeClipAnchor, isChildAsleep, _state } =
+const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, firstActiveFrameMs, wakeClipAnchor, isChildAsleep, _state, _latchWritesForTest } =
   await import('../src/lib/wakeWatcher.js');
+const { shouldHold, _reset: resetHold } = await import('../src/lib/alertHold.js');
 
 const { MOTION_ACTIVE, SOUND_ACTIVE, ONSET_QUIET_MIN, WAKE_ACTIVE_MIN, WAKE_GAP_MIN } = SLEEP_THRESHOLDS;
 
@@ -152,6 +153,13 @@ beforeEach(() => {
   stopWakeWatcher();
   stopAllSegmenters(); // #446 tests arm a real segmenter; never let one leak into the next test
   _state().clear();
+  // #1037: settle() now writes a real row. Keep every test independent, including lifecycle.
+  db.prepare('DELETE FROM wake_asleep_latch').run();
+  resetHold();
+  const w = windowAroundNow();
+  db.prepare('UPDATE children SET track_sleep = 1, hold_alerts_until_asleep = 0, sleep_window_start = ?, sleep_window_end = ? WHERE id = ?')
+    .run(w.start, w.end, CHILD);
+  db.prepare('UPDATE cameras SET child_id = ?, disabled = 0 WHERE id = ?').run(CHILD, CAM);
   clock = 0;
 });
 
@@ -3040,5 +3048,196 @@ describe('lifecycle', () => {
 
     stopWakeWatcher();
     assert.equal(_state().size, 0, 'stop must drop every camera, releasing any ring holds');
+  });
+});
+
+// #1037, Opus/Codex plan review: these use the same real temp database and minute labels as
+// the rest of the watcher suite. The row is the observable latch, not an implementation mock.
+const latchRow = (cameraId = CAM) => db.prepare('SELECT * FROM wake_asleep_latch WHERE camera_id = ?').get(cameraId);
+const insertLatch = (cameraId, childId, windowStart = childWindowKeyNow(childId)) =>
+  db.prepare('INSERT INTO wake_asleep_latch (camera_id, child_id, window_start_ms, asleep_at) VALUES (?, ?, ?, ?)')
+    .run(cameraId, childId, windowStart, Date.now());
+
+describe('#1037 asleep latch survives a restart only for its child and window', () => {
+  test('#1037 settling saves the camera, child and current window start once', () => {
+    const beforeWrites = _latchWritesForTest();
+    settle();
+    assert.deepEqual(
+      { camera_id: latchRow().camera_id, child_id: latchRow().child_id, window_start_ms: latchRow().window_start_ms },
+      { camera_id: CAM, child_id: CHILD, window_start_ms: childWindowKeyNow(CHILD) }
+    );
+    assert.ok(Number.isSafeInteger(latchRow().asleep_at));
+    quiet();
+    assert.equal(_latchWritesForTest().set - beforeWrites.set, 1, 'settled minutes do not rewrite the latch');
+  });
+
+  test('#1037 restart resumes sleep and allows the next alert before another minute arrives', () => {
+    db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run(CHILD);
+    assert.equal(shouldHold({ id: CAM }), true, 'precondition: an awake child is held');
+    settle();
+    stopWakeWatcher();
+    assert.ok(latchRow(), 'stopping must leave the saved latch');
+    assert.equal(_state().size, 0);
+    startWakeWatcher();
+    assert.equal(isChildAsleep(CHILD), true);
+    assert.equal(shouldHold({ id: CAM }), false, 'the first eligible alert after restart must pass');
+    assert.equal(_state().get(CAM).lastAt, null, 'the first payload establishes a fresh baseline');
+    assert.ok(logger.getRecent().some((line) => line.includes('resumed asleep latch')));
+  });
+
+  test('#1037 stop clears memory but never deletes a saved latch', () => {
+    settle();
+    const beforeWrites = _latchWritesForTest();
+    stopWakeWatcher();
+    assert.ok(latchRow());
+    assert.equal(_state().size, 0);
+    assert.equal(_latchWritesForTest().clear, beforeWrites.clear);
+  });
+
+  test('#1037 a closed window clears once, without a write on every payload or sweep', () => {
+    settle();
+    const beforeWrites = _latchWritesForTest();
+    const now = Date.now();
+    const hm = (ms) => new Date(ms).toISOString().slice(11, 16);
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?')
+      .run(hm(now + 3 * 3600_000), hm(now + 4 * 3600_000), CHILD);
+    quiet();
+    assert.equal(latchRow(), undefined);
+    quiet();
+    sweepStaleRuns();
+    assert.equal(_latchWritesForTest().clear - beforeWrites.clear, 1);
+    assert.equal(_state().get(CAM).latched, false);
+  });
+
+  test('#1037 a hydrated camera with no new payload is cleared by the window-close sweep', () => {
+    settle();
+    stopWakeWatcher();
+    startWakeWatcher();
+    assert.equal(_state().get(CAM).lastAt, null);
+    const hm = (ms) => new Date(ms).toISOString().slice(11, 16);
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?')
+      .run(hm(Date.now() + 3 * 3600_000), hm(Date.now() + 4 * 3600_000), CHILD);
+    sweepStaleRuns();
+    assert.equal(latchRow(), undefined);
+    assert.equal(_state().get(CAM).asleep, false);
+  });
+
+  test('#1037 a failed clear retries on the next outside-window payload', () => {
+    settle();
+    db.exec(`CREATE TRIGGER fail_latch_clear BEFORE DELETE ON wake_asleep_latch
+      BEGIN SELECT RAISE(FAIL, 'test clear failure'); END`);
+    try {
+      db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+      quiet();
+      assert.ok(latchRow());
+      assert.equal(_state().get(CAM).latched, true);
+    } finally { db.exec('DROP TRIGGER fail_latch_clear'); }
+    quiet();
+    assert.equal(latchRow(), undefined);
+    assert.equal(_state().get(CAM).latched, false);
+  });
+
+  test('#1037 a failed save keeps the in-memory asleep decision and alert flow', () => {
+    db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run(CHILD);
+    db.exec(`CREATE TRIGGER fail_latch_save BEFORE INSERT ON wake_asleep_latch
+      BEGIN SELECT RAISE(FAIL, 'test save failure'); END`);
+    try { settle(); } finally { db.exec('DROP TRIGGER fail_latch_save'); }
+    assert.equal(latchRow(), undefined);
+    assert.equal(_state().get(CAM).latched, false);
+    assert.equal(isChildAsleep(CHILD), true);
+    assert.equal(shouldHold({ id: CAM }), false);
+  });
+
+  for (const [cause, change] of [
+    ['another window start', () => insertLatch(CAM, CHILD, childWindowKeyNow(CHILD) - 60_000)],
+    ['different child after reassignment', () => {
+      const w = windowAroundNow();
+      makeChild(db, { id: 'latch-other-child', name: 'a child', start: w.start, end: w.end });
+      insertLatch(CAM, CHILD);
+      db.prepare('UPDATE cameras SET child_id = ? WHERE id = ?').run('latch-other-child', CAM);
+    }],
+    ['disabled camera', () => {
+      insertLatch(CAM, CHILD);
+      db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run(CAM);
+    }],
+    ['tracking off', () => {
+      insertLatch(CAM, CHILD);
+      db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+    }],
+    ['closed window', () => {
+      insertLatch(CAM, CHILD);
+      const hm = (ms) => new Date(ms).toISOString().slice(11, 16);
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?')
+        .run(hm(Date.now() + 3 * 3600_000), hm(Date.now() + 4 * 3600_000), CHILD);
+    }],
+    ['missing camera', () => {
+      // #1037: a valid foreign key cascades, so simulate an old or damaged database row.
+      db.pragma('foreign_keys = OFF');
+      try { insertLatch('latch-missing-camera', CHILD); }
+      finally { db.pragma('foreign_keys = ON'); }
+    }],
+    ['malformed window start', () => insertLatch(CAM, CHILD, 'junk')],
+  ]) {
+    test(`#1037 hydrate discards ${cause} without arming`, () => {
+      try {
+        change();
+        startWakeWatcher();
+        assert.equal(_state().get(CAM)?.asleep, undefined);
+        assert.equal(latchRow(cause === 'missing camera' ? 'latch-missing-camera' : CAM), undefined);
+        if (cause === 'malformed window start') {
+          assert.ok(logger.getRecent().some((line) => line.includes('invalid window start')));
+        }
+        if (cause === 'tracking off') {
+          assert.ok(logger.getRecent().some((line) => line.includes('discarded asleep latch') && line.includes('(tracking off)')));
+        }
+      } finally {
+        stopWakeWatcher();
+        db.prepare('UPDATE cameras SET child_id = ?, disabled = 0 WHERE id = ?').run(CHILD, CAM);
+        db.prepare('DELETE FROM cameras WHERE child_id = ?').run('latch-other-child');
+        db.prepare('DELETE FROM children WHERE id = ?').run('latch-other-child');
+      }
+    });
+  }
+
+  test('#1037 one hydrated camera arms its child across two cameras', () => {
+    makeCamera(db, { id: 'latch-second-camera', name: 'a camera', childId: CHILD });
+    try {
+      insertLatch(CAM, CHILD);
+      startWakeWatcher();
+      assert.equal(isChildAsleep(CHILD), true);
+      assert.equal(_state().get('latch-second-camera'), undefined);
+    } finally {
+      stopWakeWatcher();
+      db.prepare('DELETE FROM cameras WHERE id = ?').run('latch-second-camera');
+    }
+  });
+
+  test('#1037 hydrate failure starts empty and never prevents startup', () => {
+    db.exec('DROP TABLE wake_asleep_latch');
+    try {
+      assert.doesNotThrow(() => startWakeWatcher());
+      assert.equal(_state().size, 0);
+    } finally {
+      stopWakeWatcher();
+      db.exec(`CREATE TABLE wake_asleep_latch (
+        camera_id TEXT PRIMARY KEY REFERENCES cameras(id) ON DELETE CASCADE,
+        child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+        window_start_ms INTEGER NOT NULL,
+        asleep_at INTEGER NOT NULL
+      )`);
+    }
+  });
+
+  test('#1037 deleting a camera or child cascades its saved latch', () => {
+    makeCamera(db, { id: 'latch-deleted-camera', childId: CHILD });
+    insertLatch('latch-deleted-camera', CHILD);
+    db.prepare('DELETE FROM cameras WHERE id = ?').run('latch-deleted-camera');
+    assert.equal(latchRow('latch-deleted-camera'), undefined);
+    makeChild(db, { id: 'latch-deleted-child', name: 'a child' });
+    makeCamera(db, { id: 'latch-orphaned-camera', childId: 'latch-deleted-child' });
+    insertLatch('latch-orphaned-camera', 'latch-deleted-child', 1);
+    db.prepare('DELETE FROM children WHERE id = ?').run('latch-deleted-child');
+    assert.equal(latchRow('latch-orphaned-camera'), undefined);
+    db.prepare('DELETE FROM cameras WHERE id = ?').run('latch-orphaned-camera');
   });
 });
