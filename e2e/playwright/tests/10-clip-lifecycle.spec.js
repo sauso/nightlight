@@ -179,12 +179,11 @@ test('deleting a recording through the UI removes it for good', async ({ page })
 
   await page.goto(`/#/children/${childId}`);
   await expect(page.getByText('Recordings')).toBeVisible();
-  // The card is one row now (UI refresh PR D); the thumbnails only exist once it is opened.
-  await page.getByRole('button', { name: /^Recordings/ }).click();
+  // The card lists its recordings like Recent alerts does (newest three at once), so the row is there without opening anything.
 
   // Open the recording, then delete it — deliberately two steps behind a confirm, since a recording
   // has no retention and nothing else can bring it back.
-  await page.locator('.rec-strip__item').first().click();
+  await page.locator('.child-page__recordings .alert-item--btn').first().click();
   await page.getByRole('button', { name: 'Delete recording' }).click();
   await expect(page.getByText(/This can’t be undone/)).toBeVisible();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();

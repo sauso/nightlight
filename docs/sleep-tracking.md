@@ -95,7 +95,11 @@ asleep / stirring / awake stretches on a real time axis. Nearby short stirs join
 the underlying times and counts stay separate, and the hover status follows the original segments.
 While a night is still going, the bar runs from the start of the night to now
 and its right-hand end reads **Now** with the time, not the morning end of the night (tonight's page refreshes every two minutes).
-The legend lists only the states present that night. Below it, one card with two tabs, **Wake-ups** and
+The legend lists only the states present that night. Directly under the Timeline card, a **Timelapse** card plays
+**that night's** sped-up video, with its date and length. It sits on the night's own page, not on the child's page, and there is
+one per night: step to another night to see that night's. A night without a timelapse (it was too short, the detector saw no one in
+the bed, or timelapses are off) shows no card at all. An admin can delete a timelapse from its player; a caregiver can watch and
+download it. See [Recording](recording.md) for how many are kept and when one is hidden. Below that, one card with two tabs, **Wake-ups** and
 **Room activity**, shows each count and its own rows (with clips or saved frames where available).
 The **Wake-ups** count is the same number as the **Wake-ups** figure in the night's summary (mid-night wake-ups only):
 the morning wake is listed at the end as **Up for the day** with the time the child got up, and is not counted.

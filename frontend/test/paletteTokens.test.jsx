@@ -87,7 +87,7 @@ describe('the peri palette', () => {
 });
 
 describe('child-page interactive surfaces', () => {
-  const controls = /\.(?:alert-list__more|recordings-row|rec-strip__item|alert-item--btn|timelapse-strip__item|timelapse-hero|child-cam__settings|child-cam__watch)\b/;
+  const controls = /\.(?:alert-list__more|alert-item--btn|timelapse-hero|child-cam__settings|child-cam__watch)\b/;
 
   test('★ hover fills apply only to pointer hover, and pressed/open states never use the inset surface', () => {
     // Walk nested blocks so a media query's first selector and later selectors are treated alike.
@@ -104,7 +104,7 @@ describe('child-page interactive surfaces', () => {
       && /:hover\b|:active\b|\[aria-expanded/.test(rule.slice(0, rule.lastIndexOf('{'))));
     expect(stateRules.length).toBeGreaterThan(5);
     for (const rule of stateRules) expect(rule, rule).not.toMatch(/background:\s*var\(--bg-elevated-2\)/);
-    for (const selector of ['.alert-list__more', '.recordings-row', '.alert-item--btn']) {
+    for (const selector of ['.alert-list__more', '.alert-item--btn']) {
       expect(stateRules.some((rule) => rule.includes(`${selector}:hover`) && rule.includes('var(--child-action-hover)')), selector).toBe(true);
       expect(stateRules.some((rule) => rule.includes(`${selector}:active`) && rule.includes('var(--child-action-active)')), selector).toBe(true);
     }
@@ -160,25 +160,8 @@ describe('child-page interactive surfaces', () => {
     }
   });
 
-  test('★ recording tiles are images with an overlaid label and snap to reveal the next recording', () => {
-    const strip = rules.find((rule) => rule.startsWith('.rec-strip {'));
-    const tile = rules.find((rule) => rule.startsWith('.rec-strip__item {'));
-    const chip = rules.find((rule) => rule.startsWith('.rec-strip__label {'));
-    expect(strip).toMatch(/scroll-snap-type:\s*x/);
-    expect(tile).toContain('aspect-ratio: 16 / 9');
-    expect(tile).toContain('scroll-snap-align: start');
-    expect(tile).not.toContain('background: var(--bg-elevated-2)');
-    expect(chip).toContain('position: absolute');
-  });
-
-  test('★ a Timelapse tile with a transparent border does not show its inset fill through it', () => {
-    const tile = rules.find((rule) => rule.startsWith('.timelapse-strip__item {'));
-    expect(tile).toContain('border: 2px solid transparent');
-    expect(tile).toContain('background-clip: padding-box');
-  });
-
   test('★ card controls keep a visible accent-line keyboard ring', () => {
-    for (const selector of ['.alert-list__more', '.recordings-row', '.alert-item--btn', '.rec-strip__item', '.timelapse-hero', '.timelapse-strip__item']) {
+    for (const selector of ['.alert-list__more', '.alert-item--btn', '.timelapse-hero']) {
       const focus = rules.find((rule) => rule.slice(0, rule.lastIndexOf('{')).includes(`${selector}:focus-visible`));
       expect(focus, selector).toContain('outline: 2px solid var(--accent-line)');
     }

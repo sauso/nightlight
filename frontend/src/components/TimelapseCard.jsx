@@ -6,10 +6,12 @@ import { formatDayKey } from '../lib/homeTime.js';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
 import ModalActions from './ModalActions.jsx';
 
-// "Timelapse" card on a child's detail page: the nightly sleep timelapse (see lib/timelapse.js). Shows
-// the most recent night as a hero thumbnail that plays in a modal; recent nights sit in a strip below as small
-// weekday-labelled thumbnails to pick from (UI refresh PR D). Renders nothing until the first timelapse exists, so it
-// never shows an empty placeholder (a child with no timelapse, or one whose timelapse is off, gets no card at all).
+// "Timelapse" card on a NIGHT's page (pages/SleepDetail.jsx, directly under the Timeline card): the sleep timelapse of THAT
+// night (see lib/timelapse.js), as a hero thumbnail that plays in a modal. It used to sit on the child's page with a strip of
+// recent nights to pick from; it moved here (owner, 2026-11-15) because a timelapse is one night's memory, so the night is the
+// natural place to look for it and the strip of nights is no longer needed (the page's own night navigator does that job).
+// Renders nothing when that night has no timelapse (the card is not drawn at all, never an empty placeholder): a child with
+// no timelapse, a night that is too short, one the detector scored empty, or a timelapse switched off.
 
 // `night_date` is a calendar date the server worked out in HOME time (the night that began that evening),
 // so it is already the same for every viewer and has no clock to convert. It is printed through
@@ -19,37 +21,25 @@ function nightLabel(nightDate) {
   return formatDayKey(nightDate, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-// The strip's short label: the weekday of the same calendar date, built the same way (see above), so it can never disagree
-// with the full label next to it. An unparseable date comes back as the raw text, like nightLabel.
-function weekdayLabel(nightDate) {
-  return formatDayKey(nightDate, { weekday: 'short' });
-}
-
-// A strip tile's accessible name: the printed weekday first, then the day and month, then "timelapse". An unparseable date comes
-// back from formatDayKey as the raw text for BOTH parts, so the date part is left out rather than saying it twice ("garbage timelapse").
-function tileName(nightDate) {
-  const weekday = weekdayLabel(nightDate);
-  const dayMonth = formatDayKey(nightDate, { day: 'numeric', month: 'short' });
-  return `${weekday}${dayMonth === weekday ? '' : `, ${dayMonth}`} timelapse`;
-}
-
-export default function TimelapseCard({ childId }) {
+// `nightDate` is the night's `YYYY-MM-DD`, the same key as `sleep_nights.night_date` and `timelapses.night_date`, so the
+// match below is an exact string comparison and no date maths (or timezone) is involved.
+export default function TimelapseCard({ childId, nightDate }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  // The child's whole list (no backend change: the endpoint already returns every night's row), fetched when the card mounts
+  // or the child changes, then the row for the shown night picked from it. SleepDetail keys this card by child only, so a
+  // `nightDate` change on a card that stays mounted costs no request. (On the real page the card does not stay mounted from one
+  // night to the next: see the note where SleepDetail mounts it.)
   const [list, setList] = useState([]);
-  const [selId, setSelId] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [del, setDel] = useState(''); // '' | 'confirm' | 'deleting' | 'error'
 
   function load(alive = { current: true }) {
-    return api
-      .get(`/timelapses/child/${childId}`)
+    // Promise.resolve: a test double (or a future caller) whose `get` returns nothing must not throw during render.
+    return Promise.resolve(api.get(`/timelapses/child/${childId}`))
       .then((rows) => {
         if (!alive.current) return;
-        const arr = Array.isArray(rows) ? rows : [];
-        setList(arr);
-        // Keep the current pick if it survived the refresh, else fall back to the newest.
-        setSelId((prev) => (arr.some((t) => t.id === prev) ? prev : arr.length ? arr[0].id : null));
+        setList(Array.isArray(rows) ? rows : []);
       })
       .catch(() => {});
   }
@@ -60,8 +50,15 @@ export default function TimelapseCard({ childId }) {
     return () => { alive.current = false; };
   }, [childId]);
 
-  if (!list.length) return null;
-  const sel = list.find((t) => t.id === selId) || list[0];
+  // The card stays mounted while the page steps from night to night (it is keyed by child only), so a player left open, or a
+  // half-answered delete confirmation, must not wait there and reappear when the page comes back to a night that has a timelapse.
+  useEffect(() => {
+    setPlaying(false);
+    setDel('');
+  }, [nightDate]);
+
+  const sel = list.find((t) => t && t.night_date === nightDate);
+  if (!sel) return null;
   const confirming = del === 'confirm' || del === 'deleting' || del === 'error';
   const heroMeta = `${nightLabel(sel.night_date)}${sel.duration_s ? ` · ${sel.duration_s}s` : ''}`;
 
@@ -99,36 +96,13 @@ export default function TimelapseCard({ childId }) {
         <span className="timelapse-hero__meta">{heroMeta}</span>
       </button>
 
-      {list.length > 1 && (
-        <div className="timelapse-strip">
-          {list.map((t) => (
-            // The tile prints only the weekday (the design: "Tue", "Mon"), over the thumbnail. A weekday alone repeats once a
-            // week, so the FULL date is the accessible name and the tooltip, and the picture is decoration (alt="") so a
-            // screen reader hears "Tue, 1 Sept timelapse" once, not the date twice. The name opens with the printed weekday
-            // (WCAG 2.5.3, label in name; it was "Show Tue, 1 Sept timelapse"), and aria-pressed says it picks the night.
-            <button
-              key={t.id}
-              type="button"
-              className={`timelapse-strip__item${t.id === sel.id ? ' timelapse-strip__item--active' : ''}`}
-              onClick={() => setSelId(t.id)}
-              title={nightLabel(t.night_date)}
-              aria-label={tileName(t.night_date)}
-              aria-pressed={t.id === sel.id}
-            >
-              <img src={api.url(`/timelapses/${t.id}/thumb`)} alt="" loading="lazy" />
-              <span>{weekdayLabel(t.night_date)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
       {playing && (
         <MediaPlayerModal
           title={`Timelapse · ${nightLabel(sel.night_date)}`}
           videoPath={`/timelapses/${sel.id}/video`}
           posterPath={`/timelapses/${sel.id}/thumb`}
           filename={`timelapse-${sel.night_date}.mp4`}
-          meta={`${nightLabel(sel.night_date)}${sel.duration_s ? ` · ${sel.duration_s}s` : ''}`}
+          meta={heroMeta}
           onClose={closePlayer}
           headerAction={
             isAdmin ? (

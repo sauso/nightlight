@@ -16,6 +16,7 @@ import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import SleepScoreCard from '../components/SleepScoreCard.jsx';
+import TimelapseCard from '../components/TimelapseCard.jsx';
 import NightPendingRing from '../components/NightPendingRing.jsx';
 import { scoreOf, sheetScoreOf, bandOf } from '../lib/sleepScoreText.js';
 import { showsInBed } from '../lib/inBed.js';
@@ -424,7 +425,24 @@ function settingsSwitchOf(night) {
     : { to: 'auto', label: 'Show with the settings this night was saved with' };
 }
 
-function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProtectionChange, onWakeProtectionChange }) {
+// The night's content plus, for the statuses that return early below, its timelapse. The card sits between the Timeline and the
+// event tabs on an ordinary night (inside NightContentBody); those early states have no Timeline, so it goes under their message.
+// It matters for `empty`: a parent who marks a night "No one was in the bed" KEEPS that night's timelapse (docs/recording.md), the
+// timelapse list still returns it, and since the card left the child's page this is the only place left to watch or delete it
+// (found in the Codex review of #1111). `no_data` is left out on purpose: such a night has no timelapse and the card would only
+// make a request for nothing. The card renders nothing when the night has none.
+const TIMELAPSE_AFTER_MESSAGE = ['off', 'no_sleep', 'empty'];
+function NightContent(props) {
+  const { night, childId, date } = props;
+  return (
+    <>
+      <NightContentBody {...props} />
+      {night && TIMELAPSE_AFTER_MESSAGE.includes(night.status) && <TimelapseCard key={childId} childId={childId} nightDate={date} />}
+    </>
+  );
+}
+
+function NightContentBody({ night, fmtTime, tz, tempUnit, childId, date, onAlertProtectionChange, onWakeProtectionChange }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
@@ -576,6 +594,14 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
         <ClimateTrack night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} tempUnit={tempUnit} />
         <VitalsTracks night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} />
       </div>
+
+      {/* This night's timelapse, directly under the Timeline (owner, 2026-11-15: it moved here from the child's page). Keyed by
+          child only: the card fetches the child's list and picks this night's row from it. It is drawn here and not in the
+          early-return states above because a night with no data has no timelapse either. It renders nothing when this night
+          has none. ⚠️ Stepping to another night passes through "Loading night…" (NightBody), which unmounts this whole block,
+          so the card asks for the list again for each night drawn: one small request, and the card appears a moment after the
+          night does. Keeping the list across nights would mean fetching it in this page instead of in the card. */}
+      <TimelapseCard key={childId} childId={childId} nightDate={date} />
 
       <NightEventTabs key={`${childId}|${date}`} wakes={wakes} wakeCount={night.wake_count} visits={visits} alerts={alerts}
         wakeClips={wakeClips} frames={frames} fmtTime={fmtTime} onPlay={setClipFor}
