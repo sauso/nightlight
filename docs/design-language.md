@@ -110,7 +110,7 @@ Saved ESPHome devices and cameras share `.dev-card`: a status dot and word, wrap
 
 **Remove camera** is the one item of the header **⋯** menu (`MoreMenu` through `AppHeader`'s `actions`), shown to an admin on a saved camera. There is no red button under Save. It opens the same `RemoveCameraDialog` as the Cameras list.
 
-**Remove child** follows the same header menu pattern on saved records. **Remove user** is the exception: it is a red button at the bottom of the user page (the owner could not find it in a menu). The child form has separate **Profile** and **Sleep** cards. The setup guide's finish screen keeps its centred heading; its child and camera summary is one card with two label and value rows. The welcome steps use plain bullets until each step is done.
+**Remove child** and **Remove user** are the exceptions: each is a full-width red button at the bottom of its page, after Save (the owner could not find them in a menu), shown to an admin on a saved record that has loaded. Remove child's confirmation opens with a bold "This will permanently delete everything for" the child's name, then lists what goes. The child form has separate **Profile** and **Sleep** cards. The setup guide's finish screen keeps its centred heading; its child and camera summary is one card with two label and value rows. The welcome steps use plain bullets until each step is done.
 
 ### Child hero card (`.night`)
 

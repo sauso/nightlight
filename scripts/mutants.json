@@ -14269,8 +14269,8 @@
   {
     "label": "W5 role UI M17: Remove child is offered to a caregiver again",
     "file": "frontend/src/pages/ChildSettings.jsx",
-    "find": "actions={!isNew && isAdmin && kid ? <MoreMenu",
-    "replace": "actions={!isNew && kid ? <MoreMenu",
+    "find": "{!isNew && isAdmin && kid && (\n              <div className=\"form-actions\" style={{ marginTop: 10 }}>",
+    "replace": "{!isNew && kid && (\n              <div className=\"form-actions\" style={{ marginTop: 10 }}>",
     "expect": "killed",
     "tests": ["childSettings.test.jsx"],
     "namePattern": "has no Remove child"

@@ -4,9 +4,8 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import MoreMenu from '../components/MoreMenu.jsx';
 import ModalActions from '../components/ModalActions.jsx';
-import { Ban, Check, Trash2 } from 'lucide-react';
+import { Ban, Check } from 'lucide-react';
 import AvatarEditor from '../components/AvatarEditor.jsx';
 import Modal from '../components/Modal.jsx';
 import SwitchRow from '../components/SwitchRow.jsx';
@@ -222,17 +221,7 @@ export default function ChildSettings() {
 
   return (
     <>
-      <AppHeader title={isNew ? 'Add child' : (kid?.name || 'Child')} back={back}
-        // Offered only once the child has loaded (same condition that swaps "Loading…" for the form).
-        // Remove used to sit inside the form, which does not exist while loading; in the header it was
-        // reachable then, so an admin could confirm and send a DELETE for a child the page had not
-        // shown yet (PR #1088 review).
-        actions={!isNew && isAdmin && kid ? <MoreMenu label="More options for this child" menuLabel="Child">
-          <button type="button" role="menuitem" className="more-menu__item dev-card__delete"
-            onClick={() => { setRemoveError(''); setRemoving(true); }}>
-            <Trash2 size={16} aria-hidden="true" />Remove child
-          </button>
-        </MoreMenu> : null} />
+      <AppHeader title={isNew ? 'Add child' : (kid?.name || 'Child')} back={back} />
       <main className="app-main">
         {isNew && !isAdmin ? (
           // No form at all: the server refuses a caregiver's add, so a form here would only let someone
@@ -457,6 +446,21 @@ export default function ChildSettings() {
                 {busy ? 'Saving…' : isNew ? 'Add child' : 'Save changes'}
               </button>
             </div>
+
+            {/* Remove child is a visible red button at the bottom, like Remove user: PR #1088 moved it into a header "⋯"
+                menu and the owner could not find it. Remove camera stays in its menu. Three gates, all required:
+                  - !isNew: a new child has nothing to remove.
+                  - isAdmin: the server refuses a caregiver's DELETE; the button is not offered either.
+                  - kid: the record has loaded. The form only exists once it has, so an admin cannot confirm and send a
+                    DELETE for a child the page has not shown yet (PR #1088 review; kept explicit so moving the button
+                    cannot drop the gate). */}
+            {!isNew && isAdmin && kid && (
+              <div className="form-actions" style={{ marginTop: 10 }}>
+                <button className="btn btn-danger" type="button" onClick={() => { setRemoveError(''); setRemoving(true); }}>
+                  Remove child
+                </button>
+              </div>
+            )}
           </form>
         )}
       </main>
@@ -467,13 +471,14 @@ export default function ChildSettings() {
               contract with lib/entityPurge.js: if the server starts deleting (or keeping) something else,
               change both. "Are you sure?" is a sentence in the dialog, not a browser confirm(). */}
           <p style={{ marginTop: 0 }}>
-            Remove <strong>{kid?.name}</strong>? This permanently deletes everything for this child:
+            <strong>This will permanently delete everything for {kid?.name}.</strong> That includes:
           </p>
           <ul style={{ margin: '0 0 12px', paddingLeft: 20 }}>
             <li>sleep nights and morning reviews, with their notes</li>
             <li>bed transitions and their snapshot photos</li>
             <li>the activity history their cameras recorded</li>
             <li>recordings, wake clips and timelapses, including the video files</li>
+            <li>heart rate and other readings from their ESPHome sensors</li>
             <li>their profile, photo and sleep settings</li>
           </ul>
           {/* #719 review: "everything for this child" must be true, and alerts are the camera's, not the child's

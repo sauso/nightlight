@@ -638,22 +638,34 @@ describe('★★ what a caregiver can change (#542)', () => {
   test('★ a caregiver has no Remove child; an admin does', async () => {
     const carer = mount({ who: CAREGIVER });
     await screen.findByLabelText('Name');
-    expect(screen.queryByRole('button', { name: 'More options for this child' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove child' })).toBeNull();
     carer.unmount();
     mount({ who: ADMIN });
-    expect(await screen.findByRole('button', { name: 'More options for this child' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Remove child' })).toBeTruthy();
   });
 
-  test('★ while the child is still loading there is no ⋯ menu, so Remove child cannot be reached; it appears once loaded', async () => {
-    // Remove moved from inside the form (absent while loading) to the header menu, which is not. An
-    // admin could then confirm and send DELETE for a child the page had not shown yet (PR #1088 review).
+  test('★ while the child is still loading there is no Remove child button, so it cannot be reached; it appears once loaded', async () => {
+    // Remove was in the header menu (present while loading) in PR #1088, so an admin could confirm and send
+    // DELETE for a child the page had not shown yet (PR #1088 review). The button is back inside the form.
     const first = mount({ kid: null });
     expect(screen.getByText('Loading…')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'More options for this child' })).toBeNull();
-    expect(screen.queryByRole('menuitem', { name: 'Remove child' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove child' })).toBeNull();
     first.unmount();
     mount();
-    expect(await screen.findByRole('button', { name: 'More options for this child' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Remove child' })).toBeTruthy();
+  });
+
+  test('★ Remove child is a visible red button after Save, and the page has no ⋯ menu for it', async () => {
+    // The owner could not find it in the header menu (PR #1088 moved it there). Same place and style as Remove user.
+    mount();
+    const remove = await screen.findByRole('button', { name: 'Remove child' });
+    expect(remove).toHaveClass('btn', 'btn-danger');
+    expect(remove).not.toHaveAttribute('role', 'menuitem');
+    const save = screen.getByRole('button', { name: 'Save changes' });
+    // Same form, and after Save in document order.
+    expect(remove.closest('form')).toBe(save.closest('form'));
+    expect(save.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'More options for this child' })).toBeNull();
   });
 
   test('★ a caregiver on Add child is told an admin adds children, with no form to fill in', async () => {
@@ -672,8 +684,7 @@ describe('removing a child', () => {
     // tests green. They are the parts that make the page behind inert and give the dialog a name, and
     // this dialog is a destructive confirmation, which is exactly where that matters.
     const { user } = mount();
-    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'Remove child' }));
     const dialog = await screen.findByRole('dialog');
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog).toHaveAccessibleName('Remove child');
@@ -687,8 +698,7 @@ describe('removing a child', () => {
     // The consequence people do not expect: the cameras survive, unassigned. Saying so is what stops
     // someone believing they are about to delete the cameras too.
     const { user } = mount();
-    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'Remove child' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/become unassigned/)).toBeTruthy();
     expect(delSpy).not.toHaveBeenCalled();
@@ -699,12 +709,17 @@ describe('removing a child', () => {
   // consequence. One assertion per category: a regex over the paragraph would survive a dropped line.
   test('★ #540 the dialog says plainly that everything for the child is deleted, lists what, and asks', async () => {
     const { user } = mount();
-    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'Remove child' }));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/permanently deletes everything for this child/)).toBeTruthy();
+    // The first thing the dialog says, in bold, before the list (owner 2026-11-15: "say it will delete everything").
+    const lead = within(dialog).getByText(/permanently delete everything for/);
+    expect(lead.tagName).toBe('STRONG');
+    expect(lead).toHaveTextContent('This will permanently delete everything for Child B.');
+    expect(lead.compareDocumentPosition(within(dialog).getAllByRole('listitem')[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const items = within(dialog).getAllByRole('listitem').map((li) => li.textContent);
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
+    // lib/entityPurge.js purgeChild also deletes the child's ESPHome readings (docs/esphome.md says so); the list had omitted them.
+    expect(items.join('|')).toMatch(/heart rate and other readings from their ESPHome sensors/);
     expect(items.join('|')).toMatch(/sleep nights and morning reviews, with their notes/);
     expect(items.join('|')).toMatch(/bed transitions and their snapshot photos/);
     expect(items.join('|')).toMatch(/activity history their cameras recorded/);
@@ -725,8 +740,7 @@ describe('removing a child', () => {
     vi.stubGlobal('fetch', fetchSpy);
     try {
       const { user, camerasValue } = mount();
-      await user.click(screen.getByRole('button', { name: 'More options for this child' }));
-      await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
+      await user.click(screen.getByRole('button', { name: 'Remove child' }));
       await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
       const dialog = screen.getByRole('dialog');
       expect(await within(dialog).findByRole('alert')).toHaveTextContent(reason);
@@ -741,8 +755,7 @@ describe('removing a child', () => {
 
   test('confirming deletes, refreshes and goes back', async () => {
     const { user, camerasValue } = mount();
-    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'Remove child' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/children/kid-1'));
@@ -750,11 +763,20 @@ describe('removing a child', () => {
     expect(await screen.findByText('at /children')).toBeTruthy();
   });
 
+  test('cancelling closes the dialog and deletes nothing', async () => {
+    const { user, camerasValue } = mount();
+    await user.click(screen.getByRole('button', { name: 'Remove child' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(delSpy).not.toHaveBeenCalled();
+    expect(camerasValue.refresh).not.toHaveBeenCalled();
+    expect(screen.getByText('at /children/kid-1')).toBeTruthy();
+  });
+
   test('a failed delete says why and keeps you on the child', async () => {
     delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Child has recorded nights'));
     const { user } = mount();
-    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'Remove child' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
     expect(await screen.findByText('Child has recorded nights')).toBeTruthy();
@@ -767,8 +789,7 @@ describe('removing a child', () => {
   test('★ #378 the failure is shown INSIDE the dialog, once, and the dialog stays open to retry', async () => {
     delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused: cameras still streaming #378'));
     const { user, camerasValue } = mount();
-    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'Remove child' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
     const dialog = screen.getByRole('dialog');
@@ -781,14 +802,14 @@ describe('removing a child', () => {
     // Cancel and reopen: the old message must not greet the next attempt.
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'Remove child' }));
     expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
   });
 
   test('a new child has nothing to remove', async () => {
     mount({ id: 'new' });
     await screen.findByLabelText('Name');
+    expect(screen.queryByRole('button', { name: 'Remove child' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'More options for this child' })).toBeNull();
   });
 });
