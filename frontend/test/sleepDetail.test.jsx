@@ -852,6 +852,16 @@ describe('the night\'s timelapse, under the Timeline', () => {
     expect(container.querySelector('.timelapse-card')).toBeNull();
     expect(listRequests(get)).toBe(0);
   });
+
+  // ★ A parent who marks a night "No one was in the bed" keeps that night's timelapse (docs/recording.md) and the list still returns it.
+  // With the card gone from the child's page, the night's page is the only place to watch or delete it, and an `empty` night returns
+  // before the Timeline. Fails if the card is mounted only in the ordinary night's render (Codex review of #1111).
+  test('★ a night marked "no one in the bed" still shows its timelapse, under the message', async () => {
+    mockWithTimelapses(TIMELAPSES, { night: { night_date: '2026-08-30', status: 'empty', nobody_in_bed: true, corrected: true, coverage_minutes: 700, onset_at: null, wake_at: null } });
+    mount();
+    await screen.findByText(/You said no one was in the bed for this night/);
+    expect(await screen.findByRole('button', { name: 'Sun, 30 Aug · 42s, play timelapse' })).toBeInTheDocument();
+  });
 });
 
 describe('★ only the live night is polled', () => {

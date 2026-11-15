@@ -425,7 +425,24 @@ function settingsSwitchOf(night) {
     : { to: 'auto', label: 'Show with the settings this night was saved with' };
 }
 
-function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProtectionChange, onWakeProtectionChange }) {
+// The night's content plus, for the statuses that return early below, its timelapse. The card sits between the Timeline and the
+// event tabs on an ordinary night (inside NightContentBody); those early states have no Timeline, so it goes under their message.
+// It matters for `empty`: a parent who marks a night "No one was in the bed" KEEPS that night's timelapse (docs/recording.md), the
+// timelapse list still returns it, and since the card left the child's page this is the only place left to watch or delete it
+// (found in the Codex review of #1111). `no_data` is left out on purpose: such a night has no timelapse and the card would only
+// make a request for nothing. The card renders nothing when the night has none.
+const TIMELAPSE_AFTER_MESSAGE = ['off', 'no_sleep', 'empty'];
+function NightContent(props) {
+  const { night, childId, date } = props;
+  return (
+    <>
+      <NightContentBody {...props} />
+      {night && TIMELAPSE_AFTER_MESSAGE.includes(night.status) && <TimelapseCard key={childId} childId={childId} nightDate={date} />}
+    </>
+  );
+}
+
+function NightContentBody({ night, fmtTime, tz, tempUnit, childId, date, onAlertProtectionChange, onWakeProtectionChange }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
