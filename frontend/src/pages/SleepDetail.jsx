@@ -16,6 +16,7 @@ import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import SleepScoreCard from '../components/SleepScoreCard.jsx';
+import TimelapseCard from '../components/TimelapseCard.jsx';
 import NightPendingRing from '../components/NightPendingRing.jsx';
 import { scoreOf, sheetScoreOf, bandOf } from '../lib/sleepScoreText.js';
 import { showsInBed } from '../lib/inBed.js';
@@ -576,6 +577,14 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
         <ClimateTrack night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} tempUnit={tempUnit} />
         <VitalsTracks night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} />
       </div>
+
+      {/* This night's timelapse, directly under the Timeline (owner, 2026-11-15: it moved here from the child's page). Keyed by
+          child only: the card fetches the child's list and picks this night's row from it. It is drawn here and not in the
+          early-return states above because a night with no data has no timelapse either. It renders nothing when this night
+          has none. ⚠️ Stepping to another night passes through "Loading night…" (NightBody), which unmounts this whole block,
+          so the card asks for the list again for each night drawn: one small request, and the card appears a moment after the
+          night does. Keeping the list across nights would mean fetching it in this page instead of in the card. */}
+      <TimelapseCard key={childId} childId={childId} nightDate={date} />
 
       <NightEventTabs key={`${childId}|${date}`} wakes={wakes} wakeCount={night.wake_count} visits={visits} alerts={alerts}
         wakeClips={wakeClips} frames={frames} fmtTime={fmtTime} onPlay={setClipFor}

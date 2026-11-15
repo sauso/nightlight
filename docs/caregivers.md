@@ -29,7 +29,7 @@ destroy or reconfigure.**
 | Answer the morning sleep review (the review shows who last answered it) | Yes | Yes |
 | Delete an alert clip, a recording or a wake clip | No | Yes |
 | See which clips are protected; protect or unprotect alert and wake clips | See only | Yes |
-| Delete a timelapse | No | Yes |
+| Delete a timelapse (from that night's page) | No | Yes |
 | Delete a child and everything recorded for them (nights, reviews, bed transitions, recordings, timelapses) | No | Yes |
 | Change global settings (detection, notifications, providers, recording retention) | No | Yes |
 | Manage caregiver/admin accounts and sessions | No | Yes |

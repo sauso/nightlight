@@ -1485,32 +1485,31 @@ body.in-pip .tile-menu-backdrop {
 .child-cam__settings:focus-visible, .child-cam__watch:focus-visible { outline: 2px solid #c7caff; outline-offset: 2px; }
 
 /* The child page's layout (pages/ChildDetail.jsx; UI refresh PR D). A phone is one column in DOM order: night card, camera,
-   timelapse, alerts, recordings, sensor history. From 1024px the same elements go into two columns as drawn (night card then
-   alerts on the left; camera, timelapse, recordings and sensor history on the right) by grid placement ONLY, never `order`, so the
+   alerts, recordings, sensor history (the nightly timelapse is not here any more: it is on each night's page, under the
+   Timeline). From 1024px the same elements go into two columns as drawn (night card then
+   alerts on the left; camera, recordings and sensor history on the right) by grid placement ONLY, never `order`, so the
    keyboard and reading order stay the DOM order. The rows are
      1  night card | camera(s)        (the camera column stretches to the card's height)
-     2  alerts ...  | timelapse
-     3  alerts ...  | recordings
-     4  alerts ...  | sensor history
-     5  alerts ...  | (spare)
+     2  alerts ...  | recordings
+     3  alerts ...  | sensor history
+     4  alerts ...  | (spare)
    with the alerts card spanning rows 2 to the end and the last row `1fr`: a spanning item that touches a flexible track is
    sized by that track, so an alerts list expanded to 20 rows grows into the spare row instead of pushing a gap under the
-   timelapse. Sections that render nothing (no timelapse, no recordings) leave an empty zero-height box, and the margins live
+   recordings. Sections that render nothing (no recordings) leave an empty zero-height box, and the margins live
    on the cards INSIDE the boxes, so an empty one adds no gap. */
 .child-page__cameras { display: flex; flex-direction: column; }
 .child-page__nocam { color: var(--text-secondary); font-size: 13px; }
 @media (min-width: 1024px) {
   .app-main.child-page { max-width: 1040px; }
   .child-page {
-    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto auto auto 1fr;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto auto 1fr;
     column-gap: 20px; align-items: start;
   }
   .child-page__night { grid-column: 1; grid-row: 1; }
   .child-page__cameras { grid-column: 2; grid-row: 1; align-self: start; }
-  .child-page__timelapse { grid-column: 2; grid-row: 2; }
   .child-page__alerts { grid-column: 1; grid-row: 2 / -1; }
-  .child-page__recordings { grid-column: 2; grid-row: 3; }
-  .child-page__sensors { grid-column: 2; grid-row: 4; }
+  .child-page__recordings { grid-column: 2; grid-row: 2; }
+  .child-page__sensors { grid-column: 2; grid-row: 3; }
 }
 
 /* Child hero ("night") card — identity now, last night's sleep later. */
@@ -2220,6 +2219,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .alert-item--btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .alert-item__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
 .alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
+/* A recording that could not be saved (components/RecordingsCard.jsx, issue #276): its empty thumbnail carries a warning glyph in the
+   same muted colour the old strip tile used, so it reads as an explanation and not as an alert. */
+.alert-item__thumb--failed { color: var(--offline); }
 .alert-item__body { flex: 1; min-width: 0; display: block; }
 .alert-item__name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
 .alert-item__nametext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3070,7 +3072,7 @@ input[type='range'] {
   flex: 1;
 }
 
-/* Timelapse card on child detail (see components/TimelapseCard.jsx). The title is 15px bold with an accent icon, like the
+/* Timelapse card on a night's page, under the Timeline (see components/TimelapseCard.jsx). The title is 15px bold with an accent icon, like the
    Recent alerts title (UI refresh PR D): the canonical 12px grey .card-title is too quiet for the one heading of a card
    whose body is a picture. Flex centring keeps the icon level with the word (owner screenshot, 2026-11-01). */
 .timelapse-card .card-title {
@@ -3084,31 +3086,6 @@ input[type='range'] {
 }
 .timelapse-card .card-title svg, .alert-list__title svg { color: var(--accent-line); }
 .alert-list__title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
-/* The Recordings card is ONE row (components/RecordingsCard.jsx): icon, title, the newest recording's time, a chevron that
-   turns down while the thumbnails below it are open. The row is the whole card's top, so the card carries no padding of
-   its own and the row is 56px high (past the 44px touch target). */
-.recordings-card { padding: 0; overflow: hidden; }
-.recordings-row {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 0 16px;
-  border: none; background: none; font: inherit; color: var(--text-primary); text-align: left; cursor: pointer;
-}
-@media (hover: hover) { .recordings-row:hover { background: var(--child-action-hover); } }
-.recordings-row:active { background: var(--child-action-active); }
-.recordings-row:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
-.recordings-row__icon { flex: none; color: var(--accent-line); }
-.recordings-row__title { font-size: 15px; font-weight: 700; }
-/* One line at any width: at 320px the time wrapped ("4:14" over "AM") and broke the 56px row's rhythm; it now truncates instead. */
-/* The zone suffix an away-from-home viewer sees ("GMT+11") is its own item and is never cut off. When time and zone do not both fit
-   beside the title (320px) the zone drops under the time, right-aligned, inside the row's 56px, rather than the time being
-   truncated to "Fri 4:1..." (the first attempt: the time shrank first, and lost its AM/PM, which is worse than a second line).
-   Only the time ends in an ellipsis, and only when it alone is wider than the room. */
-.recordings-row__latest { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 0.3em; text-align: right; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
-.recordings-row__when { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.recordings-row__zone { flex: none; }
-.recordings-row__chev { flex: none; color: var(--text-secondary); transition: transform 0.15s ease; }
-.recordings-row[aria-expanded='true'] .recordings-row__chev { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { .recordings-row__chev { transition: none; } }
-.recordings-card .rec-strip { padding: 4px 16px 16px; scroll-padding-inline: 16px; }
 .timelapse-hero {
   position: relative;
   display: block;
@@ -3127,7 +3104,7 @@ input[type='range'] {
   object-fit: cover;
   display: block;
 }
-.timelapse-hero:focus-visible, .timelapse-strip__item:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.timelapse-hero:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .timelapse-play {
   position: absolute;
   top: 50%;
@@ -3150,51 +3127,6 @@ input[type='range'] {
   padding: 3px 8px;
   border-radius: 8px;
   font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.55);
-}
-.timelapse-strip {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
-/* The strip: small thumbnails, four in view (scrolling for the rest), each labelled with its WEEKDAY over the picture. The label
-   sits on a dark chip because a thumbnail can be any brightness, and the tile is positioned so that chip stays inside it. */
-.timelapse-strip__item {
-  position: relative;
-  flex: 0 0 calc((100% - 24px) / 4);
-  aspect-ratio: 3 / 2;
-  padding: 0;
-  border: 2px solid transparent;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--bg-elevated-2);
-  /* The 2px transparent border would otherwise show this inset fill through it: a near-black outline round every unselected
-     tile on the dark theme (owner, 11-13). Clipping the fill to the padding box leaves the border the card's own colour. */
-  background-clip: padding-box;
-  cursor: pointer;
-  color: var(--text-secondary);
-}
-.timelapse-strip__item--active {
-  border-color: var(--accent-line);
-  color: var(--text-primary);
-}
-.timelapse-strip__item img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.timelapse-strip__item span {
-  position: absolute;
-  left: 4px;
-  bottom: 4px;
-  padding: 1px 6px;
-  border-radius: 6px;
-  font-size: 11px;
   font-weight: 600;
   color: #fff;
   background: rgba(0, 0, 0, 0.55);
@@ -3540,40 +3472,6 @@ input[type='range'] {
   background: var(--bg-elevated);
 }
 
-
-/* The strip previews the next recording at phone width and snaps each picture into view. Its own positioned
-   tile keeps the play badge on the recording (the timelapse strip has different geometry). */
-.rec-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x mandatory; }
-.rec-strip__item {
-  position: relative; /* the containing block for the play glyph and time chip */
-  flex: 0 0 min(72%, 224px); aspect-ratio: 16 / 9; scroll-snap-align: start; padding: 0;
-  border: 2px solid transparent; border-radius: 8px; overflow: hidden;
-  background: var(--bg-elevated); color: var(--text-primary); cursor: pointer;
-}
-@media (hover: hover) { .rec-strip__item:hover { border-color: var(--accent-line); } }
-.rec-strip__item:active { border-color: var(--accent-line); }
-.rec-strip__item:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
-.rec-strip__item img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
-.rec-strip__label {
-  position: absolute; left: 5px; bottom: 5px; max-width: calc(100% - 10px); padding: 2px 6px;
-  border-radius: 6px; background: rgba(0, 0, 0, 0.66); color: #fff; font-size: 11px; font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-/* A recording that couldn't be saved (issue #276). It has no thumbnail to show, so the tile keeps the
-   same footprint as its neighbours — a shorter tile would make the strip ragged — and fills the image
-   area with a warning glyph instead. Muted rather than alarming: it is an explanation, not an alert. */
-.rec-strip__item--failed { border-style: dashed; border-color: var(--border); }
-@media (hover: hover) { .rec-strip__item--failed:hover { border-color: var(--offline); } }
-.rec-strip__failed {
-  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  background: var(--bg-elevated); color: var(--offline);
-}
-
-.rec-strip__play {
-  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 50%; background: rgba(0, 0, 0, 0.5); color: #fff; pointer-events: none;
-}
 
 /* Record button on the camera tile. Sits with the other overlay controls (see the icon-only rule
    above, which this joins) — white with a soft black glow, no chip. While recording it takes the

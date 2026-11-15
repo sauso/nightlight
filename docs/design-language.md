@@ -875,6 +875,14 @@ The top of the sleep detail page, as drawn in the UI refresh.
   from `GET /children/:id/sleep?nights=30` (the history window; the route allows 60), slices them in the browser, and renders nothing
   while loading or if the request fails. It is not shown for a child until that child's own newest night is known, so it is never
   drawn against the previous child's.
+- **Timelapse card** (`components/TimelapseCard.jsx`; owner, 2026-11-15: it moved here from the child's page). Directly **below the
+  Timeline card**, on a night that has data: a card with the same 15px bold title and accent icon as the other cards ("Timelapse"),
+  one 16:9 picture with a play mark and "Tue, 1 Sept · 42s" on it, and the player it always had (an admin can delete from there,
+  after a confirmation that it cannot be rebuilt). It shows **that night's** timelapse and nothing else: there is no strip of other
+  nights, because the night strip above already steps between nights. It renders nothing, and leaves no gap, for a night with no
+  timelapse and for a night with no data. Its accessible name starts with the printed date ("Tue, 1 Sept · 42s, play timelapse").
+  It asks for the child's timelapse list each time a night is drawn (stepping to another night passes through "Loading night…"):
+  one small request, and the card appears a moment after the night does.
 
 ### Modal (`components/Modal.jsx`)
 `ModalActions` lays out two dialog buttons as an equal-width row: a secondary Cancel or Close first, then the primary or danger action. A dialog with one action fills the row. Busy dialogs keep their existing disabled and dismiss rules.
@@ -1016,7 +1024,8 @@ events and Recent alerts (they show their error and hide the empty copy, but hav
 
 ### The child page below the night card (`pages/ChildDetail.jsx`, UI refresh PR D, 2026-11-13)
 The `.night` card is described under "Child hero card" above. Below it, in this order (which is also the DOM order, the
-reading order and the keyboard order):
+reading order and the keyboard order). The nightly **Timelapse** is not on this page: it moved to each night's page,
+under the Timeline (`components/TimelapseCard.jsx`, see "Timelapse card" under the sleep page frame; owner, 2026-11-15).
 
 1. **Camera tile** (`components/ChildCameraTile.jsx`, `.child-cam`): one **slim row** per camera of the child (about 64px
    tall, 18px radius, the dark navy gradient from `--thumb-hi`/`--thumb-lo` in both themes). It used to be a 192px tile with a large
@@ -1031,11 +1040,7 @@ reading order and the keyboard order):
    **not a live picture**: no stream is opened by opening the page. There is no "Cameras · n" heading and no Online/Offline pill or
    PTZ/TALK badges (the Cameras tab shows ONVIF, PTZ and Two-way Audio badges). Instead, one quiet muted line under the camera's name, **for every role**, says whether detection is on in words: "Motion on · Sound on", or "Motion off" / "Sound off" for what is off (from the camera's `detect_motion_enabled` and `detect_sound_enabled`; owner decision, 2026-11-13: the first version had no such line, so a caregiver could not tell). It is left out on a disabled camera and on a camera object that carries neither field. A child with no camera gets a plain card with the existing
    "No cameras assigned yet" sentence (the admin and caregiver wordings differ, as before).
-2. **Timelapse** (`components/TimelapseCard.jsx`): the card title (15px bold, accent icon), one player (the newest night, 16:9),
-   and a strip of recent nights as small thumbnails, four in view and scrolling for the rest, each labelled with its **weekday**
-   in a dark chip on the picture. A weekday repeats weekly, so the full date is the accessible name ("Show Tue, 1 Sept
-   timelapse") and the tooltip. Renders nothing at all when the child has no timelapse (no empty card).
-3. **Recent alerts** (`components/AlertList.jsx`, `.alert-list`): the newest **three**, each row 56px or more: a 56 × 40 thumbnail,
+2. **Recent alerts** (`components/AlertList.jsx`, `.alert-list`): the newest **three**, each row 56px or more: a 56 × 40 thumbnail,
    the kind (icon and word, "Motion" or "Sound") and under it the **clock time** in the home timezone ("3:12 AM"; an earlier day
    adds "Wed, 11 Nov, "; the zone label appears when the device is elsewhere, as on every time in the app). A row **with a clip**
    is one button (the whole row; accessible name "Play clip from <camera>") with a chevron; a row without one is plain, with no
@@ -1043,32 +1048,33 @@ reading order and the keyboard order):
    expands the rest in place (the page already holds the newest 20), and becomes "Show fewer". There is no alerts page to link
    to. The empty and failed states keep the title and say what happened, as before ("No alerts for <name> yet.", or the failed
    message with Retry).
-4. **Recordings** (`components/RecordingsCard.jsx`, `.recordings-row`): one 56px row, "Recordings", the newest recording's time, a
-   chevron. It is a disclosure (`aria-expanded`), closed until tapped. It opens a scrolling strip of 16:9 pictures with a peek of
-   the next one; each picture carries a short chip and a play mark: weekday and home time ("Wed 12:09 am") for a recording
-   under seven days old, the date and time ("30 Aug, 7:00 pm") from seven days on, so an old recording is not mistaken for
-   this week's. The full date and time are the accessible name and the tooltip. The row's own time uses the same short form
-   (the long form lost its AM/PM at 320px) and keeps the full one as its name and tooltip. For a viewer away from home the zone
-   suffix ("GMT+11") is its own item beside the time: at 320px, when both do not fit, **the zone drops under the time** (right-aligned,
-   inside the 56px row) rather than being cut off, and only a time that alone is wider than the row ends in an ellipsis (checked in a
-   browser at 320 and 375px, both themes). Tap a picture to play it. A failed recording has a warning mark and opens
-   its explanation instead. Older recordings stay reachable (recordings have no retention). A newest recording that failed says
-   "Couldn't be saved" on the row. Renders nothing when there are none.
-5. **Sensor history** (a camera with an MQTT topic), unchanged.
+3. **Recordings** (`components/RecordingsCard.jsx`): the same card as Recent alerts (it reuses its `.alert-list` and
+   `.alert-item` classes, so the two cannot drift apart), with the title "Recordings" and a video icon (owner, 2026-11-15: "make
+   recordings look like recent alerts"). The newest **three** recordings are listed at once, newest first, each a 56px-or-more row:
+   a 56 × 40 thumbnail with a play mark, the **camera name** (video icon and name; "Camera" when it has none) and under it the
+   **time** in the home timezone, in the same form as the alerts (time alone for today, "Wed, 11 Nov, 3:12 AM" for an earlier day,
+   the zone label when the device is elsewhere) followed by " · 30s" when the length is known. **Every row is a button with a
+   chevron**, unlike an alert row, because every recording opens something: the player, or for a failed one an explanation. Its
+   accessible name starts with the camera name and carries the time and length ("Nursery, Wed, 2 Sept, 10:00 am · 30s"); the
+   tooltip has the full home-time date. A failed recording has a warning mark in place of the picture (and requests no image),
+   says "Couldn't be saved" on the name line, and shows its camera and time on the second line. **See all recordings** (44px, only
+   when there are more than three) shows the rest in place and becomes "Show fewer"; the list is the whole list the server
+   returns, so nothing more is requested. Older recordings stay reachable that way (recordings have no retention). Renders
+   nothing when there are none.
+4. **Sensor history** (a camera with an MQTT topic), unchanged.
 
-On these child-page cards, the alerts disclosure and Recordings row keep the card colour when open. A pointer hover gives them
+On these child-page cards, the alert and recording rows and the "See all" rows keep the card colour at rest. A pointer hover gives them
 a light tint, and pressing gives a slightly stronger one; on a touch screen there is no lingering hover fill after a tap.
-Alert rows with clips use the same treatment. Focus rings stay visible for keyboard users. Timelapse and recording pictures
-also show a focus ring. The camera tile's controls retain their own light-on-dark colours and only show hover feedback to a
-hovering pointer.
+Focus rings stay visible for keyboard users. The camera tile's controls retain their own light-on-dark colours and only show
+hover feedback to a hovering pointer.
 
 From **1024px** the same elements sit in two columns by grid placement (never `order`): the night card then recent alerts on the
-left; the camera, timelapse, recordings and sensor history on the right. The camera column stretches to the night card's height.
+left; the camera, recordings and sensor history on the right. The camera column stretches to the night card's height.
 The page is 1040px wide at that size (the other pages stay at 720px). Cards take their margin on the inside of their wrapper, so
 an absent section leaves no gap.
 
 Known trade-off (accepted in review): because the DOM stays in phone order, at 1024px and wider the keyboard and reading order
-(night card, camera, timelapse, alerts, recordings) no longer matches the screen order in the left column (night card, then
+(night card, camera, alerts, recordings) no longer matches the screen order in the left column (night card, then
 alerts), so Tab leaves the night card for the camera tile in the right column before reaching the alerts under it.
 
 Known limits: the layout has been checked in a desktop browser at 375 and 1280 wide, light and dark; it has not been seen on a
