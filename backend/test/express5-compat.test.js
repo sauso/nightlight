@@ -10,6 +10,7 @@ import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { listenOrFail } from '../src/lib/listenOrFail.js';
 import { defaultBody } from '../src/middleware/defaultBody.js';
 
@@ -126,6 +127,12 @@ describe('defaultBody: req.body is an object whatever was sent (Express 4 gave {
 // with res.sendFile exactly as index.js does, from a folder under a DOT-FOLDER: send 1.x refuses a file whose
 // absolute path has any dot-folder in it unless `root` is given (a deep link was a 404 for a checkout under
 // `.claude/worktrees/` or `~/.local/` before index.js passed `root`).
+//
+// `limited` is a rate limiter in front of the two throwaway routes below. Nothing here needs one (the apps live for one test, on
+// loopback); CodeQL's js/missing-rate-limiting flags any route that reaches the file system, and it flagged these two when this
+// file first reached a release PR (0.48.0). The limit is far above what the tests send, and `validate: false` skips the proxy
+// checks that need a real request IP, as in async-errors.test.js.
+const limited = rateLimit({ limit: 1000, validate: false });
 describe('the SPA catch-all pattern /{*splat}', () => {
   test('/ and deep paths reach the page, from under a dot-folder; /api/* is a JSON 404', async () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-spa-'));
@@ -133,7 +140,7 @@ describe('the SPA catch-all pattern /{*splat}', () => {
     fs.mkdirSync(publicDir, { recursive: true });
     fs.writeFileSync(path.join(publicDir, 'index.html'), '<spa>');
     const app = express();
-    app.get('/{*splat}', (req, res) => {
+    app.get('/{*splat}', limited, (req, res) => {
       if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
       res.sendFile('index.html', { root: publicDir });
     });
@@ -158,7 +165,7 @@ describe('the SPA catch-all pattern /{*splat}', () => {
     fs.mkdirSync(publicDir, { recursive: true });
     fs.writeFileSync(path.join(publicDir, 'index.html'), '<spa>');
     const app = express();
-    app.get('/{*splat}', (req, res) => res.sendFile(path.join(publicDir, 'index.html'), (err) => { if (err) res.status(err.status || 500).end(); }));
+    app.get('/{*splat}', limited, (req, res) => res.sendFile(path.join(publicDir, 'index.html'), (err) => { if (err) res.status(err.status || 500).end(); }));
     const s = await listen(app);
     try {
       const r = await request(s.address().port, { path: '/settings' });

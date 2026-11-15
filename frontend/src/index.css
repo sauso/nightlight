@@ -2520,6 +2520,11 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   content: '';
   position: absolute;
   inset: -10px;
+  /* z-index: 1 on purpose. The camera name's row (.camera-tile__title) is position: relative, so it paints over any positioned
+     element that comes BEFORE it in the page and has no z-index, and the next flex item starts only 8px after the handle, so it
+     covered the last 2px of this 10px reach: a tap 21px from the handle's centre landed on the name, not the handle
+     (e2e 14-touch-targets.spec.js, which runs only on PRs to main: found on the 0.48.0 release PR). */
+  z-index: 1;
 }
 
 .drag-handle:active {
