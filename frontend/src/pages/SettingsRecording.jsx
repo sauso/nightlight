@@ -311,7 +311,7 @@ export default function SettingsRecording() {
               Oldest clips are deleted once either limit is passed (0 turns that limit off). The alert
               and its snapshot stay — only the video is removed. <strong>This does not apply to your own
               recordings below</strong>, which are kept until you delete them.
-              {' '}Unprotected alerts in Recent alerts, with their clips and pictures, are also removed after 30 days or beyond 2,000 unprotected entries, whatever you set here.
+              {' '}Whatever you set here, Recent alerts keeps at most 30 days and 2,000 unprotected entries: older unprotected alerts, with their clips and pictures, are removed as new alerts are recorded.
             </div>
           </div>
 

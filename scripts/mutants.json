@@ -26347,10 +26347,19 @@
   {
     "label": "#934 clear history protected clip selection",
     "file": "backend/src/lib/detectionEvents.js",
-    "find": "const clipsToClear = db.prepare('SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL').all();",
+    "find": "const clipsToClear = db.prepare(`SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL\n    AND clip_path NOT IN (SELECT clip_path FROM detection_events WHERE protected = 1 AND clip_path IS NOT NULL)`).all();",
     "replace": "const clipsToClear = db.prepare('SELECT clip_path FROM detection_events WHERE clip_path IS NOT NULL').all();",
     "expect": "killed",
     "tests": ["detection-events.test.js"],
     "namePattern": "#934 clearDetectionEvents removes every unprotected media path"
+  },
+  {
+    "label": "#934 clear history shared protected clip guard removed",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "\n    AND clip_path NOT IN (SELECT clip_path FROM detection_events WHERE protected = 1 AND clip_path IS NOT NULL)",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["detection-events.test.js"],
+    "namePattern": "#934 clearDetectionEvents keeps a clip shared with a protected alert"
   }
 ]

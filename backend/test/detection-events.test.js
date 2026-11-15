@@ -156,7 +156,25 @@ test('#934 clearDetectionEvents removes every unprotected media path and snapsho
   assert.equal(fs.existsSync(lockedSnapshot), true);
 });
 
-test('#934 clearDetectionEvents removes a clip that finishes after its pending row was cleared', () => {
+test('#934 clearDetectionEvents keeps a clip shared with a protected alert', () => {
+  const open = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  const locked = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  const rel = makeClipFile('clear-934-shared.mp4');
+  const file = path.join(CLIPS_DIR, rel);
+  const thumb = file.replace(/\.mp4$/, '.jpg');
+  fs.writeFileSync(thumb, 'thumbnail');
+  ev.setClipReady(open, rel, 5, 100);
+  ev.setClipReady(locked, rel, 5, 100);
+  db.prepare('UPDATE detection_events SET protected = 1 WHERE id = ?').run(locked);
+  // The deleted row must not unlink media still named by the surviving protected row.
+  assert.equal(ev.clearDetectionEvents(), 1);
+  assert.equal(rowOf(open), undefined);
+  assert.equal(rowOf(locked).clip_path, rel);
+  assert.equal(fs.existsSync(file), true);
+  assert.equal(fs.existsSync(thumb), true);
+});
+
+test('#934 clearDetectionEvents pending-clip guard uses existing setClipReady cleanup after its row was cleared', () => {
   const id = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
   ev.markClipPending(id);
   assert.equal(rowOf(id).clip_path, null);

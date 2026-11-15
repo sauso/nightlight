@@ -291,7 +291,9 @@ export function clearDetectionEvents() {
   const doomed = db.prepare('SELECT id FROM detection_events WHERE protected = 0').all();
   // #934: collect paths before deleting rows, as prune() does. A pending recording normally has no
   // clip_path yet; if it finishes after the row is gone, setClipReady() removes that late clip.
-  const clipsToClear = db.prepare('SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL').all();
+  // A protected row can name the same file: keep any clip still referenced after the clear.
+  const clipsToClear = db.prepare(`SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL
+    AND clip_path NOT IN (SELECT clip_path FROM detection_events WHERE protected = 1 AND clip_path IS NOT NULL)`).all();
   const changes = db.prepare('DELETE FROM detection_events WHERE protected = 0').run().changes;
   for (const { id } of doomed) unlinkSnapshot(id);
   for (const { clip_path } of clipsToClear) unlinkClip(clip_path);

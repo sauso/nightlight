@@ -164,6 +164,20 @@ test('count backstop counts only unprotected rows in all three inner populations
   for (const p of [within.file, within.snapshot, locked.file, locked.snapshot]) assert.ok(fs.existsSync(p));
 });
 
+test('clear history retains protected alert and snapshot', async () => {
+  const open = alert('open');
+  const locked = alert('locked', { protectedClip: true });
+  const orphan = path.join(ev.DETECTION_SNAPSHOT_DIR, '999999.jpg');
+  fs.writeFileSync(orphan, 'orphan');
+  assert.equal(ev.clearDetectionEvents(), 1);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(row(open.id), undefined);
+  assert.equal(fs.existsSync(open.snapshot), false);
+  assert.equal(fs.existsSync(orphan), false);
+  assert.equal(row(locked.id).protected, 1);
+  for (const p of [locked.file, locked.thumb, locked.snapshot]) assert.ok(fs.existsSync(p));
+});
+
 test('#934 DELETE /api/cameras/alerts returns the clear count, refuses a caregiver, and retains protected media', async () => {
   const open = alert('open');
   const locked = alert('locked', { protectedClip: true });
