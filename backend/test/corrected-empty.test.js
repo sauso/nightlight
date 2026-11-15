@@ -331,5 +331,14 @@ test('★ golden: nothing a correction does not touch has moved (numbers from th
     // Fails on purpose: a run that writes the file has compared nothing, so it must never read as a pass.
     assert.fail(`wrote ${GOLDEN.pathname}; this run checked nothing. Unset NIGHTLIGHT_WRITE_GOLDEN, re-run, and review the fixture's diff.`);
   }
-  assert.deepEqual(out, JSON.parse(fs.readFileSync(GOLDEN, 'utf8')));
+  const golden = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'));
+  // #355: this hand-planted old review has no minute snapshot. Its detector
+  // row and fallback asleep total stay golden; the three wake figures are
+  // deliberately unavailable instead of contradicting the moved span.
+  for (const key of ['awake_minutes', 'wake_count', 'longest_stretch_minutes']) {
+    assert.equal(out['ok, corrected'].overlaid[key], null);
+    delete out['ok, corrected'].overlaid[key];
+    delete golden['ok, corrected'].overlaid[key];
+  }
+  assert.deepEqual(out, golden);
 });

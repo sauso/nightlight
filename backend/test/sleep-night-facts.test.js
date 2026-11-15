@@ -35,9 +35,13 @@ import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, 
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
-const { computeNight, computeAndStoreNight, parseSummaryFacts, lastCompletedNightDate, currentNightDate } =
+const { computeNight, computeAndStoreNight, parseSummaryFacts, lastCompletedNightDate, currentNightDate, SLEEP_THRESHOLDS } =
   await import('../src/lib/sleepAnalysis.js');
-const { applyCorrection, saveNightReview } = await import('../src/lib/sleepReviews.js');
+const { applyCorrection, saveNightReview, correctionSnapshot } = await import('../src/lib/sleepReviews.js');
+const { refreshCorrectionSnapshots } = await import('../src/lib/sleepReviews.js');
+const { correctedSpanFigures } = await import('../src/lib/correctedSpan.js');
+const { scoreNight, toScoringInput } = await import('../src/lib/sleepScore.js');
+const { sleepBaseline } = await import('../src/lib/sleepBaseline.js');
 const { TRANSITION } = await import('../src/lib/bedTransitions.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
 
@@ -158,6 +162,7 @@ const segmentAt = (night, when) => {
 let server;
 let adminToken;
 const get = (path) => call(`${server.url}/api/children/${CHILD}${path}`, { token: adminToken });
+const putReview = (body) => call(`${server.url}/api/children/${CHILD}/review/${DATE}`, { method: 'PUT', token: adminToken, body });
 
 before(async () => {
   db.prepare(`INSERT INTO settings (id, timezone) VALUES ('app', ?)
@@ -165,6 +170,238 @@ before(async () => {
   const admin = makeUser(db, { id: 'u-a', username: 'admin', role: 'admin' });
   adminToken = signToken({ sub: admin.id, sid: makeSession(db, admin.id), role: 'admin', username: 'admin' });
   server = await mountRouter('/api/children', childrenRouter);
+});
+
+describe('#355 corrected span figures', () => {
+  test('real detector basis clips earlier wake and keeps exact totals and bounded longest', (t) => {
+    const night = nightWith(t, { bed: [WAKE_23], unwatched: [[at(2, 0, 1), at(2, 10, 1)]] }, { includeTimeline: true });
+    const wake = sqlTime(at(5, 0, 1));
+    const f = correctedSpanFigures(night.span_basis, night.onset_at, wake);
+    assert.equal(f.asleep_minutes + f.awake_minutes + f.unknown_minutes,
+      (Date.parse(`${wake.replace(' ', 'T')}Z`) - Date.parse(`${night.onset_at.replace(' ', 'T')}Z`)) / 60000);
+    assert.ok(f.longest_stretch_minutes <= f.asleep_minutes);
+    assert.ok(f.wake_count <= f.awake_minutes);
+    assert.ok(f.unknown_minutes >= 10);
+    assert.equal(f.wakes.length, f.wake_count);
+  });
+
+  test('later onset skips an early wake; onset clipping keeps awake minutes but no new wake-up', (t) => {
+    const night = nightWith(t, { bed: [WAKE_23] }, { includeTimeline: true });
+    const basis = night.span_basis;
+    const before = correctedSpanFigures(basis, night.onset_at, night.wake_at);
+    const cut = correctedSpanFigures(basis, sqlTime(at(23, 2)), night.wake_at);
+    const skipped = correctedSpanFigures(basis, sqlTime(at(23, 7)), night.wake_at);
+    assert.ok(cut.awake_minutes > skipped.awake_minutes);
+    assert.equal(cut.wake_count, skipped.wake_count, 'a run cut at onset is awake, not a wake-up');
+    assert.ok(before.wake_count > skipped.wake_count);
+  });
+
+  test('wake-end clipping counts five minutes but not a shorter stir', (t) => {
+    assert.equal(SLEEP_THRESHOLDS.WAKE_ACTIVE_MIN, 5, '#355 pure clip rule must match the detector minimum');
+    const night = nightWith(t, { bed: [WAKE_23] }, { includeTimeline: true });
+    const short = correctedSpanFigures(night.span_basis, night.onset_at, sqlTime(at(23, 3)));
+    const enough = correctedSpanFigures(night.span_basis, night.onset_at, sqlTime(at(23, 5)));
+    assert.equal(short.wake_count, 0);
+    assert.ok(short.awake_minutes > 0);
+    assert.equal(enough.wake_count, 1);
+  });
+
+  test('a corrected span wholly inside a wake has no asleep stretch or counted wake-up', (t) => {
+    const night = nightWith(t, { bed: [WAKE_23] }, { includeTimeline: true });
+    const f = correctedSpanFigures(night.span_basis, sqlTime(at(23, 1)), sqlTime(at(23, 4)));
+    assert.equal(f.asleep_minutes, 0);
+    assert.equal(f.awake_minutes, 3);
+    assert.equal(f.wake_count, 0);
+    assert.equal(f.longest_stretch_minutes, 0);
+  });
+
+  test('unknown covers an actual gap and both outside-basis directions; seconds floor exactly', (t) => {
+    const night = nightWith(t, { unwatched: [[at(2, 0, 1), at(2, 10, 1)]] }, { includeTimeline: true });
+    const basis = night.span_basis;
+    const start = sqlTime(new Date(Date.parse(`${basis.start_at.replace(' ', 'T')}Z`) - 10 * 60000));
+    const end = sqlTime(new Date(Date.parse(`${basis.end_at.replace(' ', 'T')}Z`) + 10 * 60000));
+    const full = correctedSpanFigures(basis, start, end);
+    assert.ok(full.unknown_minutes >= 30);
+    const seconds = correctedSpanFigures(basis, `${night.onset_at.slice(0, 17)}37`, `${night.wake_at.slice(0, 17)}59`);
+    const floored = correctedSpanFigures(basis, night.onset_at, night.wake_at);
+    assert.deepEqual(seconds, floored);
+  });
+
+  test('post-window wake uses extension arrays; a later corrected wake includes morning awake', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: noon() });
+    layNight({ bed: [PUT_DOWN, [at(7, 40, 1), at(7, 50, 1)]] });
+    insertTransition(TRANSITION.OUT_OF_BED, at(7, 50, 1, 30));
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    assert.equal(hhmm(night.wake_at), '07:50');
+    assert.ok(night.span_basis.end_at > night.window_end);
+    assert.equal(night.timeline.at(-1).t < night.span_basis.end_at, true);
+    const f = correctedSpanFigures(night.span_basis, night.onset_at, night.wake_at);
+    assert.ok(f.awake_minutes >= 10);
+    const later = correctedSpanFigures(night.span_basis, night.onset_at, sqlTime(at(7, 55, 1)));
+    assert.ok(later.unknown_minutes >= f.unknown_minutes + 5);
+  });
+
+  test('a wake later than the detector includes its morning run as awake time', (t) => {
+    const night = nightWith(t, { bed: [WAKE_23] }, { includeTimeline: true });
+    const earlier = correctedSpanFigures(night.span_basis, night.onset_at, night.wake_at);
+    const later = correctedSpanFigures(night.span_basis, night.onset_at, sqlTime(at(6, 45, 1)));
+    assert.ok(later.awake_minutes > earlier.awake_minutes);
+    assert.equal(later.wake_count, earlier.wake_count + 1);
+  });
+
+  test('random spans on one real basis preserve all figure invariants', (t) => {
+    const night = nightWith(t, { bed: [WAKE_23, WAKE_02], unwatched: [[at(1, 0, 1), at(1, 7, 1)]] }, { includeTimeline: true });
+    const base = Date.parse(`${night.span_basis.start_at.replace(' ', 'T')}Z`);
+    let seed = 355;
+    for (let j = 0; j < 120; j++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const a = seed % 1100;
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const b = a + 1 + (seed % 200);
+      const f = correctedSpanFigures(night.span_basis, sqlTime(new Date(base + a * 60000)), sqlTime(new Date(base + b * 60000)));
+      assert.equal(f.asleep_minutes + f.awake_minutes + f.unknown_minutes, b - a);
+      assert.ok(f.longest_stretch_minutes <= f.asleep_minutes);
+      assert.ok(f.wake_count <= f.awake_minutes);
+      assert.ok(f.wakes.reduce((sum, w) => sum + w.minutes, 0) <= f.awake_minutes);
+    }
+  });
+
+  test('snapshot agrees on stored and fresh reads, invalidates on time or detector revision, and backfills', (t) => {
+    nightWith(t, { bed: [WAKE_23] });
+    computeAndStoreNight(CHILD, DATE);
+    const first = sqlTime(at(5, 0, 1));
+    saveNightReview(CHILD, DATE, { trueWakeAt: first });
+    const review = db.prepare('SELECT * FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE);
+    assert.ok(review.span_figures);
+    const snapshot = JSON.parse(review.span_figures);
+    const stored = applyCorrection(CHILD, storedRow());
+    const fresh = applyCorrection(CHILD, computeNight(CHILD, DATE, { includeTimeline: true }));
+    for (const key of ['asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes']) {
+      assert.equal(stored[key], snapshot[key], `snapshot must be the authority for ${key}`);
+      assert.equal(fresh[key], stored[key], key);
+    }
+    assert.ok(fresh.segments.length > 0 && fresh.wakes.length > 0);
+    assert.equal(fresh.wakes.at(-1).start_at, first, 'morning row begins at the corrected wake');
+    assert.equal(segmentAt(fresh, at(4, 59, 1)), 'asleep');
+    assert.equal(segmentAt(fresh, at(5, 0, 1)), 'awake');
+    db.prepare('UPDATE sleep_reviews SET span_figures = json_set(span_figures, ? , ?) WHERE child_id = ? AND night_date = ?')
+      .run('$.wake_at', sqlTime(at(4, 0, 1)), CHILD, DATE);
+    assert.equal(applyCorrection(CHILD, storedRow()).wake_count, null);
+    assert.equal(refreshCorrectionSnapshots(noon()), 1);
+    assert.equal(applyCorrection(CHILD, storedRow()).wake_count, stored.wake_count);
+    db.prepare('UPDATE sleep_nights SET computed_at = ? WHERE child_id = ? AND night_date = ?')
+      .run(sqlTime(at(12, 5, 1)), CHILD, DATE);
+    assert.equal(applyCorrection(CHILD, storedRow()).wake_count, null);
+    assert.equal(refreshCorrectionSnapshots(noon()), 1);
+    assert.equal(applyCorrection(CHILD, storedRow()).wake_count, stored.wake_count);
+    saveNightReview(CHILD, DATE, { trueWakeAt: null });
+    assert.equal(db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE).span_figures, null);
+  });
+
+  test('unavailable correction figures keep scoring and baseline finite', (t) => {
+    nightWith(t, { bed: [WAKE_23] });
+    computeAndStoreNight(CHILD, DATE);
+    saveNightReview(CHILD, DATE, { trueWakeAt: sqlTime(at(5, 0, 1)) });
+    db.prepare('UPDATE sleep_reviews SET span_figures = NULL WHERE child_id = ? AND night_date = ?').run(CHILD, DATE);
+    const overlaid = applyCorrection(CHILD, storedRow());
+    assert.equal(overlaid.awake_minutes, null);
+    assert.equal(overlaid.wake_count, null);
+    assert.equal(overlaid.longest_stretch_minutes, null);
+    const rawDetail = computeNight(CHILD, DATE, { includeTimeline: true });
+    const unavailableDetail = applyCorrection(CHILD, rawDetail);
+    assert.deepEqual(unavailableDetail.wakes, rawDetail.wakes);
+    assert.deepEqual(unavailableDetail.segments, rawDetail.segments);
+    const span = (Date.parse(`${overlaid.wake_at.replace(' ', 'T')}Z`)
+      - Date.parse(`${overlaid.onset_at.replace(' ', 'T')}Z`)) / 60000;
+    assert.equal(overlaid.asleep_minutes,
+      Math.max(0, span - (storedRow().awake_minutes ?? 0) - (storedRow().unknown_minutes ?? 0)));
+    const input = toScoringInput(overlaid);
+    assert.equal(input.metrics.awake_minutes.usable, false);
+    const baseline = sleepBaseline(CHILD, overlaid);
+    const result = scoreNight(overlaid, baseline, 24);
+    if (result.score != null) assert.ok(Number.isFinite(result.score));
+    for (const value of Object.values(baseline.metrics)) {
+      if (value.median != null) assert.ok(Number.isFinite(value.median));
+    }
+  });
+
+  test('PUT stores, replaces and clears the correction snapshot in the review row', async (t) => {
+    nightWith(t, { bed: [WAKE_23] });
+    computeAndStoreNight(CHILD, DATE);
+    const first = await putReview({ true_wake_local: '05:00' });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const one = JSON.parse(first.body.review.span_figures);
+    assert.equal(one.wake_at, sqlTime(at(5, 0, 1)));
+    const second = await putReview({ true_wake_local: '04:00' });
+    assert.equal(second.status, 200, JSON.stringify(second.body));
+    const two = JSON.parse(second.body.review.span_figures);
+    assert.equal(two.wake_at, sqlTime(at(4, 0, 1)));
+    assert.notEqual(two.asleep_minutes, one.asleep_minutes);
+    const cleared = await putReview({ true_wake_local: null });
+    assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
+    assert.equal(cleared.body.review.span_figures, null);
+    const unchanged = await putReview({ true_wake_local: hhmm(storedRow().wake_at) });
+    assert.equal(unchanged.status, 200, JSON.stringify(unchanged.body));
+    assert.equal(unchanged.body.review.span_figures, null);
+  });
+
+  test('nightly refresh fills an unscored correction and skips an old date', (t) => {
+    nightWith(t, { bed: [WAKE_23] });
+    saveNightReview(CHILD, DATE, { trueWakeAt: sqlTime(at(5, 0, 1)) });
+    assert.equal(db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE).span_figures, null);
+    computeAndStoreNight(CHILD, DATE);
+    assert.equal(refreshCorrectionSnapshots(noon() + 31 * 86400000), 0);
+    assert.equal(refreshCorrectionSnapshots(noon()), 1);
+    assert.ok(db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE).span_figures);
+    assert.equal(refreshCorrectionSnapshots(noon()), 0);
+  });
+
+  test('saved correction figures still reach the detail page after raw samples expire', async (t) => {
+    nightWith(t, { bed: [WAKE_23] });
+    computeAndStoreNight(CHILD, DATE);
+    saveNightReview(CHILD, DATE, { trueWakeAt: sqlTime(at(5, 0, 1)) });
+    const card = applyCorrection(CHILD, storedRow());
+    db.prepare('DELETE FROM activity_samples').run();
+    const detail = await get(`/sleep/${DATE}?detail=1`);
+    assert.equal(detail.status, 200, JSON.stringify(detail.body));
+    assert.equal(detail.body.status, 'ok');
+    for (const key of ['asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes']) {
+      assert.equal(detail.body[key], card[key], key);
+    }
+    assert.equal(detail.body.timeline, undefined, 'timestamps alone do not manufacture a timeline');
+    assert.equal(detail.body.score_source, 'stored');
+  });
+
+  test('detail wake list drops a wake before the corrected onset', (t) => {
+    nightWith(t, { bed: [WAKE_23] });
+    computeAndStoreNight(CHILD, DATE);
+    saveNightReview(CHILD, DATE, { trueOnsetAt: sqlTime(at(23, 7)) });
+    const detail = applyCorrection(CHILD, computeNight(CHILD, DATE, { includeTimeline: true }));
+    assert.equal(detail.wake_count, 0);
+    assert.equal(detail.wakes.length, 1, 'only the morning row remains');
+    assert.equal(detail.wakes[0].start_at, detail.wake_at);
+  });
+
+  test('no snapshot is made for empty, no-data, open or basis-free nights', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: noon() });
+    const review = { true_wake_at: sqlTime(at(5, 0, 1)) };
+    layNight({ still: () => STILL_EMPTY });
+    computeAndStoreNight(CHILD, DATE);
+    assert.equal(correctionSnapshot(CHILD, DATE, review), null, 'empty');
+    clearNight();
+    computeAndStoreNight(CHILD, DATE);
+    assert.equal(correctionSnapshot(CHILD, DATE, review), null, 'no data');
+    clearNight();
+    layNight({ bed: [PUT_DOWN, MORNING, WAKE_23] });
+    computeAndStoreNight(CHILD, DATE);
+    db.prepare('UPDATE sleep_nights SET window_end = ? WHERE child_id = ? AND night_date = ?')
+      .run(sqlTime(at(13, 0, 1)), CHILD, DATE);
+    assert.equal(correctionSnapshot(CHILD, DATE, review), null, 'window still open');
+    db.prepare('UPDATE sleep_nights SET window_end = ? WHERE child_id = ? AND night_date = ?')
+      .run(sqlTime(at(7, 0, 1)), CHILD, DATE);
+    db.prepare('DELETE FROM activity_samples').run();
+    assert.equal(correctionSnapshot(CHILD, DATE, review), null, 'no minute basis');
+  });
 });
 beforeEach(() => {
   clearNight();
@@ -621,7 +858,7 @@ function captureGoldenNights(t) {
     out[name] = {
       status: plain.status,
       plain: JSON.stringify(omit(plain, ...NEW_KEYS)),
-      detail_sha256: createHash('sha256').update(JSON.stringify(omit(detail, ...NEW_KEYS))).digest('hex'),
+      detail_sha256: createHash('sha256').update(JSON.stringify(omit(detail, ...NEW_KEYS, 'span_basis'))).digest('hex'),
       row: JSON.stringify(omit(storedRow(), 'id', ...NEW_KEYS)),
     };
   }

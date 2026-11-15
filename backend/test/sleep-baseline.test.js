@@ -197,14 +197,15 @@ describe('which figures of a qualifying night count', () => {
     review(back(1), { true_wake_at: `${TARGET} 05:30:00` });
     // And only the put-down on another: nothing about the sleep changed, so everything of it still counts.
     review(back(2), { true_in_bed_at: `${back(2)} 19:00:00` });
-    // And a wake moved by ten minutes on a third (06:30 to 06:20): within the 15-minute tolerance, so its longest
-    // stretch and stir count still count (the counts below would be 5, not 6, if any change dropped them).
+    // And a wake moved by ten minutes on a third (06:30 to 06:20). These
+    // hand-planted review rows have no #355 snapshots: their longest stretch
+    // is unavailable, while the unchanged stir count remains available.
     review(back(3), { true_wake_at: `${back(2)} 06:20:00` });
     const b = baseline();
     assert.equal(b.nights, 7);
     assert.equal(b.metrics.asleep.n, 7);
-    assert.equal(b.metrics.longest_stretch.n, 6);
-    assert.equal(b.metrics.longest_share.n, 6);
+    assert.equal(b.metrics.longest_stretch.n, 5);
+    assert.equal(b.metrics.longest_share.n, 5);
     assert.equal(b.metrics.stir_rate.n, 6);
     // The wake clock takes the parent's 05:30 (1050): six nights at 1110 and one at 1050.
     assert.deepEqual([b.metrics.wake_clock.n, b.metrics.wake_clock.median], [7, 1110]);

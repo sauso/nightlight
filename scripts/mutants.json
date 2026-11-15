@@ -8360,7 +8360,7 @@
   {
     "label": "in-bed/lock A1: the in-bed-only overlay falls through to the span derivation (asleep_minutes re-derived)",
     "file": "backend/src/lib/sleepReviews.js",
-    "find": "  if (!onsetChanged && !wakeChanged) return out;",
+    "find": "  if (!onsetChanged && !wakeChanged && !snapshot) return out;",
     "replace": "  // mutant: in-bed-only falls through",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
@@ -8589,12 +8589,12 @@
     "replace": "  // mutant: no early lock check",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
-    "namePattern": "recomputes NOTHING"
+    "namePattern": "keeps the stored detector night locked"
   },
   {
     "label": "in-bed/lock fix A15: an unchanged confirmed asleep/wake re-derives the asleep total (the UI's Put-down save changes it)",
     "file": "backend/src/lib/sleepReviews.js",
-    "find": "  if (!onsetChanged && !wakeChanged) return out;",
+    "find": "  if (!onsetChanged && !wakeChanged && !snapshot) return out;",
     "replace": "  if (!r.true_onset_at && !r.true_wake_at) return out;",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
@@ -8767,8 +8767,8 @@
   {
     "label": "in-bed/lock fix2 R1: the store-first compute runs AFTER applyVerdicts again (a compute that throws 500s a save whose verdicts were written)",
     "file": "backend/src/routes/children.js",
-    "find": "  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);\r\n\r\n  // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside\r\n  // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.\r\n  // Against `shown`, the list the page was built from: the store-first above may just have re-saved the night with\r\n  // today's settings, and a fresh decision would then refuse the page's own events (#361 PR 4b; see applyVerdicts).\r\n  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons, shown);\r\n  if (check.error) return res.status(400).json({ error: check.error });",
-    "replace": "  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons, shown);\r\n  if (check.error) return res.status(400).json({ error: check.error });\r\n  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);",
+    "find": "  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);",
+    "replace": "  applyVerdicts(req.params.id, req.params.date, verdicts, reasons, shown);\r\n  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "save-time compute throws"
@@ -8776,8 +8776,8 @@
   {
     "label": "in-bed/lock fix2 R2: the route ALSO runs saveNightReview's store-first step (every first correction computes the night twice)",
     "file": "backend/src/routes/children.js",
-    "find": "saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false, actor, answered });",
-    "replace": "saveNightReview(req.params.id, req.params.date, patch, { actor, answered });",
+    "find": "saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false, actor, answered, spanFigures });",
+    "replace": "saveNightReview(req.params.id, req.params.date, patch, { actor, answered, spanFigures });",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "save-time compute throws"
@@ -26406,5 +26406,86 @@
     "expect": "killed",
     "tests": ["detection-events.test.js"],
     "namePattern": "#934 clearDetectionEvents keeps a clip shared with a protected alert"
+  },
+  {
+    "label": "#355-F7 clip wake run to corrected span",
+    "file": "backend/src/lib/correctedSpan.js",
+    "find": "    const to = Math.min(b, wake);",
+    "replace": "    const to = b;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "wake-end clipping counts five minutes"
+  },
+  {
+    "label": "#355-F7 onset-clipped run is not a wake-up",
+    "file": "backend/src/lib/correctedSpan.js",
+    "find": "    if (a < onset || (b > wake && to - from < WAKE_ACTIVE_MIN)) continue;",
+    "replace": "    if (b > wake && to - from < WAKE_ACTIVE_MIN) continue;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "later onset skips an early wake"
+  },
+  {
+    "label": "#355-F7 short wake-end clip is a stir",
+    "file": "backend/src/lib/correctedSpan.js",
+    "find": "    if (a < onset || (b > wake && to - from < WAKE_ACTIVE_MIN)) continue;",
+    "replace": "    if (a < onset) continue;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "wake-end clipping counts five minutes"
+  },
+  {
+    "label": "#355-F7 gap and outside minutes stay unknown",
+    "file": "backend/src/lib/correctedSpan.js",
+    "find": "    } else if (i < start || i >= end || gapRuns.some(([a, b]) => i >= a && i < b)) {",
+    "replace": "    } else if (false) {",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "unknown covers an actual gap"
+  },
+  {
+    "label": "#355-F7 post-window extension belongs in basis",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    const basisEnd = Math.max(totalMin, sleepEnd);",
+    "replace": "    const basisEnd = totalMin;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "post-window wake uses extension arrays"
+  },
+  {
+    "label": "#355-F7 snapshot requires matching corrected times",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "snapshot.onset_at === onset && snapshot.wake_at === wake",
+    "replace": "true",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "snapshot agrees on stored and fresh reads"
+  },
+  {
+    "label": "#355-F7 snapshot requires matching stored detector revision",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "snapshot.night_computed_at === stored?.computed_at",
+    "replace": "true",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "snapshot agrees on stored and fresh reads"
+  },
+  {
+    "label": "#355-F7 snapshot figures beat fresh detector",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "out[key] = snapshot[key];",
+    "replace": "out[key] = night[key];",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "snapshot agrees on stored and fresh reads"
+  },
+  {
+    "label": "#355-F7 unavailable wake count is null",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "      out.wake_count = null;",
+    "replace": "      out.wake_count = night.wake_count;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "unavailable correction figures keep scoring"
   }
 ]

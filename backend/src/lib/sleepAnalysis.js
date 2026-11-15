@@ -1306,6 +1306,28 @@ function addSensorShadow(childId, nightDate, context, run, night) {
 // The night itself (computeNight's whole contract above), once. `run` is { nowMs, sensor } from computeNight: the clock
 // both passes share, and the shadow's sensor minutes (null on the real pass, which therefore runs exactly as before
 // #917). The pass writes `run.originMs` and `run.cutoffMs` (its minute origin and evidence cutoff) once it has them.
+// #355, Opus/Codex plan review 2026-11-16: keep the detector's counting rule
+// callable at module scope while exposing its minute basis. Its body is unchanged.
+function accumulateMetrics(inWakeArr, stateArr, from, to) {
+  let asleep = 0, awake = 0, unknown = 0, wakeCount = 0, longest = 0, run = 0, prevWake = false;
+  for (let i = from; i < to; i++) {
+    if (inWakeArr[i]) {
+      awake++;
+      if (!prevWake) wakeCount++;
+      run = 0;
+    } else if (stateArr[i] === null) {
+      unknown++;
+      run = 0;
+    } else {
+      asleep++;
+      run++;
+      if (run > longest) longest = run;
+    }
+    prevWake = inWakeArr[i];
+  }
+  return { asleep, awake, unknown, wakeCount, longest };
+}
+
 function computeNightPass(childId, nightDate, { includeTimeline = false, context = null }, run) {
   const ctx = context == null ? null : parseScoringContext(context);
   if (context != null && !ctx) {
@@ -2829,26 +2851,6 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // claiming an unbroken stretch THROUGH a minute nobody observed is exactly the kind of confident
   // claim from missing data this fix exists to stop making. `asleep_minutes` is gentler by comparison:
   // it only excludes the unknown minutes themselves, it does not also forfeit the minutes around them.
-  function accumulateMetrics(inWakeArr, stateArr, from, to) {
-    let asleep = 0, awake = 0, unknown = 0, wakeCount = 0, longest = 0, run = 0, prevWake = false;
-    for (let i = from; i < to; i++) {
-      if (inWakeArr[i]) {
-        awake++;
-        if (!prevWake) wakeCount++;
-        run = 0;
-      } else if (stateArr[i] === null) {
-        unknown++;
-        run = 0;
-      } else {
-        asleep++;
-        run++;
-        if (run > longest) longest = run;
-      }
-      prevWake = inWakeArr[i];
-    }
-    return { asleep, awake, unknown, wakeCount, longest };
-  }
-
   // ⚠️ WINDOW-BOUNDED, ALWAYS COMPUTED FIRST (issue #352). `status` (empty/no_sleep/ok) is decided from
   // THESE numbers, before the metrics extension below is ever applied — so a night's classification
   // cannot flip between runNightlySleepJob's provisional passes as more evidence arrives (issue #351's
@@ -3180,6 +3182,27 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     }
   }
   if (includeTimeline) {
+    // #355, Opus/Codex plan review 2026-11-16: the timeline stops at
+    // totalMin, but #352 can measure a later wake in metricsState/inWake.
+    // Export the final arrays' full measured range without changing any
+    // detector figure or the timeline's existing length.
+    const basisEnd = Math.max(totalMin, sleepEnd);
+    const runsOf = (present) => {
+      const runs = [];
+      for (let i = 0; i < basisEnd; ) {
+        if (!present(i)) { i++; continue; }
+        let k = i + 1;
+        while (k < basisEnd && present(k)) k++;
+        runs.push({ start_at: minuteTime(i), end_at: minuteTime(k) });
+        i = k;
+      }
+      return runs;
+    };
+    out.span_basis = {
+      start_at: minuteTime(0), end_at: minuteTime(basisEnd),
+      wake_runs: runsOf((i) => Boolean(inWake[i])),
+      gap_runs: runsOf((i) => metricsState[i] === null),
+    };
     out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : s ? 'active' : 'quiet', inWake: inWake[i], out: outAt[i] }));
 
     // The counted awakenings, with clock times + duration — powers the "where the wake-ups were" list.
@@ -4204,6 +4227,12 @@ export function runNightlySleepJob() {
       }
     }
     if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies).`);
+    // #355, Opus/Codex plan review 2026-11-16: after storing nights, backfill
+    // correction snapshots while their minute samples still exist. Dynamic
+    // import avoids the sleepReviews -> sleepAnalysis module cycle.
+    import('./sleepReviews.js')
+      .then((m) => m.refreshCorrectionSnapshots())
+      .catch((e) => logger.error(`[sleep] correction snapshot refresh failed: ${e.message}`));
     // Which of these actually go out, and under what name, is decided per child inside the two functions (#397, #398).
     if (fresh.length > 0) notifySleepReports(fresh);
     if (followups.length > 0) notifySleepReportUpdates(followups);

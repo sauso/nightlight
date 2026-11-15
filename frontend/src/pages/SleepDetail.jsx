@@ -561,8 +561,10 @@ function NightContentBody({ night, fmtTime, tz, tempUnit, childId, date, onAlert
               is a real minute or more before sleep — see showsInBed for why that check is one-way. */}
           {showsInBed(night) && <Stat label="In bed" value={fmtTime(night.in_bed_at)} />}
           <Stat label={night.in_progress ? 'Asleep' : 'Asleep from → to'} value={range} />
-          <Stat label="Wake-ups" value={String(night.wake_count ?? 0)} />
-          <Stat label="Longest stretch" value={fmtDurAbbr(night.longest_stretch_minutes)} />
+          {/* #355, Opus/Codex plan review 2026-11-16: null means unavailable;
+              fmtDurAbbr(0) would hide a measured zero behind its em dash. */}
+          <Stat label="Wake-ups" value={night.wake_count == null ? '-' : String(night.wake_count)} />
+          <Stat label="Longest stretch" value={night.longest_stretch_minutes == null ? '-' : night.longest_stretch_minutes === 0 ? '0m' : fmtDurAbbr(night.longest_stretch_minutes)} />
           {partialCoverage && <Stat label="Coverage" value={`${covPct}%`} />}
         </div>
       </div>}

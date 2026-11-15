@@ -18,6 +18,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- Corrected asleep or wake-up times now give the child's card and sleep detail page the same measured asleep, awake, unknown, wake-up and longest-stretch figures. The nightly update fills in older corrections while their camera samples remain available. Without a measurement, wake figures show as unavailable and the asleep total keeps its earlier estimate (#355).
 - Hold alerts until asleep now remembers when a child has settled through a server restart in the same sleep window, so motion and sound alerts and wake-clip recording can resume at once (#1037).
 - Clearing alert history now also deletes the clips and pictures of cleared alerts; protected alerts and their media are kept (#934).
 - **Copy codes** now works when Nightlight is opened over plain http. If it can't copy the backup codes, the dialog selects them so you can copy them by hand.

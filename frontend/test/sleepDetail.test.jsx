@@ -97,6 +97,21 @@ const lastNightPath = (get) =>
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
+test('#355 unavailable wake figures show a dash while measured zero stays zero', async () => {
+  mockSleep({ night: { ...NIGHT, asleep_minutes: 590, awake_minutes: null,
+    wake_count: null, longest_stretch_minutes: null } });
+  const view = mount();
+  expect((await screen.findByText('Wake-ups')).closest('.sleep-stat')).toHaveTextContent('-');
+  expect(screen.getByText('Longest stretch').closest('.sleep-stat')).toHaveTextContent('-');
+  view.unmount();
+  vi.restoreAllMocks();
+  mockSleep({ night: { ...NIGHT, asleep_minutes: 590, awake_minutes: 0,
+    wake_count: 0, longest_stretch_minutes: 0 } });
+  mount();
+  expect((await screen.findByText('Wake-ups')).closest('.sleep-stat')).toHaveTextContent('0');
+  expect(screen.getByText('Longest stretch').closest('.sleep-stat')).toHaveTextContent('0m');
+});
+
 // UI refresh PR E: "Recompute this night" and the settings switch live in the page's "⋯" menu, not in the night card. These
 // open the menu the way a person does (press the button, then the item) and look for an item even while the menu is closed
 // (a closed menu is hidden, so a plain query would call a present-but-closed item "absent").

@@ -751,15 +751,16 @@ An early estimate needs the child's birthday (edit the child to add it), and the
 ### Provisional and low confidence
 
 A night's figures keep being refined for 3 hours after the sleep window closes. A score worked out before
-then is marked **provisional** and may still change. A saved night you have corrected is locked, so its
-score is final.
+then is marked **provisional** and may still change. A saved night you have corrected is locked against
+detector updates. Its score can still change when the nightly update fills in a missing correction measurement.
 
 A score is marked **low confidence** when the camera watched less than 80% of the sleep window, when more
 than 15 minutes inside the sleep were not watched, or when the wake time is uncertain (no wake was
 detected, or the detector [set aside an early exit](#an-exit-far-earlier-than-usual-does-not-end-the-night)).
 A wake time you gave in the morning review counts as certain, also when you left it as it was. Unwatched
-minutes are never counted as sleep, and with more than 15 of them the longest stretch is left out of the
-score.
+minutes in a measured corrected span are not counted as sleep, and with more than 15 of them the longest
+stretch is left out of the score. If an older correction has no measurement, its asleep total may still
+include minutes the cameras did not see.
 
 ### After you correct a night
 
@@ -767,8 +768,8 @@ The score always uses the night as you see it, so a correction changes the score
 read, and changes what "usual" means for the nights after it.
 
 If you move the time asleep or the time up by **more than 15 minutes**, that night's restlessness and
-longest stretch are left out of its score and out of the usual: the detector measured them over different
-hours. A smaller adjustment keeps them. The tolerance is fixed at 15 minutes for each of the two times and
+longest stretch are left out of its score and out of the usual. A smaller adjustment can use the measured
+longest stretch for your corrected times. The tolerance is fixed at 15 minutes for each of the two times and
 is not a setting.
 
 Settling follows what the page shows: if you changed the time asleep but not the put-down, the night is
@@ -1143,18 +1144,22 @@ confirm is the one the child's card shows. Times are still shown, and typed, in 
 
 #### Your times become the ones shown
 
-Once you correct a night, the sleep detail page shows *your* times, marked **You corrected this**, and the child's card
-shows the total sleep recalculated to match wherever an asleep or wake-up time you saved differs
-from the one that screen had (a time that is the same keeps that screen's own total). This is different from
-**Recompute this night**, which re-runs the detector: correcting records what *you* know,
-recomputing re-asks the *app*.
+Once you correct a night, the sleep detail page shows *your* times, marked **You corrected this**. If you move
+the asleep or wake-up time on a night the app scored as slept, and samples support a measurement, the child's card
+and the detail page use the same saved figures for minutes asleep, awake and unknown, wake-ups, and longest stretch.
+Minutes the cameras did not see inside your times are unknown. If neither sleep time moves from the app's saved
+night, its figures stay the app's own. This is different from **Recompute this night**, which re-runs the detector:
+correcting records what *you* know, recomputing re-asks the *app*.
+
+The wake-up list and sleep bar use your times when that measurement is available. Room visits, alerts, bed
+transitions and restlessness still describe what the detector saw. Alerts and automatic wake clips are fetched
+only up to the detector's morning end, so a later time you enter may have none beside it.
+
 - A corrected **In bed** only moves the "in bed" time. Saving the review records only the times you
   answered: a wake-only answer stores your wake-up time, and the asleep time stays the app's. Where a
-  time you saved is the one a screen was already showing, nothing about the sleep changes there: the
-  total asleep, the wake-ups and the longest stretch stay what that screen had. The total is
-  recalculated only where a time you saved differs from that screen's own, which is normally only
-  when you changed it (but not always: see the
-  [Known limits, all documented rather than fixed](#known-limits-all-documented-rather-than-fixed) about the review page and the card starting from different versions of the night).
+  time you saved matches the saved detector night and you moved no other sleep time, its figures stay
+  the detector's. When a measurement is available for a moved sleep time, the card and detail page use it,
+  even if a later fresh calculation happens to match the time you entered.
   When you give an in-bed
   time, the card and the detail page show it next to the asleep time even if you corrected that too
   (they hide the *detector's* put-down beside a corrected asleep time, because it may belong to the
@@ -1299,10 +1304,12 @@ Either:
     not because none happened, so counting it would add an invented calm night. A report built over your own
     correction would also only repeat what you just typed.
     Only a "no one in the bed" night is promoted; "no data" and "no sleep" nights are not.
-  - A corrected total still subtracts every unwatched minute the detector counted for the night,
-    even ones outside your corrected times (the camera-outage limit under "Minutes with no video are
-    unknown" in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)). Locking makes that figure stop changing; it
-    does not make it exact.
+  - A moved time on a night the app scored as slept uses the minutes the cameras measured while samples
+    are available. A nightly update fills in older corrections while those samples still exist, for up
+    to 30 days. If the app cannot rebuild a correction, the wake-up count and longest stretch show "-";
+    minutes awake are unavailable too. The asleep total then uses the earlier estimate, and the detail
+    page may still show the detector's old wake list and bar. A saved correction snapshot continues to
+    serve the card and detail page after the samples expire.
   - Nights corrected **before 0.35.0** were locked, as they were last saved, from the moment that
     version was installed.
   - The sleep ↔ temperature averages read the detector's saved figures and never apply time

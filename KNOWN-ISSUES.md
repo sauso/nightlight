@@ -726,16 +726,13 @@ closing sentence.
   this nightly rule and is not handled live. And a camera that has delivered no video since the server started
   (for example one with no video feed at all) keeps its sound in the live watcher, while this rule counts its
   minutes as unwatched.
-- **A parent's corrected night** subtracts the night's stored unknown minutes from the corrected span as
-  one total (an existing limit of corrections). A recompute that adds many unknown minutes to a corrected
-  night can therefore shrink its displayed sleep more than the stall alone explains. Since a corrected
-  night's saved summary is locked (docs/sleep-tracking.md, "A night you have corrected is locked"), that no longer happens
-  to the child's card after the correction is saved; the figure stops changing but is not made exact. The
-  sleep detail page works the night out fresh each time, so it can still show it. Since a finished night is
-  shown with the camera, timezone and window it was saved with (docs/sleep-tracking.md, "Finished nights use
-  the settings they were saved with"), a later change of camera, timezone or window no longer adds to that
-  difference for a night saved with its settings recorded; a change to the detection rules, or data recorded
-  after the night was locked, still can.
+- **A parent's corrected night** uses a saved measurement of its moved span while the camera samples
+  still exist. Minutes outside the measured range, or in a video gap, are unknown. The card and detail
+  page use the same saved sleep figures even if a later live calculation differs. A correction made before
+  this fix is filled in by the nightly update while its samples are within 30 days. If no measurement can
+  be made, minutes awake, wake-ups and longest stretch are unavailable; the asleep total keeps its earlier
+  estimate, and the detail page may still show the detector's old wake list and bar. Once saved, the
+  measurement remains available after the samples expire.
 
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.

@@ -549,7 +549,9 @@ one fixed log line an hour at most, the route still answers). The context a fres
 ran with: the route's parsed saved context for `context=stored`, `scoring_view.stored` when `computeNightForDisplay`
 replayed it (`applied === 'stored'`), `currentScoringContext` otherwise; a stored row uses its own `scoring_context`.
 When a read's fresh night is `no_data` and a saved `ok` row exists, the score is the saved row's and
-`score_source: 'stored'` is added; no other key of the fresh night changes. A night in progress or not `ok` skips the
+`score_source: 'stored'` is added. Normally no other key of the fresh night changes. For a corrected night
+with a valid #355 span snapshot, a detail read whose fresh compute is not `ok` serves the corrected saved
+row and its five measured figures, without manufacturing a timeline. A night in progress or not `ok` skips the
 baseline read. `applyCorrection` adds `wake_given: true` when the review carries a wake time (#1041), which is how a
 wake the parent saved unchanged counts as confirmed.
 **The night summary** (sleep score plan, phase 3; tests in `backend/test/night-summary.test.js`,

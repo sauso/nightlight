@@ -729,7 +729,7 @@ const LOCKING = ['nobody_in_bed', 'true_onset_at', 'true_wake_at', 'true_in_bed_
 // answered_by_* (#552) say WHO answered, not what the night was: a name on a review must never lock a night
 // or change what it shows.
 const NOT_LOCKING = ['true_onset_transition_id', 'true_wake_transition_id', 'true_in_bed_transition_id',
-  'computed_onset_at', 'computed_wake_at', 'note', 'dismissed', 'answered_by_user_id', 'answered_by_username'];
+  'computed_onset_at', 'computed_wake_at', 'note', 'dismissed', 'span_figures', 'answered_by_user_id', 'answered_by_username'];
 const REVIEW_KEYS = ['child_id', 'night_date', 'reviewed_at'];
 
 test('★ the lock, the overlay and the card agree about every sleep_reviews column, one column at a time', () => {
@@ -1013,10 +1013,9 @@ test('★ corrected in the half hour between the evidence horizon and the job\'s
   assert.equal(nightIsLocked(CHILD, DATE), true);
 });
 
-test('★ a later save on an already-locked night recomputes NOTHING: re-edit, note or verdict (fix round, item 2)', async (t) => {
-  // Every save that leaves the night corrected calls the store-first step. Once the night is locked the
-  // store is refused anyway, so it must return BEFORE computeNight: otherwise each re-edit, note or
-  // verdict paid for a full compute, and a compute that threw would 500 a save after applyVerdicts wrote.
+test('★ a later save keeps the stored detector night locked while refreshing correction figures', async (t) => {
+  // #355: every save recomputes the correction snapshot once, before verdict
+  // writes. The store-first step still skips the locked detector row.
   // computeNight's first act is `SELECT id FROM cameras WHERE child_id = ?`, prepared per call and nowhere
   // else on this route, so counting that statement counts computes without touching production code.
   layLateWakeNight();
@@ -1035,7 +1034,7 @@ test('★ a later save on an already-locked night recomputes NOTHING: re-edit, n
   for (const body of [{ true_onset_local: '19:12' }, { note: 'a cold' }, { verdicts: { [frame]: 'correct' } }]) {
     const seen = computes();
     assert.equal((await put(body)).status, 200, JSON.stringify(body));
-    assert.equal(computes(), seen, `${JSON.stringify(body)} ran computeNight on a locked night`);
+    assert.equal(computes(), seen + 1, `${JSON.stringify(body)} must refresh its correction snapshot once`);
     assert.deepEqual(storedRow(), locked, 'and the locked row is untouched');
   }
   assert.deepEqual(storeNightBeforeCorrection(CHILD, DATE), { stored: false, skipped: 'locked' });
@@ -1073,13 +1072,13 @@ test('★ a FIRST correction whose save-time compute throws is a 500 before anyt
   assert.equal(nightIsLocked(CHILD, DATE), false);
 
   // The same save once the compute works: stored first, then locked, verdict and all. And stored ONCE: the
-  // route's own store-first step replaces saveNightReview's, it does not run beside it (a second one would
-  // find the night not yet locked and still provisional, and compute it again).
+  // route's own store-first step replaces saveNightReview's. #355 adds one
+  // independent timeline compute to snapshot the corrected figures.
   const spy = t.mock.method(db, 'prepare', (source) => realPrepare(source));
   assert.equal((await put({ true_wake_local: '07:20', verdicts: { [frame]: 'correct' } })).status, 200);
   const computes = spy.mock.calls.filter((c) => c.arguments[0] === COMPUTE_FIRST_SQL).length;
   spy.mock.restore();
-  assert.equal(computes, 1, 'one save-time compute, not two');
+  assert.equal(computes, 2, 'one store-first compute and one correction snapshot compute');
   assert.equal(verdictOf(frame), 'correct');
   assert.equal(nightIsLocked(CHILD, DATE), true);
   assert.equal(storedRow().computed_at, minuteSql(at(7, 10, 1)), 'stored at the save');

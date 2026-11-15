@@ -239,7 +239,9 @@ test('golden: without a context computeNight returns exactly what it did before 
   // keeps its order) the JSON is byte for byte what it was before them.
   assert.equal(timeline.stir_minutes, GOLDEN.stir_minutes);
   assert.equal(timeline.summary_facts, GOLDEN.summary_facts);
-  assert.equal(createHash('sha256').update(JSON.stringify(omit(timeline, 'stir_minutes', 'summary_facts'))).digest('hex'), GOLDEN_TIMELINE_SHA256);
+  // #355's span_basis is additive on detail computes; the prior keys retain
+  // their golden bytes once it is omitted from this detector-output pin.
+  assert.equal(createHash('sha256').update(JSON.stringify(omit(timeline, 'stir_minutes', 'summary_facts', 'span_basis'))).digest('hex'), GOLDEN_TIMELINE_SHA256);
   assert.deepEqual(json(computeNight(CHILD, DATE, { includeTimeline: true, context: null })), json(timeline));
 });
 
