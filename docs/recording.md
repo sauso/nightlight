@@ -585,8 +585,8 @@ is skipped, so recording can never be the thing that fills your disk.
 
 ⚠️ **This is not retention, and nothing here is kept, including protected clips.** Removing a child, or a camera, deletes everything
 that belongs to it, rows and files, and **cannot be undone**. The Remove dialog lists these before you
-confirm and asks "Are you sure?". Both are admin-only and both start from the **⋯** menu at the top right of the
-child's or the camera's settings page (**Remove child**, **Remove camera**), not from a button under Save. The two are
+confirm and asks "Are you sure?". Both are admin-only. **Remove child** is a red button at the bottom of the child's
+settings page; **Remove camera** is in the **⋯** menu at the top right of the camera's settings page. The two are
 **different**, and so is what each leaves behind:
 
 | | Removing a **child** | Removing a **camera** |
@@ -598,6 +598,7 @@ child's or the camera's settings page (**Remove child**, **Remove camera**), not
 | Timelapses, and frames collected for a night not yet assembled | Deleted | **Kept** (they belong to the child), including the ones made from this camera's frames |
 | Alerts, with their clips and snapshots (protected or not) | **Kept** (they belong to the camera) | Deleted |
 | Camera event log and temperature and humidity history | **Kept** (they belong to the camera) | Deleted |
+| ESPHome sensor readings (heart rate and so on) attributed to the child | Deleted | Not affected |
 | The child's profile, photo and sleep-tracking settings | Deleted | Not applicable |
 | The camera itself | **Kept**, and becomes unassigned | Deleted, with its stream and its clip ring |
 

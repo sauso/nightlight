@@ -405,8 +405,8 @@ function UserSettingsForm() {
             </div>
 
             {/* Remove user is a visible red button at the bottom, not in a header menu: PR #1088 moved it into a "⋯" menu
-                and the owner could not find it ("lost the ability to delete a caregiver"). Remove child and Remove camera
-                stay in their header menus. Three gates, all required:
+                and the owner could not find it ("lost the ability to delete a caregiver"). Remove child is a red button
+                again for the same reason; only Remove camera stays in its header menu. Three gates, all required:
                   - !isNew: a new account has nothing to remove.
                   - formReady: the form only exists once the GET found the record, so an admin cannot confirm and send a
                     DELETE for someone the page has not shown yet (PR #1088 review; the form being inside the loaded branch
