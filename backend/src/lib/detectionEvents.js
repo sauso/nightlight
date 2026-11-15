@@ -289,8 +289,12 @@ export function clearDetectionEvents() {
   // #932: only unprotected rows are cleared. Their JPEGs and old orphan JPEGs can go; a
   // protected alert's snapshot must survive even though it shares this directory.
   const doomed = db.prepare('SELECT id FROM detection_events WHERE protected = 0').all();
+  // #934: collect paths before deleting rows, as prune() does. A pending recording normally has no
+  // clip_path yet; if it finishes after the row is gone, setClipReady() removes that late clip.
+  const clipsToClear = db.prepare('SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL').all();
   const changes = db.prepare('DELETE FROM detection_events WHERE protected = 0').run().changes;
   for (const { id } of doomed) unlinkSnapshot(id);
+  for (const { clip_path } of clipsToClear) unlinkClip(clip_path);
   try {
     for (const name of fs.readdirSync(SNAPSHOT_DIR)) {
       if (!name.endsWith('.jpg')) continue;

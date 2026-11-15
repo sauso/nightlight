@@ -26325,5 +26325,32 @@
     "tests": ["auth-invite.test.js"],
     "namePattern": "the invite redeem answers 400 before taking a slot",
     "note": "Review of #1094, M-1: without the early check the central refusal still answers 400, but only after the single-flight slot, so a concurrent bad try answers 409."
+  },
+  {
+    "label": "#934 clear history clip unlink loop removed",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "for (const { clip_path } of clipsToClear) unlinkClip(clip_path);",
+    "replace": "/* clip unlink skipped */",
+    "expect": "killed",
+    "tests": ["detection-events.test.js"],
+    "namePattern": "#934 clearDetectionEvents removes every unprotected media path"
+  },
+  {
+    "label": "#934 clear history snapshot unlink removed",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "for (const { id } of doomed) unlinkSnapshot(id);",
+    "replace": "/* snapshot unlink skipped */",
+    "expect": "killed",
+    "tests": ["detection-events.test.js"],
+    "namePattern": "#934 clearDetectionEvents removes every unprotected media path"
+  },
+  {
+    "label": "#934 clear history protected clip selection",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "const clipsToClear = db.prepare('SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL').all();",
+    "replace": "const clipsToClear = db.prepare('SELECT clip_path FROM detection_events WHERE clip_path IS NOT NULL').all();",
+    "expect": "killed",
+    "tests": ["detection-events.test.js"],
+    "namePattern": "#934 clearDetectionEvents removes every unprotected media path"
   }
 ]

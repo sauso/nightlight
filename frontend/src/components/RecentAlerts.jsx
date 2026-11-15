@@ -87,7 +87,7 @@ export default function RecentAlerts() {
       {confirming && (
         <Modal title="Clear recent alerts" placement="top" onClose={() => (clearBusy ? null : setConfirming(false))}>
           <p style={{ marginTop: 0 }}>
-            Clear all recent alerts? This permanently deletes unprotected alert history and can't be undone. Protected alerts are kept.
+            Clear all recent alerts? This permanently deletes unprotected alert history, including its clips and pictures, and can't be undone. Protected alerts are kept.
           </p>
           <ModalActions>
             <button className="btn btn-secondary" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>

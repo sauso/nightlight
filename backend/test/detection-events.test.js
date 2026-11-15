@@ -99,6 +99,77 @@ test('clearDetectionEvents wipes the history and reports how many rows went', ()
   assert.equal(ev.clearDetectionEvents(), 0, 'clearing an empty history is a no-op, not an error');
 });
 
+test('#934 clearDetectionEvents removes every unprotected media path and snapshot, keeps protected media, and tolerates a missing or escaping clip', async () => {
+  // Derive the path columns from the schema so a later media path cannot be silently omitted by clear.
+  const pathColumns = db.pragma('table_info(detection_events)')
+    .map(({ name }) => name).filter((name) => name === 'path' || name.endsWith('_path'));
+  assert.ok(pathColumns.length > 0);
+  function plantPaths(id, label) {
+    const files = [];
+    for (const column of pathColumns) {
+      const rel = makeClipFile(`clear-934-${label}-${column}.mp4`);
+      db.prepare(`UPDATE detection_events SET "${column.replaceAll('"', '""')}" = ? WHERE id = ?`).run(rel, id);
+      const file = path.join(CLIPS_DIR, rel);
+      const thumb = file.replace(/\.mp4$/, '.jpg');
+      fs.writeFileSync(thumb, 'thumbnail');
+      files.push(file, thumb);
+    }
+    return files;
+  }
+
+  const open = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  const locked = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  const missing = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  const escaping = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  const openFiles = plantPaths(open, 'open');
+  const lockedFiles = plantPaths(locked, 'locked');
+  ev.saveEventSnapshot(open, Buffer.from('open picture'));
+  ev.saveEventSnapshot(locked, Buffer.from('protected picture'));
+  const openSnapshot = path.join(ev.DETECTION_SNAPSHOT_DIR, `${open}.jpg`);
+  const lockedSnapshot = path.join(ev.DETECTION_SNAPSHOT_DIR, `${locked}.jpg`);
+  db.prepare('UPDATE detection_events SET protected = 1 WHERE id = ?').run(locked);
+  ev.setClipReady(missing, path.join('clips-test', 'clear-934-already-missing.mp4'), 5, 100);
+  const outside = plantOutside('clear-934-escape.mp4');
+  ev.setClipReady(escaping, path.join('..', 'clear-934-escape.mp4'), 5, 100);
+
+  // Make the orphan-directory pass unavailable so the row-specific snapshot unlink must do the work.
+  // This also proves an unreadable directory does not stop clip cleanup or the clear response.
+  const realReaddir = fs.readdirSync;
+  fs.readdirSync = (...args) => {
+    if (path.resolve(args[0]) === path.resolve(ev.DETECTION_SNAPSHOT_DIR)) throw new Error('unreadable snapshot directory');
+    return realReaddir(...args);
+  };
+  try {
+    assert.equal(ev.clearDetectionEvents(), 3);
+  } finally {
+    fs.readdirSync = realReaddir;
+  }
+  assert.deepEqual([open, missing, escaping].map(rowOf), [undefined, undefined, undefined]);
+  assert.equal(rowOf(locked).protected, 1);
+  for (const file of openFiles) assert.equal(fs.existsSync(file), false, `cleared media remained: ${file}`);
+  for (const file of lockedFiles) assert.equal(fs.existsSync(file), true, `protected media was removed: ${file}`);
+  assert.equal(fs.existsSync(outside), true, 'a stored path escaped the clips directory');
+  // unlinkSnapshot uses an asynchronous best-effort removal, so allow it to complete before checking.
+  const deadline = Date.now() + 1000;
+  while (fs.existsSync(openSnapshot) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(fs.existsSync(openSnapshot), false);
+  assert.equal(fs.existsSync(lockedSnapshot), true);
+});
+
+test('#934 clearDetectionEvents removes a clip that finishes after its pending row was cleared', () => {
+  const id = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  ev.markClipPending(id);
+  assert.equal(rowOf(id).clip_path, null);
+  assert.equal(ev.clearDetectionEvents(), 1);
+  const rel = makeClipFile('clear-934-late.mp4');
+  const file = path.join(CLIPS_DIR, rel);
+  const thumb = file.replace(/\.mp4$/, '.jpg');
+  fs.writeFileSync(thumb, 'thumbnail');
+  ev.setClipReady(id, rel, 5, 100);
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(fs.existsSync(thumb), false);
+});
+
 // --- snapshots --------------------------------------------------------------------------------
 
 test('saveEventSnapshot writes the image and flags the row', () => {
