@@ -561,10 +561,12 @@ function NightContentBody({ night, fmtTime, tz, tempUnit, childId, date, onAlert
               is a real minute or more before sleep — see showsInBed for why that check is one-way. */}
           {showsInBed(night) && <Stat label="In bed" value={fmtTime(night.in_bed_at)} />}
           <Stat label={night.in_progress ? 'Asleep' : 'Asleep from → to'} value={range} />
-          {/* #355, Opus/Codex plan review 2026-11-16: null means unavailable;
-              fmtDurAbbr(0) would hide a measured zero behind its em dash. */}
-          <Stat label="Wake-ups" value={night.wake_count == null ? '-' : String(night.wake_count)} />
-          <Stat label="Longest stretch" value={night.longest_stretch_minutes == null ? '-' : night.longest_stretch_minutes === 0 ? '0m' : fmtDurAbbr(night.longest_stretch_minutes)} />
+          {/* #355: null means nothing was measured, so it gets the page's own empty-value dash (the one
+              fmtDurAbbr returns; #355 review, Opus L6), never a made-up 0. A measured 0 still reads 0 / 0m:
+              fmtDurAbbr(0) would hide it behind that dash. Since the review's amendment A a correction no
+              longer nulls these, but a null from anywhere else still renders honestly. */}
+          <Stat label="Wake-ups" value={night.wake_count == null ? '—' : String(night.wake_count)} />
+          <Stat label="Longest stretch" value={night.longest_stretch_minutes == null ? '—' : night.longest_stretch_minutes === 0 ? '0m' : fmtDurAbbr(night.longest_stretch_minutes)} />
           {partialCoverage && <Stat label="Coverage" value={`${covPct}%`} />}
         </div>
       </div>}

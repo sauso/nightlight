@@ -523,7 +523,13 @@ router.get('/:id/sleep/:date', (req, res) => {
     // a valid stored correction snapshot still has the five measured figures;
     // serve that saved night without inventing a timeline from the parent's
     // timestamps. In-progress nights still show their live detector answer.
-    const savedCorrection = !raw && includeTimeline && night.in_progress !== true && overlaid.status !== 'ok'
+    // Decided on the FRESH night, not the overlaid one (#355 review, Opus L1):
+    // a fresh `empty` night that the parent's two times promote to `ok`
+    // (asScoredFromEmpty) is still not a scored detector night with a minute
+    // basis, and without this it showed the promoted figures beside a card
+    // reading the snapshot's.
+    const savedCorrection = !raw && includeTimeline && night.in_progress !== true
+      && (night.status !== 'ok' || !night.span_basis)
       ? storedCorrectedNightWithSnapshot(req.params.id, req.params.date) : null;
     if (savedCorrection) overlaid = savedCorrection;
     // The score, AFTER the correction (or without it for `raw`), from the context this night was really computed
@@ -970,8 +976,13 @@ router.put('/:id/review/:date', (req, res) => {
   // events) comes after it, which is harmless: the store writes no answer and no lock, only the pass the
   // nightly job owes the night anyway (see storeNightBeforeCorrection).
   if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);
-  // #355: compute before verdict writes so a failed basis compute cannot
-  // leave event answers saved while the review itself fails.
+  // #355: the correction snapshot is worked out here, after the store-first
+  // step (it is measured against the row that step leaves) and before
+  // applyVerdicts writes. Its own compute failing is caught inside it (#355
+  // review, Opus H1: a failed measurement must not fail the parent's save), but
+  // anything else it throws must still be a 500 with no verdict written, the
+  // rule above. Pinned by "a later save whose correction snapshot throws" in
+  // review-in-bed-and-lock.test.js.
   const spanFigures = correctionSnapshot(req.params.id, req.params.date, merged);
 
   // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside

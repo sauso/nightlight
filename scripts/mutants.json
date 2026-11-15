@@ -26480,12 +26480,102 @@
     "namePattern": "snapshot agrees on stored and fresh reads"
   },
   {
-    "label": "#355-F7 unavailable wake count is null",
+    "label": "#355-F7 fallback longest stretch is capped at sleep",
     "file": "backend/src/lib/sleepReviews.js",
-    "find": "      out.wake_count = null;",
-    "replace": "      out.wake_count = night.wake_count;",
+    "find": "out.longest_stretch_minutes = Math.min(out.longest_stretch_minutes, out.asleep_minutes);",
+    "replace": "out.longest_stretch_minutes = out.longest_stretch_minutes;",
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
-    "namePattern": "unavailable correction figures keep scoring"
+    "namePattern": "no snapshot keeps detector wake figures"
+  },
+  {
+    "label": "#355-F7 stored endpoint validates snapshot despite fresh drift",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const snapshot = storedSpan ? validSnapshot(r, storedSpan) : null;",
+    "replace": "const snapshot = storedSpan ? validSnapshot(r, { ...storedSpan, onset_at: night.onset_at, wake_at: night.wake_at }) : null;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "snapshot freezes the uncorrected endpoint"
+  },
+  {
+    "label": "#355-F7 snapshot owns both displayed times",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    out.onset_at = snapshot.onset_at;",
+    "replace": "    out.onset_at = onset;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "snapshot freezes the uncorrected endpoint"
+  },
+  {
+    "label": "#355-F7 snapshot detector times from the fresh compute",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    out.algo_onset_at = storedSpan.onset_at ?? null;",
+    "replace": "    /* mutant: algo_onset_at stays the fresh compute's */",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "snapshot freezes the uncorrected endpoint"
+  },
+  {
+    "label": "#355-F7 keep valid snapshot on another save",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (old) return existing.span_figures;",
+    "replace": "  /* mutant: always re-measure */",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "saved correction figures still reach the detail page"
+  },
+  {
+    "label": "#355-F7 snapshot compute failure fails the save",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    logSnapshotFailure(attemptKey(childId, nightDate, review.reviewed_at, stored.computed_at), error);\n    return null;",
+    "replace": "    throw error;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "a later PUT saves its review when snapshot recomputation throws"
+  },
+  {
+    "label": "#355-F7 pre-onset movement counts as asleep",
+    "file": "backend/src/lib/correctedSpan.js",
+    "find": "        || (i < detectorOnset && activeRuns.some(([a, b]) => i >= a && i < b))) {",
+    "replace": "        || false) {",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "active minutes before detector onset"
+  },
+  {
+    "label": "#355-F7 one failing night stops the nightly refresh",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    } catch (error) {\n      failedSnapshotAttempts.add(key);\n      logSnapshotFailure(key, error);\n    }",
+    "replace": "    } catch (error) {\n      throw error;\n    }",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "a night the nightly step cannot write"
+  },
+  {
+    "label": "#355-F7 unrebuildable night retried every tick",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    if (failedSnapshotAttempts.has(key)) continue;",
+    "replace": "    /* mutant: no memory of failed attempts */",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "unrebuildable correction is tried once"
+  },
+  {
+    "label": "#355-F7 nightly job never refreshes snapshots",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "        .then((m) => m.refreshCorrectionSnapshots())",
+    "replace": "        .then(() => {})",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "nightly job fills a missing snapshot"
+  },
+  {
+    "label": "#355-F7 detail fallback decided on the overlaid night",
+    "file": "backend/src/routes/children.js",
+    "find": "      && (night.status !== 'ok' || !night.span_basis)",
+    "replace": "      && overlaid.status !== 'ok'",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "fresh empty detail uses a valid saved corrected night"
   }
 ]

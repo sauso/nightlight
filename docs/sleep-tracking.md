@@ -752,25 +752,34 @@ An early estimate needs the child's birthday (edit the child to add it), and the
 
 A night's figures keep being refined for 3 hours after the sleep window closes. A score worked out before
 then is marked **provisional** and may still change. A saved night you have corrected is locked against
-detector updates. Its score can still change when the nightly update fills in a missing correction measurement.
+detector updates. Its score can still change once, when the nightly update measures an earlier correction
+between your times (see [After you correct a night](#after-you-correct-a-night)).
 
 A score is marked **low confidence** when the camera watched less than 80% of the sleep window, when more
 than 15 minutes inside the sleep were not watched, or when the wake time is uncertain (no wake was
 detected, or the detector [set aside an early exit](#an-exit-far-earlier-than-usual-does-not-end-the-night)).
 A wake time you gave in the morning review counts as certain, also when you left it as it was. Unwatched
-minutes in a measured corrected span are not counted as sleep, and with more than 15 of them the longest
-stretch is left out of the score. If an older correction has no measurement, its asleep total may still
-include minutes the cameras did not see.
+minutes are never counted as sleep, and with more than 15 of them the longest stretch is left out of the
+score. The one exception is a moved time the app could not measure (see
+[After you correct a night](#after-you-correct-a-night)): its asleep total is an estimate, and it can include
+minutes the cameras did not see.
 
 ### After you correct a night
 
 The score always uses the night as you see it, so a correction changes the score the next time it is
 read, and changes what "usual" means for the nights after it.
 
+When you move the time asleep or the time up on a night the app scored as slept, the app measures the night
+again between your two times, as long as it still has that night's camera samples (about 30 days). The score
+then uses the minutes asleep, awake and unwatched, the wake-ups and the longest stretch between your times.
+If it cannot measure them (for example a correction made before this was added, whose samples are gone),
+the night is scored as it was before: the wake-ups and minutes awake stay the app's own and may not fit
+your times.
+
 If you move the time asleep or the time up by **more than 15 minutes**, that night's restlessness and
-longest stretch are left out of its score and out of the usual. A smaller adjustment can use the measured
-longest stretch for your corrected times. The tolerance is fixed at 15 minutes for each of the two times and
-is not a setting.
+longest stretch are left out of its score and out of the usual. A smaller adjustment keeps them. The
+longest stretch is then never longer than the time asleep. The tolerance is fixed at 15 minutes for each
+of the two times and is not a setting.
 
 Settling follows what the page shows: if you changed the time asleep but not the put-down, the night is
 not judged on settling.
@@ -783,7 +792,8 @@ not judged on settling.
   it sees.
 - A night with no detected put-down is not judged on settling, so it can score higher than the same night
   with a slow, detected settle.
-- After you correct a time, the number of wake-ups and the minutes awake are still the detector's.
+- After you correct a time, a saved measurement counts wake-ups and minutes awake inside your corrected span.
+  Without one, both remain the detector's figures and may not match your corrected times.
 - Nights saved before stirring minutes were stored have no restlessness figure and never will.
 - Changing the camera a child's sleep is measured from, or the sleep window, starts "usual" again: about
   a week of early estimates.
@@ -956,9 +966,9 @@ Known limits:
 ### After you correct a night
 
 Wake-ups outside the times you gave are left out before any wake-up observation is chosen. If you moved
-the time asleep or the time up by **more than 15 minutes** (the same rule as the score), the summary does
-not mention wake-ups or the longest stretch at all, because the detector measured them over different
-hours.
+the time asleep or the time up by **more than 15 minutes**, the summary does not mention wake-ups or the
+longest stretch at all. It uses the score's 15-minute tolerance to decide, and keeps to it even when the
+app measured the night between your times.
 
 ### Known limits
 
@@ -1145,20 +1155,31 @@ confirm is the one the child's card shows. Times are still shown, and typed, in 
 #### Your times become the ones shown
 
 Once you correct a night, the sleep detail page shows *your* times, marked **You corrected this**. If you move
-the asleep or wake-up time on a night the app scored as slept, and samples support a measurement, the child's card
-and the detail page use the same saved figures for minutes asleep, awake and unknown, wake-ups, and longest stretch.
-Minutes the cameras did not see inside your times are unknown. If neither sleep time moves from the app's saved
-night, its figures stay the app's own. This is different from **Recompute this night**, which re-runs the detector:
-correcting records what *you* know, recomputing re-asks the *app*.
+the asleep or wake-up time on a night the app scored as slept, the app measures the night between your times
+while it still has the camera samples (about 30 days) and saves that measurement with your answer. The child's
+card and the detail page then show the same two times and the same figures for minutes asleep, awake and
+unknown, wake-ups, and longest stretch, also after the samples are gone. Minutes the cameras did not see
+inside your times are unknown. If you give an asleep time earlier than the app's, any minute in between with
+movement or sound counts as awake but never as a wake-up: the app did not look for wake-ups before its own
+asleep time, so this is a judgement, not a measurement. If neither sleep time moves from the app's saved
+night, its figures stay the app's own. This is different from **Recompute this night**, which re-runs the
+detector: correcting records what *you* know, recomputing re-asks the *app*.
 
-The wake-up list and sleep bar use your times when that measurement is available. Room visits, alerts, bed
+Without that measurement (a correction made before this was added, whose samples are gone, or one the app
+could not measure), the night reads as it did before: the asleep total is an estimate that can include
+minutes the cameras did not see, the wake-ups and minutes awake stay the app's own and may not fit your
+times, and the longest stretch is never longer than the asleep total. The child's card then reads the saved night and the detail page works it out fresh, as
+for a night you have not corrected, so the two can differ a little.
+
+The wake-up list and sleep bar use your times when that measurement is available. Wake-coloured segments
+outside your corrected span are by design: the detector paints its morning run as a wake. Room visits, alerts, bed
 transitions and restlessness still describe what the detector saw. Alerts and automatic wake clips are fetched
 only up to the detector's morning end, so a later time you enter may have none beside it.
 
 - A corrected **In bed** only moves the "in bed" time. Saving the review records only the times you
   answered: a wake-only answer stores your wake-up time, and the asleep time stays the app's. Where a
   time you saved matches the saved detector night and you moved no other sleep time, its figures stay
-  the detector's. When a measurement is available for a moved sleep time, the card and detail page use it,
+  the detector's. When a measurement was saved for a moved sleep time, the card and detail page use it,
   even if a later fresh calculation happens to match the time you entered.
   When you give an in-bed
   time, the card and the detail page show it next to the asleep time even if you corrected that too
@@ -1258,8 +1279,11 @@ Either:
     first summary has no wake-up time yet (the morning's departure was still being confirmed when it
     was saved), the night keeps showing no wake-up time until you add one to your review.
   - The sleep detail page always works the night out fresh and lays your times over it, so its
-    total asleep and wake-ups can differ a little from the locked summary on the child's card. That
-    holds even though a locked night is shown with the settings it was saved with (see [Finished nights
+    total asleep and wake-ups can differ a little from the locked summary on the child's card. A night
+    whose asleep or wake-up time you moved, and that the app measured between your times, is the
+    exception: both pages show that saved measurement (see [Your times become the ones
+    shown](#your-times-become-the-ones-shown)). Otherwise the difference holds even though a locked
+    night is shown with the settings it was saved with (see [Finished nights
     use the settings they were saved with](#finished-nights-use-the-settings-they-were-saved-with)):
     the page sees the whole morning's data, which a night locked early did not.
   - The review page starts from the night worked out fresh when you open it (with the same settings as
@@ -1268,8 +1292,9 @@ Either:
     detector), the
     wake-up time you save unchanged is the review page's, so the card shows that and
     recalculates its total to fit it, even if you only marked **In bed**. The sleep detail page,
-    which works the night out fresh, may keep its own total instead. Each screen's total always fits
-    the times it shows; they just aren't always the same total.
+    which works the night out fresh, may keep its own total instead, unless the app saved a
+    measurement for that time: then both show it. Each screen's total always fits the times it shows;
+    they just aren't always the same total.
   - **Correcting a night the app called "no one in the bed" makes it a slept night (#355).** Open the
     night on the sleep detail page and press **Was this night right?** (the morning card on the child's
     page never asks about such a night). Give both an asleep and a wake-up time and the night is shown
@@ -1304,12 +1329,15 @@ Either:
     not because none happened, so counting it would add an invented calm night. A report built over your own
     correction would also only repeat what you just typed.
     Only a "no one in the bed" night is promoted; "no data" and "no sleep" nights are not.
-  - A moved time on a night the app scored as slept uses the minutes the cameras measured while samples
-    are available. A nightly update fills in older corrections while those samples still exist, for up
-    to 30 days. If the app cannot rebuild a correction, the wake-up count and longest stretch show "-";
-    minutes awake are unavailable too. The asleep total then uses the earlier estimate, and the detail
-    page may still show the detector's old wake list and bar. A saved correction snapshot continues to
-    serve the card and detail page after the samples expire.
+  - A moved time on a night the app scored as slept is measured between your times while the night's
+    camera samples exist (about 30 days), when you save and again by the nightly update for corrections
+    saved earlier. Once saved, that measurement keeps the same times and figures on the card and the
+    detail page after the samples are gone. If the app cannot measure a correction, the night reads as
+    it did before (see [Your times become the ones shown](#your-times-become-the-ones-shown)): wake-ups
+    and minutes awake stay the app's own and may not match your times, the asleep total is an estimate
+    that can include minutes the cameras did not see (the camera-outage limit in
+    [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)), the longest stretch is capped at that total, and the detail
+    page shows the app's own wake list and bar.
   - Nights corrected **before 0.35.0** were locked, as they were last saved, from the moment that
     version was installed.
   - The sleep ↔ temperature averages read the detector's saved figures and never apply time

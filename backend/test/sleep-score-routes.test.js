@@ -361,12 +361,11 @@ test('raw samples gone, saved row kept: the detail read is no_data and its score
   assert.deepEqual(headline(r.body.score), GREAT_96);
   assert.deepEqual(r.body.score, listed.score, 'the same score the list gives the saved row');
 
-  // #355: this correction is saved after samples have gone, so no snapshot
-  // can measure its wake figures. The score omits those unavailable terms.
+  // With the parent's correction over the saved row (the wake an hour earlier: 81, see the corrected-night test).
   saveNightReview(CHILD, DATE, { trueWakeAt: sqlAt(local(5, 0, 1)) }, { storeFirst: false });
   const corrected = await get(`/sleep/${DATE}?context=auto`);
   assert.deepEqual([corrected.body.status, corrected.body.score_source, corrected.body.score.score, comp(corrected.body.score, 'duration').value],
-    ['no_data', 'stored', 71, 540]);
+    ['no_data', 'stored', 81, 540]);
   // raw=1 returns the night without the correction, so the saved row is scored without it too.
   const raw = await get(`/sleep/${DATE}?context=current&raw=1`);
   assert.deepEqual([raw.body.score_source, raw.body.score.score], ['stored', 96]);

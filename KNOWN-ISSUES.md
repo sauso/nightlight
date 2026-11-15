@@ -726,13 +726,19 @@ closing sentence.
   this nightly rule and is not handled live. And a camera that has delivered no video since the server started
   (for example one with no video feed at all) keeps its sound in the live watcher, while this rule counts its
   minutes as unwatched.
-- **A parent's corrected night** uses a saved measurement of its moved span while the camera samples
-  still exist. Minutes outside the measured range, or in a video gap, are unknown. The card and detail
-  page use the same saved sleep figures even if a later live calculation differs. A correction made before
-  this fix is filled in by the nightly update while its samples are within 30 days. If no measurement can
-  be made, minutes awake, wake-ups and longest stretch are unavailable; the asleep total keeps its earlier
-  estimate, and the detail page may still show the detector's old wake list and bar. Once saved, the
-  measurement remains available after the samples expire.
+- **A parent's corrected night.** When a parent moves the asleep or wake-up time of a night the app
+  scored, the app measures the night between the parent's times while its camera samples still exist
+  (about 30 days): when the review is saved, and in the nightly update for corrections saved earlier.
+  Minutes outside the measured range, or in a video gap, are unknown, and the child's card and the
+  sleep detail page show the same saved times and figures, also after the samples expire. A correction
+  the app cannot measure (one saved before this change whose samples are gone, or one it could not
+  rebuild) keeps the earlier behaviour: the night's stored unknown minutes are subtracted from the
+  corrected span as one total, so the asleep figure is an estimate that can count unwatched minutes as
+  sleep or leave out some sleep; wake-ups and minutes awake stay the detector's and may not match the
+  corrected times; and the longest stretch is capped at the asleep total. The card then reads the stored
+  night and the detail page a fresh calculation, as for an uncorrected night, so the two can differ.
+  Wake-coloured segments outside the corrected span are by design: the detector paints its morning run
+  as a wake.
 
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.

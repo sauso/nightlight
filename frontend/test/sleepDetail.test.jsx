@@ -98,11 +98,12 @@ const lastNightPath = (get) =>
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 test('#355 unavailable wake figures show a dash while measured zero stays zero', async () => {
+  // The dash is the page's own empty value (fmtDurAbbr's), not a hyphen (#355 review, Opus L6).
   mockSleep({ night: { ...NIGHT, asleep_minutes: 590, awake_minutes: null,
     wake_count: null, longest_stretch_minutes: null } });
   const view = mount();
-  expect((await screen.findByText('Wake-ups')).closest('.sleep-stat')).toHaveTextContent('-');
-  expect(screen.getByText('Longest stretch').closest('.sleep-stat')).toHaveTextContent('-');
+  expect((await screen.findByText('Wake-ups')).closest('.sleep-stat')).toHaveTextContent('—');
+  expect(screen.getByText('Longest stretch').closest('.sleep-stat')).toHaveTextContent('—');
   view.unmount();
   vi.restoreAllMocks();
   mockSleep({ night: { ...NIGHT, asleep_minutes: 590, awake_minutes: 0,
