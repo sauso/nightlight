@@ -2,7 +2,8 @@ name: Next Node major preview
 
 # Runs the backend and front-end suites on the NEXT Node major (26 today), beside the Node 24 the project
 # supports, so that what breaks on the move is known well before anyone makes it (#751, step 1 of its plan).
-# This remains a preview, not a support gate: `engines`, `.nvmrc` and every other CI workflow stay on 24.
+# This remains a preview, not a support gate: `engines`, `.nvmrc` and other suites' setup-node pins stay on 24.
+# The e2e and docker-publish builds use the Dockerfile's Node 26 base during the #751 SOAK.
 # #751 SOAK runs the Docker image on 26 for staging; backend/test/node-version-pin.test.js guards that exception.
 #
 # HOW TO READ IT. A failure here that ALSO fails on the supported Node is an ordinary bug. A failure that appears

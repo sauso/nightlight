@@ -31,8 +31,8 @@ test('both package.json files require that major or newer', () => {
   }
 });
 
-// #751, Codex plan review 2026-11-16: scan every FROM, including --platform, and retain the
-// final-stage check. The old /^FROM node:/ scan missed the Tailscale stage entirely.
+// #751, PR #1121 round 1: scan every FROM, including --platform, then guard the full five-stage
+// graph. Counting only Node stages let an extra scratch stage or a missing MediaMTX stage through.
 export function scanDockerNodeStages(text) {
   return text.split(/\r?\n/).filter((line) => /^\s*FROM\b/i.test(line)).map((line) => {
     const match = /^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$/i.exec(line);
@@ -45,11 +45,19 @@ export function assertDockerNodeStages(text, supported, preview) {
   const from = scanDockerNodeStages(text);
   assert.ok(from.length > 0, 'Dockerfile has no FROM lines');
   assert.ok(from.every((s) => s.image), 'every Dockerfile FROM line must be parsed');
+  assert.equal(from.length, 5, 'Dockerfile must have exactly five stages');
+  assert.deepEqual(from.map((s) => s.name),
+    ['frontend-build', 'mediamtx-binary', 'backend-deps', 'tailscale-binaries', null],
+    'Dockerfile stage names and order must match the production build');
+  assert.equal(from[1].image, 'bluenviron/mediamtx:1', 'MediaMTX stage must use the reviewed image');
   assert.ok(from.at(-1).major !== null, 'Dockerfile final stage must be a Node image');
   const stages = from.filter((s) => s.major !== null);
   assert.equal(stages.length, 4, 'Dockerfile must have exactly four Node stages');
-  assert.deepEqual(stages.map((s) => s.name), ['frontend-build', 'backend-deps', 'tailscale-binaries', null],
-    'Dockerfile Node stages must remain frontend-build, backend-deps, tailscale-binaries and final runtime');
+  // #751, PR #1121 round 1: a major alone accepts node:26 and node:26-bookworm,
+  // but the soak and its BusyBox/native-module assumptions require Alpine in every Node stage.
+  for (const stage of stages) {
+    assert.match(stage.image, /^node:\d+-alpine$/, `${stage.name ?? 'runtime'} must use node:<major>-alpine`);
+  }
   const versions = new Set(stages.map((s) => s.major));
   assert.equal(versions.size, 1, `Dockerfile Node stages are mixed: ${[...versions].join(', ')}`);
   assert.ok(versions.has(supported) || versions.has(preview),
@@ -74,6 +82,25 @@ test('Dockerfile scan includes --platform and rejects mixed stages or a non-Node
   assert.equal(assertDockerNodeStages(fixture, 24, 26), 24);
   assert.throws(() => assertDockerNodeStages(fixture.replace('node:24-alpine AS tailscale-binaries', 'node:26-alpine AS tailscale-binaries'), 24, 26), /mixed/);
   assert.throws(() => assertDockerNodeStages(fixture.replace(/FROM node:24-alpine\n$/, 'FROM alpine:3.24\n'), 24, 26), /final stage/);
+});
+
+// #751, PR #1121 round 1: guard the exact image family and stage graph, including non-Node stages.
+const dockerStagesFixture = `FROM node:24-alpine AS frontend-build\nFROM bluenviron/mediamtx:1 AS mediamtx-binary\nFROM node:24-alpine AS backend-deps\nFROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries\nFROM node:24-alpine\n`;
+
+test('Dockerfile rejects a bare Node tag', () => {
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replaceAll('node:24-alpine', 'node:26-alpine').replace('node:26-alpine AS frontend-build', 'node:26 AS frontend-build'), 24, 26));
+});
+
+test('Dockerfile rejects a different Node distro', () => {
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replaceAll('node:24-alpine', 'node:26-alpine').replace('node:26-alpine AS frontend-build', 'node:26-bookworm AS frontend-build'), 24, 26));
+});
+
+test('Dockerfile rejects an extra non-Node stage', () => {
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM node:24-alpine\n', 'FROM scratch AS extra\nFROM node:24-alpine\n'), 24, 26));
+});
+
+test('Dockerfile rejects a missing non-Node stage', () => {
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM bluenviron/mediamtx:1 AS mediamtx-binary\n', ''), 24, 26));
 });
 
 test('the preview-major Dockerfile announces the #751 SOAK', () => {
