@@ -534,7 +534,8 @@ describe('the setup guide: adding a caregiver', () => {
     await user.click(screen.getByRole('button', { name: 'Create and show invite' }));
     await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
     expect(postSpy.mock.calls[0][1]).toEqual({ username: 'robin', role: 'caregiver', first_name: 'Robin', last_name: '', invite: true });
-    expect(onAdded).toHaveBeenCalledWith(1);
+    // onAdded runs once the POST is ANSWERED, a real 10 ms later in the slow-request job (#1146, CI run 43849867988).
+    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(1));
   });
 
   test('★ the panel replaces the form, holds the reload, and Done brings the form back with the person listed', async () => {
