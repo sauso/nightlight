@@ -205,10 +205,11 @@ is the same in any home or climate). Nights at exactly the median temperature be
 group, so the first comparison needs at least 21 nights (10 cooler, 10 warmer and one at the
 median). Until both groups reach 10 the card reads "Not enough nights yet" with how many it has
 of each, and shows no verdict and no averages. A warmer or cooler headline also needs the
-correlation and the two groups shown to point in the same direction, and it must still hold when
-any one night is left out. If it does not, the card says there is a hint but it is not reported as a
-pattern yet, without showing comparison averages. The footer shows the number of tracked nights
-and how many are in each group. The "wake-ups avg" columns put each group's average hourly rate
+correlation and the two groups shown to point in the same direction, and both the correlation and
+the groups' direction must still hold when any one night is left out. If they do not, the card says
+there is a hint but it is not reported as a pattern yet, without showing comparison averages. The
+footer shows the number of tracked nights and how many are in each group. The "wake-ups avg"
+columns put each group's average hourly rate
 onto the same average watched night, so the two columns match what the headline compares. With
 equal watched time every night, these are the ordinary wake-up averages. Known limits: the rate is
 per watched hour of the configured window, not per hour slept; the card uses stored detector wake

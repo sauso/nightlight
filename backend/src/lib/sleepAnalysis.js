@@ -3967,14 +3967,22 @@ function pearson(xs, ys) {
 const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
 const wakeRate = (row) => row.wake_count * 60 / row.coverage_minutes;
 
-function leaveOneOutStable(temps, rates, verdictClass) {
+function leaveOneOutStable(temps, rates, median, verdictClass) {
   // Owner decision 2026-11-17 (#365, Codex plan review): a single night must not carry a headline.
-  // This hard gate is judgement, not a measured confidence level; it rechecks the r class only, not
-  // group sizes, because the groups and their median were fixed using all eligible nights.
+  // This hard gate is judgement, not a measured confidence level. Recheck both correlation and the
+  // direction of the displayed groups; keep their full-set median and membership fixed, and do not
+  // reapply the minimum group size after a drop. Compare drop rates before rounding: rounding here
+  // could mark a night unstable even when the displayed averages would not change.
   for (let i = 0; i < temps.length; i++) {
     const remainingR = pearson(temps.filter((_, j) => j !== i), rates.filter((_, j) => j !== i));
     if (verdictClass === 'warm_more_wakes' ? remainingR == null || remainingR < INSIGHT_R
       : remainingR == null || remainingR > -INSIGHT_R) return false;
+    const coolRates = rates.filter((_, j) => j !== i && temps[j] < median);
+    const warmRates = rates.filter((_, j) => j !== i && temps[j] > median);
+    if (!coolRates.length || !warmRates.length) return false;
+    const agrees = verdictClass === 'warm_more_wakes'
+      ? mean(warmRates) > mean(coolRates) : mean(warmRates) < mean(coolRates);
+    if (!agrees) return false;
   }
   return true;
 }
@@ -4034,6 +4042,8 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
     avg_wakes: Math.round(mean(set.map(wakeRate)) * averageCoverageHours * 10) / 10,
     avg_asleep_minutes: Math.round(mean(set.map((r) => r.asleep_minutes))),
   });
+  const cooler = cool.length ? half(cool) : null;
+  const warmer = warm.length ? half(warm) : null;
 
   // Verdict the UI turns into a sentence. 'flat' = temperature barely varied, so we can't say anything.
   // 'flat' stays FIRST (#365): it says nothing about sleep, only that the room barely varied. A room
@@ -4046,15 +4056,16 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   if (spread < INSIGHT_TEMP_SPREAD) verdict = 'flat';
   else if (cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';
   // Owner decision 2026-11-17 (#365, Codex plan review): median-tied nights affect r but appear
-  // in neither column. A directional headline needs the displayed groups to agree with its direction.
+  // in neither column. A directional headline needs the rounded values readers see to agree too;
+  // an unrounded difference that displays as equal is not evidence for a directional headline.
   else if (rWakes != null && rWakes >= INSIGHT_R &&
-    mean(warm.map(wakeRate)) > mean(cool.map(wakeRate))) verdict = 'warm_more_wakes';
+    warmer.avg_wakes > cooler.avg_wakes) verdict = 'warm_more_wakes';
   else if (rWakes != null && rWakes <= -INSIGHT_R &&
-    mean(warm.map(wakeRate)) < mean(cool.map(wakeRate))) verdict = 'warm_fewer_wakes';
+    warmer.avg_wakes < cooler.avg_wakes) verdict = 'warm_fewer_wakes';
 
   let direction;
   if (verdict === 'warm_more_wakes' || verdict === 'warm_fewer_wakes') {
-    if (!leaveOneOutStable(temps, rates, verdict)) {
+    if (!leaveOneOutStable(temps, rates, median, verdict)) {
       direction = verdict === 'warm_more_wakes' ? 'more' : 'fewer';
       verdict = 'unstable';
     }
@@ -4077,8 +4088,8 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
         ? Math.round(mean(rows.filter((r) => r.avg_humidity != null).map((r) => r.avg_humidity)))
         : null,
     },
-    cooler: cool.length ? half(cool) : null,
-    warmer: warm.length ? half(warm) : null,
+    cooler,
+    warmer,
   };
 }
 

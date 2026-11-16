@@ -346,6 +346,43 @@ test('#365 leaving one night out can weaken r below the threshold without making
   assert.equal(r.direction, 'more');
 });
 
+test('#365 dropping a warm night must keep the displayed groups in the headline direction', () => {
+  // Owner decision 2026-11-17 (#365, Codex plan review): 21 nights at 700 watched minutes.
+  // Cooler wakes total 53 (5.3 avg); warmer total 57 (5.7 avg), including one 10-wake night.
+  // Full r is about 0.48 and every drop keeps r above 0.35 (lowest about 0.357), but dropping
+  // that warm night leaves 47/9 = 5.22, below the cooler 5.3. One night decides the headline.
+  const coolWakes = [3, 3, 4, 4, 6, 6, 7, 6, 7, 7];
+  const warmWakes = [3, 3, 3, 7, 6, 7, 4, 7, 7, 10];
+  layNights(KID, [
+    ...coolWakes.map((wakes, i) => [18 + i * 0.2, wakes, 600]),
+    [20, 5, 600],
+    ...warmWakes.map((wakes, i) => [20.2 + i * 0.2, wakes, 600]),
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.equal(r.cooler.avg_wakes, 5.3);
+  assert.equal(r.warmer.avg_wakes, 5.7);
+  assert.equal(r.verdict, 'unstable');
+  assert.equal(r.direction, 'more');
+});
+
+test('#365 rounded equal columns cannot support a directional headline', () => {
+  // Owner decision 2026-11-17 (#365, Codex plan review): ten cool nights have 4 wakes/700
+  // watched minutes, the median has 4/695, and ten warm nights have 4/690. The rates and
+  // every leave-one-out r stays above the threshold, but both displayed averages round to 4.0.
+  layNights(KID, [
+    ...Array.from({ length: 10 }, () => [18, 4, 600, null, 700]),
+    [20, 4, 600, null, 695],
+    ...Array.from({ length: 10 }, () => [22, 4, 600, null, 690]),
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.equal(r.cooler.avg_wakes, 4);
+  assert.equal(r.warmer.avg_wakes, 4);
+  assert.equal(r.verdict, 'none');
+  assert.equal('direction' in r, false);
+});
+
 test('#365 median ties cannot produce a headline contradicted by the shown groups', () => {
   layNights(KID, [
     ...Array.from({ length: 10 }, () => [18, 1, 600]),
