@@ -346,6 +346,50 @@ test('#365 leaving one night out can weaken r below the threshold without making
   assert.equal(r.direction, 'more');
 });
 
+test('#365 leaving one night out: r below the threshold alone makes it unstable', () => {
+  // Owner decision 2026-11-17 (#365, Codex plan review): the 10 cooler wakes are
+  // [4, 6, 8, 7, 5, 8, 6, 5, 3, 7] (mean 5.9); the 10 warmer wakes are
+  // [4, 8, 7, 8, 8, 9, 5, 6, 5, 13] (mean 7.3). All nights have 700 watched minutes.
+  // Full r = 0.615422; dropping the 30 C / 13-wake night gives r = 0.226763,
+  // while every other drop has r = 0.597702..0.677442. The warmer-minus-cooler
+  // mean stays 0.766667..1.766667 after every drop, so only the correlation
+  // threshold can make this headline unstable.
+  const coolWakes = [4, 6, 8, 7, 5, 8, 6, 5, 3, 7];
+  const warmWakes = [4, 8, 7, 8, 8, 9, 5, 6, 5];
+  layNights(KID, [
+    ...coolWakes.map((wakes) => [18, wakes, 600]),
+    [20, 5, 600],
+    ...warmWakes.map((wakes) => [22, wakes, 600]),
+    [30, 13, 600],
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.equal(r.temp_wake_r, 0.62);
+  assert.equal(r.verdict, 'unstable');
+  assert.equal(r.direction, 'more');
+});
+
+test('#365 leaving one night out: fewer wakes r above the threshold alone makes it unstable', () => {
+  // Mirror of the fixture above: 14 minus each wake count gives cooler mean 8.1,
+  // warmer mean 6.7, full r = -0.615422 and r = -0.226763 after dropping the
+  // 30 C / 1-wake night. Other drops have r = -0.677442..-0.597702, and the
+  // warmer-minus-cooler mean stays -1.766667..-0.766667 after every drop.
+  // Only the negative correlation threshold can withhold the headline.
+  const coolWakes = [4, 6, 8, 7, 5, 8, 6, 5, 3, 7];
+  const warmWakes = [4, 8, 7, 8, 8, 9, 5, 6, 5];
+  layNights(KID, [
+    ...coolWakes.map((wakes) => [18, 14 - wakes, 600]),
+    [20, 9, 600],
+    ...warmWakes.map((wakes) => [22, 14 - wakes, 600]),
+    [30, 1, 600],
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.equal(r.temp_wake_r, -0.62);
+  assert.equal(r.verdict, 'unstable');
+  assert.equal(r.direction, 'fewer');
+});
+
 test('#365 dropping a warm night must keep the displayed groups in the headline direction', () => {
   // Owner decision 2026-11-17 (#365, Codex plan review): 21 nights at 700 watched minutes.
   // Cooler wakes total 53 (5.3 avg); warmer total 57 (5.7 avg), including one 10-wake night.
