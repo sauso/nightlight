@@ -336,7 +336,9 @@ check_processes() {
     name=$(status_field "$st" Name)
     # Node renames its main thread, so /proc/<pid>/status says "MainThread" rather than "node" (seen in the first CI
     # run of this script). The command line is the reliable name for it: node is the process running src/index.js.
-    if [ "$name" = MainThread ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qE '(^| |/)node( |$)'; then
+    # Node 26 names it "node-MainThread" (found by the first e2e run of the #751 soak branch: every check here failed
+    # with "no node process under tini"), so both spellings are accepted.
+    if { [ "$name" = MainThread ] || [ "$name" = node-MainThread ]; } && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qE '(^| |/)node( |$)'; then
       name=node
     fi
     uid=$(status_field "$st" Uid)

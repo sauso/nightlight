@@ -81,6 +81,8 @@ import {
 // lib/cameraWatchdogs.js get from perTargetRunner). See lib/processGuards.js for why an unattended
 // monitor deliberately does NOT follow Node's exit-on-uncaught guidance.
 installCrashGuards();
+// #751 SOAK: one early line makes the running Node and architecture visible in staging evidence.
+logger.info(`[boot] Node ${process.version} (${process.arch})`);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
