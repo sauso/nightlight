@@ -39,6 +39,12 @@ updates:
     target-branch: "dev"
     schedule:
       interval: "weekly"
+    ignore:
+      # WHY: React 19 is the planned migration in planning/634-react19.md (#634), not a Dependabot PR.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
 
   # No committed E2E lock: it is a per-run artefact (see playwright/.gitignore).
   # Dependabot bumps the manifest only. Bump the Playwright image tag in the same

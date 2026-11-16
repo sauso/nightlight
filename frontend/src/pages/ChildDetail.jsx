@@ -13,13 +13,12 @@ import LoadFailed from '../components/LoadFailed.jsx';
 import { loadState } from '../lib/loadState.js';
 import SensorHistoryCard from '../components/SensorHistoryCard.jsx';
 import SleepSummaryCard from '../components/SleepSummaryCard.jsx';
-import TimelapseCard from '../components/TimelapseCard.jsx';
 import RecordingsCard from '../components/RecordingsCard.jsx';
 import MorningReviewCard from '../components/MorningReviewCard.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { ageLabel } from '../lib/age.js';
 
-// A child's hub: ONE night card (identity, last night's sleep, the morning question), then their camera, timelapse, alerts and recordings.
+// A child's hub: ONE night card (identity, last night's sleep, the morning question), then their camera, alerts and recordings.
 // The avatar opens the photo (or Child settings when there is none) and the gear opens Child settings (name / birthday /
 // colour / photo). Alerts are filtered to this child's cameras client-side via each event's camera_id.
 
@@ -119,13 +118,14 @@ export default function ChildDetail() {
     <>
       <AppHeader title={kid.name} back={{ to: '/children', label: 'Children' }} />
       {/* ★ LAYOUT (UI refresh PR D). The DOM is the PHONE order, which is also the reading and tab order: night card, camera,
-          timelapse, recent alerts, recordings, sensor history. From 1024px the same elements are placed in two columns by
+          recent alerts, recordings, sensor history. From 1024px the same elements are placed in two columns by
           CSS grid (index.css, `.child-page`), alerts under the night card and everything else in the other column, as drawn.
           Nothing is reordered with `order`, so a keyboard or screen-reader user never gets an order that disagrees with the
-          screen. Each section sits in its own wrapper because TimelapseCard and RecordingsCard render NOTHING until there
-          is something to show; the wrapper is then an empty box that takes no space. */}
-      {/* The timelapse, alerts and recordings cards are keyed by child (below): this component is reused when only :id changes, and
-          each card keeps local state (the picked night, "See all alerts" expanded, the Recordings row open) that must not carry from one
+          screen. Each section sits in its own wrapper because RecordingsCard renders NOTHING until there
+          is something to show; the wrapper is then an empty box that takes no space. (The nightly timelapse is not on this page:
+          it is on each night's page, under the Timeline.) */}
+      {/* The alerts and recordings cards are keyed by child (below): this component is reused when only :id changes, and
+          each card keeps local state ("See all alerts" / "See all recordings" expanded, an open player) that must not carry from one
           child to the next. */}
       <main className="app-main child-page">
         <div className="child-page__night">
@@ -184,8 +184,6 @@ export default function ChildDetail() {
             </div>
           )}
         </div>
-
-        <div className="child-page__timelapse"><TimelapseCard key={id} childId={id} /></div>
 
         <div className="child-page__alerts">
           {alertsState === 'ready' || alertsState === 'stale' ? (

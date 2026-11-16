@@ -726,16 +726,19 @@ closing sentence.
   this nightly rule and is not handled live. And a camera that has delivered no video since the server started
   (for example one with no video feed at all) keeps its sound in the live watcher, while this rule counts its
   minutes as unwatched.
-- **A parent's corrected night** subtracts the night's stored unknown minutes from the corrected span as
-  one total (an existing limit of corrections). A recompute that adds many unknown minutes to a corrected
-  night can therefore shrink its displayed sleep more than the stall alone explains. Since a corrected
-  night's saved summary is locked (docs/sleep-tracking.md, "A night you have corrected is locked"), that no longer happens
-  to the child's card after the correction is saved; the figure stops changing but is not made exact. The
-  sleep detail page works the night out fresh each time, so it can still show it. Since a finished night is
-  shown with the camera, timezone and window it was saved with (docs/sleep-tracking.md, "Finished nights use
-  the settings they were saved with"), a later change of camera, timezone or window no longer adds to that
-  difference for a night saved with its settings recorded; a change to the detection rules, or data recorded
-  after the night was locked, still can.
+- **A parent's corrected night.** When a parent moves the asleep or wake-up time of a night the app
+  scored, the app measures the night between the parent's times while its camera samples still exist
+  (about 30 days): when the review is saved, and in the nightly update for corrections saved earlier.
+  Minutes outside the measured range, or in a video gap, are unknown, and the child's card and the
+  sleep detail page show the same saved times and figures, also after the samples expire. A correction
+  the app cannot measure (one saved before this change whose samples are gone, or one it could not
+  rebuild) keeps the earlier behaviour: the night's stored unknown minutes are subtracted from the
+  corrected span as one total, so the asleep figure is an estimate that can count unwatched minutes as
+  sleep or leave out some sleep; wake-ups and minutes awake stay the detector's and may not match the
+  corrected times; and the longest stretch is capped at the asleep total. The card then reads the stored
+  night and the detail page a fresh calculation, as for an uncorrected night, so the two can differ.
+  Wake-coloured segments outside the corrected span are by design: the detector paints its morning run
+  as a wake.
 
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.
@@ -858,8 +861,10 @@ one moves both. They are constants, not settings, so there is no default to chan
   the future of the clock).
 
 **What to do:** nothing. In the log, `[wake] "<camera>" settled — watching for wakes` marks the start of
-watching. No such line all night means either that the camera never had 15 unbroken minutes, or that the
-watcher was still armed from the previous night (it settles only once, so it logs nothing the second time).
+watching. After a restart in the same sleep window, `[wake] resumed asleep latch` means the camera was already
+settled; it need not wait another 15 quiet minutes. No `settled` line all night can mean the camera never had
+15 unbroken minutes, that it resumed a saved asleep result, or that the watcher was still armed from the previous
+night (it settles only once, so it logs nothing the second time).
 To narrow it down, look for the line a hole writes while the watcher is still settling:
 `[wake] "<camera>" settling restarted: readings N min apart after M quiet minute(s)`. N is the distance in minutes
 between the two OBSERVED readings around the hole (a minute with sound but no video is not an observed reading, so
@@ -879,8 +884,8 @@ after them mean holes keep sending that camera's count back to zero. Read the M 
 appear: M close to 15 means one missing minute each time was all that stood between the camera and watching
 (the strict rule is what is in the way), while small M values say little on their own, because a restless
 child with active minutes in between would not have settled with every hole filled either. No restart line
-and no `settled` line means the child never had 15 quiet minutes, the watcher was still armed from the night
-before, or only the silent cases above applied. A
+and no `settled` line means the child never had 15 quiet minutes, the watcher resumed a saved asleep result,
+the watcher was still armed from the night before, or only the silent cases above applied. A
 run dropped at a gap logs `run ended (readings N min apart)` when that run had taken a ring hold (N is the
 distance between the two readings, which is also what a forward jump of the server's clock looks like); a run
 ended by a video stall logs `run ended (video not observed; readings N min apart)` instead (since issue #588; N is
@@ -1177,7 +1182,7 @@ alert cannot fire sooner than **Motion cooldown** after it, whatever happened to
   longer re-arms an alert (it did, before).
 - **An alert that was silenced** (outside the alert schedule, or by snoozing the camera) does not start a
   cooldown, so one can fire as soon as the schedule opens or the snooze ends (unchanged).
-- **Hold alerts until asleep (#919):** held live motion and sound alerts are dropped, not queued, and the hold does not stamp their cooldown. Outside the sleep window the watcher cannot detect sleep, so the hold has no time limit: an evening crying spell or daytime nap can be silent. A restart resets both the watcher's quiet count and the inside-window 45-minute clock, allowing up to another 45 minutes of holding inside the window. A camera reassigned between two tracked children while both windows are open can retain its asleep latch and let the new child's alerts through early. `alerting_now` still reports true during a hold because it only reads snooze and the Alert schedule. The 45-minute cap is a design choice, not measured; inside the window, a child who cries without settling can be alerted only after it. This is not a safety device. Demo sample events bypass the live alert path.
+- **Hold alerts until asleep (#919, #1037):** held live motion and sound alerts are dropped, not queued, and the hold does not stamp their cooldown. Outside the sleep window the watcher cannot detect sleep, so the hold has no time limit: an evening crying spell or daytime nap can be silent. After sleep is detected, a restart in the same window resumes the saved asleep result; before detection, a restart resets the quiet count and inside-window 45-minute clock, allowing up to another 45 minutes of holding. A saved result for a camera reassigned to another child is discarded at restart. A window open for almost 24 hours can change its start while staying open, so a restart can lose the saved result. `alerting_now` still reports true during a hold because it only reads snooze and the Alert schedule. The 45-minute cap is a design choice, not measured; inside the window, a child who cries without settling can be alerted only after it. This is not a safety device. Demo sample events bypass the live alert path.
 - **A backward step of the server's clock** (a time-sync correction) silences the frame-diff alert for at most
   one cooldown, counted from the first video frame analysed after the step (at 5 frames a second that is
   immediate; if frames stop for ten minutes after the step it starts at the next frame). The ONVIF and MQTT

@@ -41,7 +41,7 @@ Watching **both remotely in Low latency (WebRTC)** takes one extra step, because
 
 ## Finding your server automatically
 
-Nightlight announces itself on your home network (mDNS, the same way printers and smart speakers are found), so a phone can find it without anyone typing an address. The phone app's side of this is planned and not built yet; today the announcement is only visible to network-browsing tools. It is on by default.
+Nightlight announces itself on your home network (mDNS, the same way printers and smart speakers are found), so a phone can find it without anyone typing an address. The Android and iPhone apps use it: tap **Look for my Nightlight** on the setup screen and pick your server from the list ([how it works](mobile.md#finding-your-server-and-when-its-address-changes)). It is on by default.
 
 Whether a phone can hear it depends on how the container is networked:
 

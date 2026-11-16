@@ -39,6 +39,21 @@ describe('copyText', () => {
     expect(await copyText('x')).toBe('copied');
   });
 
+  test('the fallback returns focus to the control used to copy', async () => {
+    setClipboard(undefined);
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    button.focus();
+    // Browsers can move focus to the selected temporary box while copying.
+    document.execCommand = vi.fn(() => { document.querySelector('textarea').focus(); return true; });
+    try {
+      expect(await copyText('x')).toBe('copied');
+      expect(document.activeElement).toBe(button);
+    } finally {
+      button.remove();
+    }
+  });
+
   test('★ when nothing works it says so instead of throwing, and still removes its box', async () => {
     setClipboard(undefined);
     document.execCommand = vi.fn(() => false);

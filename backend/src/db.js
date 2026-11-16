@@ -333,6 +333,7 @@ db.exec(`
     note TEXT,
     dismissed INTEGER NOT NULL DEFAULT 0,
     nobody_in_bed INTEGER NOT NULL DEFAULT 0,
+    span_figures TEXT,
     reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
     answered_by_user_id TEXT,
     answered_by_username TEXT,
@@ -567,6 +568,12 @@ for (const col of ['true_onset_transition_id', 'true_wake_transition_id', 'true_
 // no way to tell which stored onsets came from the old "Put down here" button).
 if (!sleepReviewColumns.includes('true_in_bed_at')) {
   db.exec('ALTER TABLE sleep_reviews ADD COLUMN true_in_bed_at TEXT');
+}
+
+// #355, Opus/Codex plan review 2026-11-16: old reviews have no measured
+// correction snapshot until the bounded nightly backfill reaches them.
+if (!sleepReviewColumns.includes('span_figures')) {
+  db.exec('ALTER TABLE sleep_reviews ADD COLUMN span_figures TEXT');
 }
 
 // "No one was in the bed" — a parent saying the detector's whole night was about an empty bed (added
@@ -1186,6 +1193,19 @@ db.exec(`
     ended_at INTEGER NOT NULL,
     notified INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+  )
+`);
+
+// #1037, Opus/Codex plan review: the asleep latch belongs to both the camera and its child.
+// A camera can be reassigned, and its child_id becomes NULL on child deletion. These timestamps are epoch ms;
+// the window start, rather than the saved time, decides whether a latch is still valid after a restart.
+// CREATE IF NOT EXISTS upgrades existing databases; older versions simply ignore this table.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS wake_asleep_latch (
+    camera_id TEXT PRIMARY KEY REFERENCES cameras(id) ON DELETE CASCADE,
+    child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    window_start_ms INTEGER NOT NULL,
+    asleep_at INTEGER NOT NULL
   )
 `);
 

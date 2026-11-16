@@ -38,9 +38,10 @@ const alert = (cameraId, i = 0) => ({
   created_at: '2026-08-30 09:00:00',
 });
 
-// Path-aware so the child cards (sleep summary, morning review, timelapses, recordings) each get
-// something harmless while the test drives only the alerts feed. The timelapse and recording lists are empty unless
-// a test passes some (the two cards render nothing for an empty list).
+// Path-aware so the child cards (sleep summary, morning review, recordings) each get
+// something harmless while the test drives only the alerts feed. The recording list is empty unless a test passes some (the
+// card renders nothing for an empty list). `timelapses` is answered too, but only so a test can prove the child page does NOT
+// draw them any more (they are on each night's page, under the Timeline).
 function mockApi({ alerts = [], timelapses = [], recordings = [] } = {}) {
   vi.spyOn(api, 'get').mockImplementation((path) => {
     if (String(path).includes('/cameras/alerts')) return Promise.resolve(alerts);
@@ -503,18 +504,24 @@ describe('the child page below the night card', () => {
   // True when `a` comes before `b` in the document: the DOM order IS the phone layout and the keyboard order (the two-column
   // desktop layout is CSS grid placement only, never a reorder).
   const before = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  // The Recordings card is drawn like the alerts card and reuses its classes, so the two are told apart by the page's own wrappers.
+  const ALERTS_CARD = '.child-page__alerts .alert-list';
+  const RECORDINGS_CARD = '.child-page__recordings .alert-list';
 
   beforeEach(() => vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`));
 
-  test('★ the sections come in the designed order: night card, camera, timelapse, recent alerts, recordings', async () => {
+  test('★ the sections come in the designed order: night card, camera, recent alerts, recordings, and no timelapse', async () => {
     full();
     const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
     const q = (s) => container.querySelector(s);
-    await waitFor(() => expect(q('.recordings-card')).not.toBeNull());
-    await waitFor(() => expect(q('.alert-item')).not.toBeNull());
-    await waitFor(() => expect(q('.timelapse-card')).not.toBeNull());
-    const order = [q('.night'), q('.child-cam'), q('.timelapse-card'), q('.alert-list'), q('.recordings-card')];
+    await waitFor(() => expect(q(RECORDINGS_CARD)).not.toBeNull());
+    await waitFor(() => expect(q(`${ALERTS_CARD} .alert-item`)).not.toBeNull());
+    const order = [q('.night'), q('.child-cam'), q(ALERTS_CARD), q(RECORDINGS_CARD)];
     for (let i = 0; i < order.length - 1; i += 1) expect(before(order[i], order[i + 1]), `section ${i} should precede section ${i + 1}`).toBe(true);
+    // ★ The timelapse moved to each night's page (under the Timeline): the child page neither draws it nor asks for the list.
+    expect(q('.timelapse-card')).toBeNull();
+    expect(q('.child-page__timelapse')).toBeNull();
+    expect(api.get.mock.calls.some(([p]) => String(p).includes('/timelapses/'))).toBe(false);
   });
 
   test('★ the old "Cameras · n" heading and the "<child> camera" suffix are gone; the tile carries the status and "Watch live"', async () => {
@@ -529,26 +536,27 @@ describe('the child page below the night card', () => {
     expect(screen.getAllByRole('button', { name: 'Watch live' })).toHaveLength(2);
   });
 
-  // ★ ChildDetail is NOT remounted when only :id changes, and the alerts, recordings and timelapse cards keep local state (the
-  // expanded "See all alerts", the open Recordings row, the picked night). Keyed by child, that state starts over for the next child.
-  test('★ switching child resets "See all alerts" and the Recordings row', async () => {
+  // ★ ChildDetail is NOT remounted when only :id changes, and the alerts and recordings cards keep local state (the expanded
+  // "See all alerts", the expanded "See all recordings"). Keyed by child, that state starts over for the next child.
+  test('★ switching child resets "See all alerts" and "See all recordings"', async () => {
     const five = (cam) => [1, 2, 3, 4, 5].map((i) => ({ ...alert(cam, i), created_at: `2026-09-0${i} 10:00:00` }));
-    mockApi({ alerts: [...five('cam-a1'), ...five('cam-b1')], recordings: RECORDINGS });
+    const fiveRecordings = [1, 2, 3, 4, 5].map((i) => ({ id: `r-${i}`, status: 'ready', camera_name: 'Child B Room', started_at: `2026-09-0${i} 10:00:00`, duration_s: 30 }));
+    mockApi({ alerts: [...five('cam-a1'), ...five('cam-b1')], recordings: fiveRecordings });
     function Jump() { const go = useNavigate(); return <button type="button" onClick={() => go('/children/kid-2')}>jump</button>; }
     const { container, user } = renderAsAdmin(
       <Routes><Route path="/children/:id" element={<><Jump /><ChildDetail /></>} /></Routes>, atChild('kid-1'));
-    await waitFor(() => expect(container.querySelectorAll('.alert-item')).toHaveLength(3));
+    await waitFor(() => expect(container.querySelectorAll(`${ALERTS_CARD} .alert-item`)).toHaveLength(3));
     await user.click(screen.getByRole('button', { name: 'See all alerts' }));
-    await user.click(await screen.findByRole('button', { name: /^Recordings/ }));
-    expect(container.querySelectorAll('.alert-item')).toHaveLength(5);
-    expect(container.querySelector('.rec-strip')).not.toBeNull();
+    await user.click(await screen.findByRole('button', { name: 'See all recordings' }));
+    expect(container.querySelectorAll(`${ALERTS_CARD} .alert-item`)).toHaveLength(5);
+    expect(container.querySelectorAll(`${RECORDINGS_CARD} .alert-item`)).toHaveLength(5);
 
     await user.click(screen.getByRole('button', { name: 'jump' }));
     await waitFor(() => expect(container.querySelector('.night__name').textContent).toBe('Child A'));
-    await waitFor(() => expect(container.querySelectorAll('.alert-item')).toHaveLength(3));
+    await waitFor(() => expect(container.querySelectorAll(`${ALERTS_CARD} .alert-item`)).toHaveLength(3));
     expect(screen.getByRole('button', { name: 'See all alerts' })).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByRole('button', { name: /^Recordings/ })).toHaveAttribute('aria-expanded', 'false');
-    expect(container.querySelector('.rec-strip')).toBeNull();
+    expect(screen.getByRole('button', { name: 'See all recordings' })).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelectorAll(`${RECORDINGS_CARD} .alert-item`)).toHaveLength(3);
   });
 
   test('★ a disabled camera has no "Watch live" (the Live tab hides it); the others still do', async () => {
@@ -587,40 +595,31 @@ describe('the child page below the night card', () => {
   test('★ recent alerts: three rows, a "See all alerts" row, and the rest on request', async () => {
     full();
     const { container, user } = renderAsAdmin(detailRoutes, atChild('kid-1'));
-    await waitFor(() => expect(container.querySelectorAll('.alert-item')).toHaveLength(3));
+    await waitFor(() => expect(container.querySelectorAll(`${ALERTS_CARD} .alert-item`)).toHaveLength(3));
     expect(screen.getByText('Recent alerts')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'See all alerts' }));
-    expect(container.querySelectorAll('.alert-item')).toHaveLength(5);
+    expect(container.querySelectorAll(`${ALERTS_CARD} .alert-item`)).toHaveLength(5);
   });
 
-  test('★ the timelapse has one player and a strip of recent nights as small thumbnails labelled by weekday', async () => {
+  // The owner asked for Recordings to look like Recent alerts (2026-11-15): a titled card, a row per recording, visible at once.
+  test('★ recordings are a titled card of rows like the alerts, with no row to open first', async () => {
     full();
     const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
-    await waitFor(() => expect(container.querySelectorAll('.timelapse-strip__item')).toHaveLength(2));
-    const labels = [...container.querySelectorAll('.timelapse-strip__item')].map((el) => el.textContent);
-    expect(labels).toEqual(['Tue', 'Mon']); // 2026-09-01 is a Tuesday, 2026-08-31 a Monday
-    expect(container.querySelectorAll('.timelapse-hero')).toHaveLength(1);
-  });
-
-  test('★ recordings are one row with the newest time, and the thumbnails open from it', async () => {
-    full();
-    const { container, user } = renderAsAdmin(detailRoutes, atChild('kid-1'));
-    const row = await screen.findByRole('button', { name: /^Recordings/ });
-    expect(row).toHaveAttribute('aria-expanded', 'false');
+    await waitFor(() => expect(container.querySelectorAll(`${RECORDINGS_CARD} .alert-item--btn`)).toHaveLength(1));
+    expect(container.querySelector(`${RECORDINGS_CARD} .alert-list__title`)).toHaveTextContent('Recordings');
+    expect(container.querySelector('.recordings-row')).toBeNull();
     expect(container.querySelector('.rec-strip')).toBeNull();
-    await user.click(row);
-    expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(1);
   });
 
   // The quiet empty states: each section that has nothing leaves no placeholder behind, and the ones that explain say so.
-  test('★ with nothing to show: no timelapse card, no recordings row, and the alerts card says there are none', async () => {
+  test('★ with nothing to show: no recordings card, and the alerts card says there are none', async () => {
     mockApi();
     const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/recordings/child/kid-1'));
     await screen.findByText(/No alerts for Child B yet/);
-    expect(container.querySelector('.timelapse-card')).toBeNull();
-    expect(container.querySelector('.recordings-card')).toBeNull();
+    expect(container.querySelector(RECORDINGS_CARD)).toBeNull();
     expect(screen.queryByRole('button', { name: 'See all alerts' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'See all recordings' })).toBeNull();
     // The alerts card keeps its title even when empty.
     expect(screen.getByText('Recent alerts')).toBeTruthy();
   });
@@ -636,10 +635,9 @@ describe('the child page below the night card', () => {
   test('★ a caregiver sees every section an admin sees, and none of the admin-only controls', async () => {
     full();
     const { container } = renderAsCaregiver(detailRoutes, atChild('kid-1'));
-    await waitFor(() => expect(container.querySelector('.timelapse-card')).not.toBeNull());
-    await waitFor(() => expect(container.querySelector('.recordings-card')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(RECORDINGS_CARD)).not.toBeNull());
     expect(container.querySelectorAll('.child-cam')).toHaveLength(2);
-    expect(container.querySelectorAll('.alert-item')).toHaveLength(3);
+    expect(container.querySelectorAll(`${ALERTS_CARD} .alert-item`)).toHaveLength(3);
     expect(screen.queryByRole('button', { name: /Camera settings for/ })).toBeNull();
   });
 });

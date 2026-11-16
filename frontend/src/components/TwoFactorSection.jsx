@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
 import ModalActions from './ModalActions.jsx';
 import { holdReload } from '../lib/reloadGuard.js';
 import { isNativeApp } from '../lib/nativeBridge.js';
-import { useLater } from '../lib/useLater.js';
+import { copyText } from '../lib/copyText.js';
 
 // A touch device, where the authenticator is likely on the same phone and a QR code cannot be scanned from
 // the screen it is on. Guarded because jsdom (and old browsers) have no matchMedia.
@@ -25,7 +25,6 @@ const PASSWORD_STEP = {
 // one-time backup codes), and turn off (password-confirmed). Works everywhere (no secure-context
 // requirement), unlike the passkeys planned for a later phase.
 export default function TwoFactorSection() {
-  const later = useLater(); // the "Copied" tick (#855)
   const [status, setStatus] = useState(null); // { enabled, backup_codes_remaining } | null
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -33,7 +32,16 @@ export default function TwoFactorSection() {
   const [setup, setSetup] = useState(null); // { secret, otpauth_uri, qr, resumed?, notContinued } while enrolling
   const [code, setCode] = useState('');
   const [backupCodes, setBackupCodes] = useState(null); // shown once after enabling
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState(null); // null | 'copied' | 'manual' (see lib/copyText.js)
+  const copyResetTimer = useRef(null);
+  const copyAttempt = useRef(0);
+
+  // A later click restarts this tick, and closing the one-time panel must cancel its timer and any copy in flight.
+  useEffect(() => () => {
+    copyAttempt.current += 1;
+    clearTimeout(copyResetTimer.current);
+    copyResetTimer.current = null;
+  }, [backupCodes]);
 
   const [disabling, setDisabling] = useState(false);
   // Which set-up the password step is for: 'start' | 'resume' | 'restart' | null. Every set-up call needs the
@@ -93,7 +101,7 @@ export default function TwoFactorSection() {
       const res = await api.post('/auth/me/mfa/enable', { code: code.trim() });
       setSetup(null);
       setBackupCodes(res.backup_codes);
-      setCopied(false);
+      setCopied(null);
       await loadStatus();
     } catch (err) {
       setError(err.message);
@@ -115,11 +123,18 @@ export default function TwoFactorSection() {
     }
   }
 
-  function copyCodes() {
-    navigator.clipboard?.writeText(backupCodes.join('\n')).then(
-      () => { setCopied(true); later(() => setCopied(false), 2000); },
-      () => {},
-    );
+  async function copyCodes() {
+    // LAN http has no clipboard API; the shared helper tries a selectable textarea, then reports failure.
+    clearTimeout(copyResetTimer.current);
+    copyResetTimer.current = null;
+    const attempt = ++copyAttempt.current;
+    const result = await copyText(backupCodes.join('\n'));
+    if (attempt !== copyAttempt.current) return;
+    setCopied(result);
+    if (result === 'copied') copyResetTimer.current = setTimeout(() => {
+      copyResetTimer.current = null;
+      setCopied((current) => current === 'copied' ? null : current);
+    }, 2000);
   }
 
   const enabled = !!status?.enabled;
@@ -230,12 +245,28 @@ export default function TwoFactorSection() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontFamily: 'var(--font-mono)', fontSize: 14, marginBottom: 12 }}>
             {backupCodes.map((c) => (
-              <div key={c} style={{ background: 'var(--bg-elevated-2)', padding: '8px 10px', borderRadius: 8, textAlign: 'center' }}>{c}</div>
+              <div key={c} style={{ background: 'var(--bg-elevated-2)', padding: '8px 10px', borderRadius: 8, textAlign: 'center', userSelect: 'all' }}>{c}</div>
             ))}
           </div>
+          {/* Keep the live region mounted so a failed copy is announced when its text changes. */}
+          <p role="status" aria-live="polite" style={{ margin: 0 }}>
+            {copied === 'manual' ? "Couldn't copy automatically. The codes are selected below: copy them by hand." : ''}
+          </p>
+          {copied === 'manual' && (
+            <div className="field" style={{ marginTop: 10 }}>
+              <label htmlFor="mfa-backup-codes-manual">Backup codes</label>
+              <textarea id="mfa-backup-codes-manual" readOnly rows={backupCodes.length} spellCheck={false}
+                value={backupCodes.join('\n')} autoFocus
+                // The grid is not focusable; selecting this field gives keyboard and touch users a manual copy path.
+                onFocus={(e) => e.target.select()}
+                style={{ boxSizing: 'border-box', width: '100%', fontFamily: 'var(--font-mono)', fontSize: 14,
+                  background: 'var(--field-bg)', color: 'var(--text-primary)', border: '1px solid var(--border)',
+                  borderRadius: 10, padding: '11px 12px' }} />
+            </div>
+          )}
           <ModalActions>
             <button className="btn btn-secondary" onClick={copyCodes}>
-              {copied ? 'Copied ✓' : 'Copy codes'}
+              {copied === 'copied' ? 'Copied ✓' : 'Copy codes'}
             </button>
             <button className="btn btn-primary" onClick={() => setBackupCodes(null)}>I've saved them</button>
           </ModalActions>

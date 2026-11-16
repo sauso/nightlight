@@ -61,7 +61,7 @@ The Live tab shows every enabled camera, with its status, name, assigned child a
 
 ### 3. A child's overview
 
-Each child has a page showing last night's sleep with its score and a one-line summary, a prompt to check the wake time, the camera, the nightly timelapse, recent alerts and recordings. See [Sleep tracking](sleep-tracking.md) for how nights are estimated and what the limits are.
+Each child has a page showing last night's sleep with its score and a one-line summary, a prompt to check the wake time, the camera, recent alerts and recordings (the newest three of each, with a button for the rest). Each night's own page also has that night's timelapse under its timeline. See [Sleep tracking](sleep-tracking.md) for how nights are estimated and what the limits are.
 
 ![A child's overview on a phone](screenshots/child-mobile.png)
 

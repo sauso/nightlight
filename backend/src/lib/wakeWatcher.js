@@ -1,7 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
 import { onMinuteFlushed } from './activityTracker.js';
-import { SLEEP_THRESHOLDS, childTracksSleep, childWindowActiveNow } from './sleepAnalysis.js';
+import { SLEEP_THRESHOLDS, childTracksSleep, childWindowActiveNow, childWindowKeyNow } from './sleepAnalysis.js';
 import { holdRing, releaseRing, isSegmenterRunning, ringOldestStartMs, ringHasFootageFor, clipCoverStartMs } from './clipRecorder.js';
 import { RING_OWNER, wakeCaptureHoldOwner } from './ringHolds.js';
 import { captureWakeClip, pruneWakeClips, getWakeClipSettings, WAKE_CLIP_LEAD_SEC } from './recordings.js';
@@ -72,7 +72,7 @@ const SWEEP_INTERVAL_MS = 60 * 1000;
 const RESTART_LOG_MS = 15 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-// camera_id -> { asleep, quietRun, run, lastAt, restartLogAt, restartsUnlogged, restartsLongest }
+// camera_id -> { asleep, latched, quietRun, run, lastAt, restartLogAt, restartsUnlogged, restartsLongest }
 // run = { startMs, activeCount, lastActiveMs, captured, holding, holdFromMs }
 //   startMs = the clip's anchor (#412: first active frame, clamped to the ring); lastActiveMs = the END label of
 //   the last active minute (the bridge arithmetic and the stale-run sweep read it, so it is NOT the anchor)
@@ -101,7 +101,7 @@ let captureSeq = 0;
 function slot(cameraId) {
   let st = state.get(cameraId);
   if (!st) {
-    st = { asleep: false, quietRun: 0, run: null, lastAt: null, restartLogAt: null, restartsUnlogged: 0, restartsLongest: 0 };
+    st = { asleep: false, latched: false, quietRun: 0, run: null, lastAt: null, restartLogAt: null, restartsUnlogged: 0, restartsLongest: 0 };
     state.set(cameraId, st);
   }
   return st;
@@ -121,7 +121,7 @@ function endRun(cameraId, st, why) {
   st.run = null;
 }
 
-function reset(cameraId, st) {
+function resetMemory(cameraId, st) {
   endRun(cameraId, st, null);
   st.asleep = false;
   st.quietRun = 0;
@@ -129,6 +129,42 @@ function reset(cameraId, st) {
   st.restartLogAt = null;
   st.restartsUnlogged = 0;
   st.restartsLongest = 0;
+}
+
+// #1037, Opus/Codex plan review: these writes are rare (once per night per camera), and a database
+// failure must not change a live alert or wake decision. A failed delete keeps latched true so the
+// next payload or sweep retries it. Suppress repeated error lines during a database outage.
+const latchRowsQ = db.prepare('SELECT camera_id, child_id, window_start_ms, asleep_at FROM wake_asleep_latch');
+const setLatchQ = db.prepare(`INSERT INTO wake_asleep_latch (camera_id, child_id, window_start_ms, asleep_at)
+  VALUES (?, ?, ?, ?) ON CONFLICT(camera_id) DO UPDATE SET child_id = excluded.child_id,
+  window_start_ms = excluded.window_start_ms, asleep_at = excluded.asleep_at`);
+const clearLatchQ = db.prepare('DELETE FROM wake_asleep_latch WHERE camera_id = ?');
+let lastLatchErrorAt = -Infinity;
+const latchWrites = { set: 0, clear: 0 }; // #1037: named test counter; no statement spying.
+
+function latchError(message) {
+  const now = Date.now();
+  if (now - lastLatchErrorAt >= MINUTE_MS) {
+    logger.error(`[wake] asleep latch ${message}`);
+    lastLatchErrorAt = now;
+  }
+}
+
+function clearLatch(cameraId) {
+  try {
+    clearLatchQ.run(cameraId);
+    latchWrites.clear++;
+    return true;
+  } catch (err) {
+    latchError(`clear failed: ${err.message}`);
+    return false;
+  }
+}
+
+function reset(cameraId, st) {
+  resetMemory(cameraId, st);
+  // #1037: only a successful clear forgets the persisted latch; repeated resets retry failures.
+  if (st.latched && clearLatch(cameraId)) st.latched = false;
 }
 
 const cameraQ = db.prepare('SELECT id, name, child_id, disabled FROM cameras WHERE id = ?');
@@ -388,6 +424,17 @@ export function handleMinute(payload) {
     if (st.quietRun >= ONSET_QUIET_MIN) {
       st.asleep = true;
       st.quietRun = 0;
+      // #1037: the window start is the latch's identity. Keep the in-memory decision even if
+      // the window changes at this instant or SQLite fails; only a successful write arms clearing.
+      try {
+        const windowStart = childWindowKeyNow(camera.child_id);
+        if (windowStart === null) latchError('save skipped: no open window');
+        else {
+          setLatchQ.run(cameraId, camera.child_id, windowStart, Date.now());
+          latchWrites.set++;
+          st.latched = true;
+        }
+      } catch (err) { latchError(`save failed: ${err.message}`); }
       logger.info(`[wake] "${camera.name}" settled — watching for wakes`);
     }
     return null;
@@ -571,9 +618,11 @@ export function sweepStaleRuns(now = Date.now()) {
     // N minutes": an armed watcher still stays armed across a hole INSIDE the window (a reconnect must not drop a real
     // wake, see the bridge rule in handleMinute) and a new N would have no data behind it. Known limit: a silent camera
     // is disarmed up to about 6 minutes after its window closes (the 5-minute margin plus up to one sweep interval).
-    // No "is the slot dirty" pre-check: reset() on a clean slot is a no-op, and any state worth clearing implies
-    // lastAt != null (code review, Codex, mutated each term of such a check: all survived, as it is equivalent).
-    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);
+    // #1037, Opus/Codex plan review: no "is the slot dirty" pre-check. A hydrated latch can have
+    // lastAt == null before its first payload, yet closing the window must still delete its row.
+    if (!watchedNow(cameraQ.get(cameraId))) {
+      reset(cameraId, st);
+    }
   }
   return swept;
 }
@@ -585,6 +634,36 @@ let sweepTimer = null;
 /** Start watching. Idempotent. */
 export function startWakeWatcher() {
   if (unsubscribe) return;
+  // #1037, Opus/Codex plan review: nothing before index.js starts this watcher awaits, so
+  // neither MQTT (which connects just before it) nor a detector can check an alert between
+  // hydration and subscription. Keep the slot object: capture .finally compares st.run by identity.
+  try {
+    for (const row of latchRowsQ.all()) {
+      const camera = cameraQ.get(row.camera_id);
+      let reason = null;
+      if (!camera) reason = 'camera missing';
+      else if (camera.disabled) reason = 'camera disabled';
+      else if (camera.child_id !== row.child_id) reason = 'child changed';
+      else if (!childTracksSleep(row.child_id)) reason = 'tracking off';
+      else if (!Number.isSafeInteger(row.window_start_ms)) reason = 'invalid window start';
+      else if (childWindowKeyNow(row.child_id) !== row.window_start_ms) reason = 'window changed or closed';
+      if (reason) {
+        clearLatch(row.camera_id);
+        logger.info(`[wake] discarded asleep latch for "${row.camera_id}" (${reason})`);
+        continue;
+      }
+      const st = slot(row.camera_id);
+      st.asleep = true;
+      st.latched = true;
+      const iso = (value) => Number.isSafeInteger(value) && Number.isFinite(new Date(value).getTime())
+        ? new Date(value).toISOString() : 'invalid time';
+      logger.info(`[wake] resumed asleep latch for "${camera.name}" (window starting ${iso(row.window_start_ms)}, saved ${iso(row.asleep_at)})`);
+    }
+  } catch (err) {
+    // #1037: a corrupt stored row must not crash-loop boot or partially arm cameras.
+    state.clear();
+    latchError(`hydrate failed: ${err.message}`);
+  }
   unsubscribe = onMinuteFlushed(handleMinute);
   sweepTimer = setInterval(() => {
     try { sweepStaleRuns(); } catch (err) { logger.error(`[wake] stale-run sweep failed: ${err.message}`); }
@@ -605,7 +684,8 @@ export function stopWakeWatcher() {
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
   if (pruneTimer) { clearInterval(pruneTimer); pruneTimer = null; }
-  for (const [cameraId, st] of state) reset(cameraId, st);
+  // #1037: stopping is a restart path; clearing the database here would recreate the alert hold.
+  for (const [cameraId, st] of state) resetMemory(cameraId, st);
   state.clear();
 }
 
@@ -613,3 +693,6 @@ export function stopWakeWatcher() {
 export function _state() {
   return state;
 }
+
+/** Test seam: count successful latch writes without inspecting SQLite statement internals. */
+export function _latchWritesForTest() { return { ...latchWrites }; }

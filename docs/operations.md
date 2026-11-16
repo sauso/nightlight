@@ -206,10 +206,23 @@ Images published by that workflow (and by the weekly rebuild) also carry an **SB
 attestation (#566). `docker buildx imagetools inspect sauso/nightlight:latest` lists them; a registry page may
 show them as extra `unknown/unknown` entries, and `docker pull` ignores them.
 
+### Publish test gate
+
+Publishing from `main` or a `v*` release tag waits for the latest `main` push test run of that exact commit
+to pass. A failed test run on `main` blocks `:latest`; a `dev` push still publishes `:dev` without this gate.
+The publish workflow waits up to 45 minutes for a test run to appear and finish, retrying temporary
+GitHub API errors within that time. If tests fail, fix the problem, re-run the failed test workflow,
+then re-run the publish workflow. To check the gate without publishing an image, run
+`gh workflow run docker-publish.yml --ref dev -f gate_only=true`. A manual run started from a branch waits
+for that branch's push test run (here `dev`), while a `main` push or any release tag run waits for the
+`main` run. `weekly-rebuild.yml` is separate and tests its rebuilt image before moving a tag.
+
 The build uses moving major-version tags for its runtime Node 24 and MediaMTX 1 base images, rather
 than fixed digests (#555 item 5). This picks up compatible base updates on rebuild, but rebuilding the
 same Nightlight commit later may produce different image contents. The revision label identifies the
 app commit, not identical image bytes; use the published image digest when you need that exact image.
+
+Once it reaches `main` (GitHub runs scheduled workflows only from the default branch), the [image scan](../.github/workflows/image-scan.yml) runs every Tuesday and checks the published `:dev` and `:latest` images for high and critical vulnerabilities with fixes available. Read each image's table in the run summary and download its JSON report from the run artifacts. This is a report for human triage, not a release gate; a scan that could not run is marked separately from one with findings. Workflow actions are pinned to commit SHAs, and Dependabot proposes updates to those pins.
 
 ### The weekly rebuild
 

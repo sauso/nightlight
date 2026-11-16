@@ -1,5 +1,5 @@
-// SleepSummaryCard and TimelapseCard — the two cards on a child's detail page that were still under
-// half covered.
+// SleepSummaryCard (on a child's detail page) and TimelapseCard (on a night's page, since 2026-11-15) — two cards that were
+// still under half covered.
 //
 // SleepSummaryCard is the one worth care. It renders SEVEN distinct states off one endpoint, and the
 // differences between them are the whole point:
@@ -301,6 +301,8 @@ describe('SleepSummaryCard', () => {
 });
 
 // --- TimelapseCard ------------------------------------------------------------------------------
+// It lives on a NIGHT's page (SleepDetail, under the Timeline) and shows the timelapse of the one night it is given, picked from
+// the child's list (fetched once). There is no strip of other nights any more: the page's own night navigator does that job.
 
 describe('TimelapseCard', () => {
   const ROWS = [
@@ -308,6 +310,8 @@ describe('TimelapseCard', () => {
     { id: 't-2', night_date: '2026-08-31', duration_s: null },
   ];
   const list = (rows) => vi.spyOn(api, 'get').mockResolvedValue(rows);
+  const SEP1_DATE = '2026-09-01';
+  const AUG31_DATE = '2026-08-31';
 
   // Exact strings, which are safe ONLY because test/setup.js pins the suite's locale.
   // ⚠️ These were regexes first, written to be "locale-tolerant" — and they still failed in CI,
@@ -326,93 +330,128 @@ describe('TimelapseCard', () => {
 
   test('renders nothing until a timelapse exists', async () => {
     list([]);
-    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/timelapses/child/kid-1'));
     expect(container.querySelector('.timelapse-card')).toBeNull();
   });
 
   test('a malformed response is treated as none', async () => {
     vi.spyOn(api, 'get').mockResolvedValue('nope');
-    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     await waitFor(() => expect(api.get).toHaveBeenCalled());
     expect(container.querySelector('.timelapse-card')).toBeNull();
   });
 
-  test('the hero is the NEWEST night, with its duration', async () => {
+  test('a failed fetch, and a test double that returns nothing, draw nothing and do not throw', async () => {
+    vi.spyOn(api, 'get').mockRejectedValue(new Error('down'));
+    const a = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    expect(a.container.querySelector('.timelapse-card')).toBeNull();
+    a.unmount();
+
+    // `get` returning undefined (a bare mock) used to be a render-time TypeError on `.then` of undefined.
+    vi.spyOn(api, 'get').mockReturnValue(undefined);
+    const b = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    expect(b.container.querySelector('.timelapse-card')).toBeNull();
+  });
+
+  test('★ shows the timelapse of THE GIVEN night, not the newest one', async () => {
     list(ROWS);
-    renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={AUG31_DATE} />);
+    const hero = await screen.findByRole('button', { name: AUG31 });
+    expect(hero.textContent).toBe('Mon, 31 Aug');
+    // Only that night's picture is requested, and there is exactly one hero.
+    expect(container.querySelectorAll('.timelapse-hero')).toHaveLength(1);
+    expect(hero.querySelector('img')).toHaveAttribute('src', 'http://host/timelapses/t-2/thumb');
+    expect(screen.queryByRole('button', { name: SEP1 })).not.toBeInTheDocument();
+  });
+
+  test('★ a night with no timelapse draws no card, even when other nights have one', async () => {
+    list(ROWS);
+    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate="2026-08-30" />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/timelapses/child/kid-1'));
+    // Let the list land before asserting the absence, so this cannot pass merely because the fetch is still pending.
+    await act(async () => {});
+    expect(container.querySelector('.timelapse-card')).toBeNull();
+  });
+
+  test('the hero has the duration, and its name starts with the printed text', async () => {
+    list(ROWS);
+    renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     const hero = await screen.findByRole('button', { name: SEP1 });
     expect(hero.textContent).toBe('Tue, 1 Sept · 42s');
     // ★ Label in name (WCAG 2.5.3): the name opens with the printed text, duration included. Fails on "Play Tue, 1 Sept timelapse".
     expect(nameStartsWithPrinted(hero)).toBe(true);
   });
 
-  test('a single timelapse shows no picker strip', async () => {
-    list([ROWS[0]]);
-    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+  test('there is no picker strip, however many nights the child has', async () => {
+    list(ROWS);
+    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     await screen.findByRole('button', { name: SEP1 });
     expect(container.querySelector('.timelapse-strip')).toBeNull();
+    expect(container.querySelector('.timelapse-strip__item')).toBeNull();
   });
 
-  test('picking an older night moves the hero to it', async () => {
+  test('★ stepping to another night swaps the hero WITHOUT asking the server again', async () => {
     list(ROWS);
-    const { user, container } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    const { rerenderWith, container } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     await screen.findByRole('button', { name: SEP1 });
-    const strip = container.querySelectorAll('.timelapse-strip__item');
-    expect(strip).toHaveLength(2);
-    expect(strip[0]).toHaveClass('timelapse-strip__item--active');
 
-    await user.click(strip[1]);
-    expect(screen.getByRole('button', { name: AUG31 })).toBeInTheDocument();
-    expect(container.querySelectorAll('.timelapse-strip__item')[1]).toHaveClass('timelapse-strip__item--active');
+    rerenderWith({ ui: <TimelapseCard childId="kid-1" nightDate={AUG31_DATE} /> });
+    expect(await screen.findByRole('button', { name: AUG31 })).toBeInTheDocument();
+    // A night without one: the card goes away; and back again to a night that has one.
+    rerenderWith({ ui: <TimelapseCard childId="kid-1" nightDate="2026-08-30" /> });
+    expect(container.querySelector('.timelapse-card')).toBeNull();
+    rerenderWith({ ui: <TimelapseCard childId="kid-1" nightDate={SEP1_DATE} /> });
+    expect(await screen.findByRole('button', { name: SEP1 })).toBeInTheDocument();
+    // The list is per CHILD, so it was fetched once for all of that.
+    expect(api.get).toHaveBeenCalledTimes(1);
   });
 
-  // UI refresh PR D: the strip's tiles are small thumbnails labelled by WEEKDAY only; the full date is the accessible name.
-  test('★ the strip tiles are labelled by weekday, and the full date is their accessible name', async () => {
+  test('an open player does not come back when the page returns to that night later', async () => {
     list(ROWS);
-    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    const { user, rerenderWith } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
+    await user.click(await screen.findByRole('button', { name: SEP1 }));
+    await screen.findByRole('dialog');
+
+    // The page steps to a night with no timelapse and back (the card stays mounted, keyed by child only).
+    rerenderWith({ ui: <TimelapseCard childId="kid-1" nightDate="2026-08-30" /> });
+    rerenderWith({ ui: <TimelapseCard childId="kid-1" nightDate={SEP1_DATE} /> });
     await screen.findByRole('button', { name: SEP1 });
-    const tiles = [...container.querySelectorAll('.timelapse-strip__item')];
-    expect(tiles.map((t) => t.textContent)).toEqual(['Tue', 'Mon']);
-    expect(screen.getByRole('button', { name: 'Tue, 1 Sept timelapse' })).toBe(tiles[0]);
-    expect(screen.getByRole('button', { name: 'Mon, 31 Aug timelapse' })).toBe(tiles[1]);
-    // ★ Label in name (WCAG 2.5.3): what a tile PRINTS is how its name begins. Fails on the old "Show Tue, 1 Sept timelapse".
-    for (const tile of tiles) expect(nameStartsWithPrinted(tile)).toBe(true);
-    // The thumbnail is decoration: the date is not announced twice.
-    expect(tiles[0].querySelector('img')).toHaveAttribute('alt', '');
-    expect(tiles[0]).toHaveAttribute('aria-pressed', 'true');
-    expect(tiles[1]).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  test('a different child is fetched afresh', async () => {
+    list(ROWS);
+    const { rerenderWith } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
+    await screen.findByRole('button', { name: SEP1 });
+    rerenderWith({ ui: <TimelapseCard childId="kid-2" nightDate={SEP1_DATE} /> });
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/timelapses/child/kid-2'));
   });
 
   test('an unparseable night date is shown raw rather than as Invalid Date', async () => {
     list([{ id: 't-9', night_date: 'garbage' }]);
-    renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    renderAsAdmin(<TimelapseCard childId="kid-1" nightDate="garbage" />);
     expect(await screen.findByRole('button', { name: 'garbage, play timelapse' })).toBeInTheDocument();
-  });
-
-  test('an unparseable date in a strip tile leaves the date part out rather than saying "garbage, garbage timelapse"', async () => {
-    list([{ id: 't-9', night_date: 'garbage' }, { id: 't-8', night_date: 'rubbish' }]);
-    renderAsAdmin(<TimelapseCard childId="kid-1" />);
-    expect(await screen.findByRole('button', { name: 'garbage timelapse' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'rubbish timelapse' })).toBeInTheDocument();
   });
 
   test('the hero opens the player', async () => {
     list(ROWS);
-    const { user } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    const { user } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     await user.click(await screen.findByRole('button', { name: SEP1 }));
     expect(await screen.findByRole('dialog')).toHaveAccessibleName('Timelapse · Tue, 1 Sept');
   });
 
   test('ONLY an admin can delete a timelapse', async () => {
     list(ROWS);
-    const a = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    const a = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     await a.user.click(await screen.findByRole('button', { name: SEP1 }));
     expect(await screen.findByRole('button', { name: 'Delete timelapse' })).toBeInTheDocument();
     a.unmount();
 
     list(ROWS);
-    const c = renderAsCaregiver(<TimelapseCard childId="kid-1" />);
+    const c = renderAsCaregiver(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     await c.user.click(await screen.findByRole('button', { name: SEP1 }));
     await screen.findByRole('dialog');
     expect(screen.queryByRole('button', { name: 'Delete timelapse' })).not.toBeInTheDocument();
@@ -422,7 +461,7 @@ describe('TimelapseCard', () => {
 
   test('the delete confirmation says it CANNOT be rebuilt — the source frames are gone', async () => {
     list(ROWS);
-    const { user } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    const { user, container } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     await user.click(await screen.findByRole('button', { name: SEP1 }));
     await user.click(await screen.findByRole('button', { name: 'Delete timelapse' }));
     // ⚠️ Deliberately stronger than the clip player's wording: a clip's alert and snapshot survive,
@@ -435,34 +474,20 @@ describe('TimelapseCard', () => {
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(api.del).toHaveBeenCalledWith('/timelapses/t-1'));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    // The hero falls back to what is left rather than pointing at a deleted row.
-    expect(await screen.findByRole('button', { name: AUG31 })).toBeInTheDocument();
+    // The list is reloaded, and the night's timelapse is gone, so the card is too: it never points at a deleted row, and it does
+    // not fall back to ANOTHER night's timelapse (it is this night's card).
+    await waitFor(() => expect(container.querySelector('.timelapse-card')).toBeNull());
+    expect(screen.queryByRole('button', { name: AUG31 })).not.toBeInTheDocument();
   });
 
   test('a failed delete keeps the player open with a retry', async () => {
     list(ROWS);
     api.del.mockRejectedValue(new Error('busy'));
-    const { user } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    const { user } = renderAsAdmin(<TimelapseCard childId="kid-1" nightDate={SEP1_DATE} />);
     await user.click(await screen.findByRole('button', { name: SEP1 }));
     await user.click(await screen.findByRole('button', { name: 'Delete timelapse' }));
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     expect(await screen.findByText('Couldn’t delete — try again.')).toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-  });
-
-  test('a refresh KEEPS the night you were looking at, if it survived', async () => {
-    list(ROWS);
-    const { user, container } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
-    await screen.findByRole('button', { name: SEP1 });
-    await user.click(container.querySelectorAll('.timelapse-strip__item')[1]); // pick the older night
-    expect(screen.getByRole('button', { name: AUG31 })).toBeInTheDocument();
-
-    // Deleting a DIFFERENT row triggers a reload. The selection must not silently jump back to the
-    // newest night — the user is looking at a specific one.
-    await user.click(screen.getByRole('button', { name: AUG31 }));
-    await user.click(await screen.findByRole('button', { name: 'Delete timelapse' }));
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    await user.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.getByRole('button', { name: AUG31 })).toBeInTheDocument();
   });
 });

@@ -9,7 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **Protected clips** | An admin protects an alert or wake clip | As for the original clip | Never removed automatically | In the protected clips list |
-| **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
+| **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page (the newest three, then **See all recordings**) |
 | **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The **Room activity** list in the night's sleep detail, under a row you open (signed-in users only) |
 
 All three are configured under **Settings → Camera and recording → Recording** (admin only), and all three write to the same
@@ -40,7 +40,7 @@ because a straight copy can only cut on a keyframe and the clip has to be exactl
 |---|---|---|---|
 | Pre-roll (seconds) | 5 | 0–30 | How much *before* the trigger is included |
 | Post-roll (seconds) | 15 | 5–120 | How much *after* the trigger is included |
-| Keep clips for (days) | 14 | 0–365 | 0 = no day limit |
+| Keep clips for (days) | 14 | 0–365 | Sets the day limit for unprotected alert videos; 0 turns that limit off. Whatever this is set to, Recent alerts keeps at most 30 days and 2,000 unprotected entries: older unprotected alerts, with their clips and pictures, are removed as new alerts are recorded. Protected alerts are kept. |
 | Storage cap (GB) | 5 | 0–2000 | 0 = no size limit; oldest deleted first |
 
 **Changing a limit can ask first.** Saving a different **Keep clips for** or **Storage cap** runs the
@@ -157,7 +157,8 @@ that gap without making alerts noisier.
   has stalled (such a minute is not counted as seen, as on the sleep timeline). That is stricter than the
   sleep timeline's own rule, so after an outage in the evening recording can start later than the
   timeline's bedtime (a camera that drops a minute more often than about every 15 minutes never starts).
-  Once started, a gap does not stop it.
+  Once started, a gap does not stop it. If the server restarts during that sleep window, the saved
+  asleep result lets wake-clip recording resume at once, which may mean more wake clips after a restart.
 - Only for a real wake-up: a brief **stir is ignored**, using the same threshold the sleep timeline
   uses to decide what counts as a wake-up. Activity that pauses for up to **3 minutes** is still one
   wake-up, and a minute the camera reported nothing for counts as a pause, exactly as on the timeline; a
@@ -300,7 +301,9 @@ shows **Unsaved changes restored** with a **Discard changes** button. Closing th
 pressing Save successfully or pressing **Discard changes** removes it. The draft lives on that
 device only and is never sent anywhere.
 
-Recordings appear in the **Recordings** card on the child's page. **They are never deleted
+Recordings appear in the **Recordings** card on the child's page, listed like the **Recent alerts** card beside it: the newest
+three, each with a thumbnail, the camera and the time, and a **See all recordings** button for the rest (which becomes
+**Show fewer**). **They are never deleted
 automatically** — unlike the other two kinds, these are keepsakes someone chose to keep, so deleting
 one is the only way to reclaim its space. **Only an admin can delete one**; anyone signed in, caregivers
 included, can record, watch and download (see [Who can delete](#who-can-delete)).
@@ -488,8 +491,11 @@ for the recent lists. Protect a clip before cleanup removes it: protection canno
 clip. Unprotecting one that is already older than your retention setting lets the next cleanup remove
 it, within 15 minutes for alert clips; wake clips wait for their own cleanup schedule.
 If a protected clip's video file has gone missing, an admin can still unprotect its entry and remove it.
-The **Clear recent alerts** confirmation says protected alerts stay. After clearing, they still appear
-in the alert list.
+**Clear recent alerts** removes unprotected alert history and its clips, thumbnails and pictures, including
+files for alerts still inside the usual retention limits. Protected alerts and their media stay and still
+appear in the alert list.
+The 30-day and 2,000-entry history limits are applied as new alerts are recorded; without a new alert,
+older unprotected alerts and their media can remain until the next alert or a manual clear.
 
 - **Automatic clips** are deleted once **either** limit is passed: older than *Keep clips for (days)*,
   or total clip size over *Storage cap (GB)* (oldest first). Set either to **0** to turn that limit off.
@@ -499,7 +505,8 @@ in the alert list.
   it to **0** to keep them forever. Deleting one removes only the video; the wake-up itself stays on the
   sleep timeline.
 - **On-demand recordings are never swept.** They persist until you delete them from the child's page.
-- **Nightly timelapses** (the sped-up "memories" video of each night): each child keeps their **30 most
+- **Nightly timelapses** (the sped-up "memories" video of each night, shown on **that night's page**, in a card under the
+  Timeline; the child's own page no longer lists them): each child keeps their **30 most
   recent**, and older ones are deleted automatically (not configurable). ⚠️ Two kinds of "nobody was in
   the bed" night are treated **differently**:
   - A night the **detector** scores as *no one in the bed* gets no timelapse. The frames sampled
@@ -514,14 +521,14 @@ in the alert list.
     on disk from earlier *no one in the bed* nights (a restart at the wrong moment could leave them).
   - A night whose timelapse was **already made** and which the detector then re-scores as *no one in the
     bed* (it needs a camera, bed-area or window change within those 3 hours) **stops showing** that
-    timelapse on the child's page. The video is hidden, not deleted: a **Recompute** can score the night
+    timelapse on the night's page. The video is hidden, not deleted: a **Recompute** can score the night
     again at any time, and if it comes back as the child in bed, the timelapse is listed again. The file
     stays on disk until it ages out (the 30 newest). While it is hidden there is no Delete button for it
-    on the child's page.
+    on the night's page.
   - A night **you** mark *No one was in the bed* in the morning review keeps its timelapse. It is made
     and kept like any other night's, and marking the night deletes nothing. This is deliberate: the mark
     can be taken back, and a tap in a review should never destroy video that taking it back could not
-    restore. If you don't want that night's timelapse, an admin can delete it from the child's page.
+    restore. If you don't want that night's timelapse, an admin can delete it from that night's page.
   - Correcting a night's times, or the **lock** that a correction puts on the night's summary (README,
     "A night you have corrected is locked"), changes nothing here either. A timelapse is first attempted
     the first time the nightly update scores the night (and retried if that fails, see below), and a correction never takes that pass away: a night
@@ -585,8 +592,8 @@ is skipped, so recording can never be the thing that fills your disk.
 
 ⚠️ **This is not retention, and nothing here is kept, including protected clips.** Removing a child, or a camera, deletes everything
 that belongs to it, rows and files, and **cannot be undone**. The Remove dialog lists these before you
-confirm and asks "Are you sure?". Both are admin-only and both start from the **⋯** menu at the top right of the
-child's or the camera's settings page (**Remove child**, **Remove camera**), not from a button under Save. The two are
+confirm and asks "Are you sure?". Both are admin-only. **Remove child** is a red button at the bottom of the child's
+settings page; **Remove camera** is in the **⋯** menu at the top right of the camera's settings page. The two are
 **different**, and so is what each leaves behind:
 
 | | Removing a **child** | Removing a **camera** |
@@ -598,6 +605,7 @@ child's or the camera's settings page (**Remove child**, **Remove camera**), not
 | Timelapses, and frames collected for a night not yet assembled | Deleted | **Kept** (they belong to the child), including the ones made from this camera's frames |
 | Alerts, with their clips and snapshots (protected or not) | **Kept** (they belong to the camera) | Deleted |
 | Camera event log and temperature and humidity history | **Kept** (they belong to the camera) | Deleted |
+| ESPHome sensor readings (heart rate and so on) attributed to the child | Deleted | Not affected |
 | The child's profile, photo and sleep-tracking settings | Deleted | Not applicable |
 | The camera itself | **Kept**, and becomes unassigned | Deleted, with its stream and its clip ring |
 

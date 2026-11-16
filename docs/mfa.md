@@ -19,7 +19,8 @@ a domain, are a separate planned feature.)
    your authenticator. They're shown only at this moment and only their hashes are stored — Nightlight
    can't show them again. Because of that, this dialog can only be closed with its **I've saved them**
    button: tapping outside it or pressing Escape does nothing, and it has no ✕ (unlike Nightlight's other
-   dialogs, so a stray tap can't throw the codes away). Use **Copy codes** to put them on the clipboard before you close it.
+   dialogs, so a stray tap can't throw the codes away). Use **Copy codes** to put them on the clipboard
+   before you close it. If copying fails, the dialog selects the codes in a field so you can copy them by hand.
 
 ### Setting up on a phone
 

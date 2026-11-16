@@ -19,12 +19,16 @@ process.env.DATA_DIR = dataDir;
 process.env.CLIPS_DIR = clipsDir;
 process.env.DEMO_ASSET_DIR = assetDir;
 process.env.DEMO_TIMEZONE = 'America/New_York';
+// The public demo runs with DEMO_MODE=true, and in that mode db.js creates setup_state as 'legacy_completed' (not
+// 'not_started'). The seed must turn THAT into 'completed'; without this line the test seeded a fresh, non-demo database
+// and passed while the real demo kept its half-set-up look.
+process.env.DEMO_MODE = 'true';
 
 let seededDb;
 after(() => {
   seededDb?.close();
   fs.rmSync(tempRoot, { recursive: true, force: true });
-  for (const key of ['DATA_DIR', 'CLIPS_DIR', 'DEMO_ASSET_DIR', 'DEMO_TIMEZONE', 'DEMO_ENDS_AT']) {
+  for (const key of ['DATA_DIR', 'CLIPS_DIR', 'DEMO_ASSET_DIR', 'DEMO_TIMEZONE', 'DEMO_ENDS_AT', 'DEMO_MODE']) {
     delete process.env[key];
   }
 });
@@ -78,8 +82,8 @@ test('demo seed is deterministic, timezone-native, safe and stable throughout a 
   const midWindow = await seedDemo(() => new Date(midWindowBoot));
   seededDb = midWindow.db;
   assert.deepEqual(midWindow.db.prepare("SELECT status, active_step FROM setup_state WHERE id = 'app'").get(),
-    { status: 'legacy_completed', active_step: 'review' },
-    'seeding after a fresh boot must not send the demo into the setup guide');
+    { status: 'completed', active_step: 'review' },
+    'seeding after a fresh boot must not send the demo into the setup guide, and must read as finished: Settings -> About keeps its Setup status row for any status but completed');
   assertCompletedNightsAreOk(midWindow);
   assertSeededThroughDeadline(midWindow);
 

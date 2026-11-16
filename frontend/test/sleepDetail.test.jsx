@@ -97,6 +97,22 @@ const lastNightPath = (get) =>
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
+test('#355 unavailable wake figures show a dash while measured zero stays zero', async () => {
+  // The dash is the page's own empty value (fmtDurAbbr's), not a hyphen (#355 review, Opus L6).
+  mockSleep({ night: { ...NIGHT, asleep_minutes: 590, awake_minutes: null,
+    wake_count: null, longest_stretch_minutes: null } });
+  const view = mount();
+  expect((await screen.findByText('Wake-ups')).closest('.sleep-stat')).toHaveTextContent('—');
+  expect(screen.getByText('Longest stretch').closest('.sleep-stat')).toHaveTextContent('—');
+  view.unmount();
+  vi.restoreAllMocks();
+  mockSleep({ night: { ...NIGHT, asleep_minutes: 590, awake_minutes: 0,
+    wake_count: 0, longest_stretch_minutes: 0 } });
+  mount();
+  expect((await screen.findByText('Wake-ups')).closest('.sleep-stat')).toHaveTextContent('0');
+  expect(screen.getByText('Longest stretch').closest('.sleep-stat')).toHaveTextContent('0m');
+});
+
 // UI refresh PR E: "Recompute this night" and the settings switch live in the page's "⋯" menu, not in the night card. These
 // open the menu the way a person does (press the button, then the item) and look for an item even while the menu is closed
 // (a closed menu is hidden, so a plain query would call a present-but-closed item "absent").
@@ -785,6 +801,82 @@ describe('moving between nights', () => {
     await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-30'));
     fireEvent.change(picker, { target: { value: '' } });
     expect(screen.getByLabelText('Pick a night').value).toBe('2026-08-30');
+  });
+});
+
+// ★ The nightly timelapse lives on the night's page, directly under the Timeline card (owner, 2026-11-15: it moved here from the
+// child's page). The card gets the page's selected date and picks that night's row from the child's list.
+describe('the night\'s timelapse, under the Timeline', () => {
+  // Same pinned clock as "moving between nights" (2026-08-30 is the newest browsable night), for the same reason.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
+  });
+
+  const TIMELAPSES = [
+    { id: 't-30', night_date: '2026-08-30', duration_s: 42 },
+    { id: 't-28', night_date: '2026-08-28', duration_s: 40 },
+  ];
+  // The sleep routes of mockSleep, plus the child's timelapse list. Returns the spy so a test can count the list requests.
+  function mockWithTimelapses(rows, opts) {
+    const sleep = mockSleep(opts);
+    const get = vi.fn((path) => (path.includes('/timelapses/child/') ? Promise.resolve(rows) : sleep(path)));
+    api.get.mockImplementation(get);
+    return get;
+  }
+  const listRequests = (get) => get.mock.calls.filter((c) => c[0] === '/timelapses/child/kid-1').length;
+
+  test('★ the card for the shown night sits directly below the Timeline card', async () => {
+    mockWithTimelapses(TIMELAPSES);
+    const { container } = mount();
+    const hero = await screen.findByRole('button', { name: 'Sun, 30 Aug · 42s, play timelapse' });
+    const timeline = screen.getByText('Timeline', { exact: true }).closest('.card');
+    expect(timeline).not.toBeNull();
+    // Immediately after it, not merely somewhere later on the page.
+    expect(timeline.nextElementSibling).toBe(container.querySelector('.timelapse-card'));
+    expect(timeline.nextElementSibling).toContainElement(hero);
+  });
+
+  test('★ it follows the date: a night with no timelapse shows none, and no other night\'s is borrowed', async () => {
+    mockWithTimelapses(TIMELAPSES);
+    const { container, user } = mount();
+    await screen.findByRole('button', { name: 'Sun, 30 Aug · 42s, play timelapse' });
+
+    // 29 Aug has no timelapse (only the 30th and the 28th do): the card goes away rather than showing the 30th or the 28th.
+    await user.click(await screen.findByRole('button', { name: /(Aug 29|29 Aug), score 75/ }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /play timelapse/ })).not.toBeInTheDocument());
+    expect(container.querySelector('.timelapse-card')).toBeNull();
+
+    // 28 Aug has its own.
+    await user.click(await screen.findByRole('button', { name: /(Aug 28|28 Aug),/ }));
+    expect(await screen.findByRole('button', { name: 'Fri, 28 Aug · 40s, play timelapse' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Sun, 30 Aug/ })).not.toBeInTheDocument();
+  });
+
+  test('the list asked for is the child\'s own, once per night drawn', async () => {
+    const get = mockWithTimelapses(TIMELAPSES);
+    mount();
+    await screen.findByRole('button', { name: 'Sun, 30 Aug · 42s, play timelapse' });
+    expect(listRequests(get)).toBe(1);
+    expect(get.mock.calls.filter((c) => String(c[0]).includes('/timelapses/')).every((c) => c[0] === '/timelapses/child/kid-1')).toBe(true);
+  });
+
+  test('a night with no data has no timelapse card and asks for none', async () => {
+    const get = mockWithTimelapses(TIMELAPSES, { night: { night_date: '2026-08-30', status: 'no_data' } });
+    const { container } = mount();
+    await screen.findByText(/No sleep data for this night/);
+    expect(container.querySelector('.timelapse-card')).toBeNull();
+    expect(listRequests(get)).toBe(0);
+  });
+
+  // ★ A parent who marks a night "No one was in the bed" keeps that night's timelapse (docs/recording.md) and the list still returns it.
+  // With the card gone from the child's page, the night's page is the only place to watch or delete it, and an `empty` night returns
+  // before the Timeline. Fails if the card is mounted only in the ordinary night's render (Codex review of #1111).
+  test('★ a night marked "no one in the bed" still shows its timelapse, under the message', async () => {
+    mockWithTimelapses(TIMELAPSES, { night: { night_date: '2026-08-30', status: 'empty', nobody_in_bed: true, corrected: true, coverage_minutes: 700, onset_at: null, wake_at: null } });
+    mount();
+    await screen.findByText(/You said no one was in the bed for this night/);
+    expect(await screen.findByRole('button', { name: 'Sun, 30 Aug · 42s, play timelapse' })).toBeInTheDocument();
   });
 });
 

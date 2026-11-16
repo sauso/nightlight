@@ -9,6 +9,29 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-16
+
+### Added
+
+- A weekly report-only scan of the published `:dev` and `:latest` images lists high and critical vulnerabilities for human review. It starts running weekly once the workflow reaches `main`.
+
+### Changed
+
+- Docker publishes from `main` and `v*` tags now wait for a passing `main` push test run of the same commit; a failed run blocks the publish. Dev pushes remain ungated, and the weekly rebuild remains separate.
+- GitHub workflow actions are pinned to commit SHAs; Dependabot keeps their pins current. Dependabot leaves React and React DOM major upgrades for the planned React 19 migration (#634); Dependabot reads this setting from `main`, so it applies after the next release.
+- The recording setting now explains that Recent alerts keeps at most 30 days and 2,000 unprotected entries, with older alerts and their clips and pictures removed as new alerts are recorded (#933).
+- The nightly timelapse now shows on each night's own page, in a card directly under the Timeline, instead of on the child's page (it shows that night's timelapse only, with no strip of other nights; a night without one shows no card). On the child's page, **Recordings** is now a list like **Recent alerts**: the newest three recordings with a thumbnail, the camera and the time, and a **See all recordings** button for the rest, instead of one row you had to open first. Nothing changes on the server or in how many timelapses and recordings are kept.
+- Child settings: **Remove child** is a red button at the bottom of the page again (it had moved into the ⋯ menu), and its confirmation says plainly that it permanently deletes everything for the child. The confirmation's list now also names the child's ESPHome sensor readings (heart rate and so on), which were already deleted with the child.
+- **Routine dependency updates, no behaviour change intended.** Backend: `esphome-client` 2.0.0 → 2.1.0 (the ESPHome device library: a dropped connection now ends a wait with its own error type, and large device entity lists register fully before they are reported), `ws` 8.22.1 → 8.22.2, and `fast-xml-parser` 5.11.1 → 5.12.1 (a library the push-alert dependency `firebase-admin` pulls in indirectly through Google Cloud Storage, which Nightlight does not use; it clears a low-severity Dependabot alert). Web app: `react-router-dom` 7.18.4 → 7.18.5. Build and test tooling (not part of the image): `vitest` and `@vitest/coverage-v8` 5.0.5 → 5.1.0, and `@playwright/test` 1.64.1 → 1.65.0 together with the end-to-end Playwright image tag.
+
+### Fixed
+
+- When you move the asleep or wake-up time of a night the app scored, its wake-ups, minutes awake and unknown, longest stretch and sleep bar now follow your times instead of the app's. The night is measured between your times when you save (and by the nightly update for corrections saved earlier, while the camera samples remain, about 30 days), so the child's card and the sleep detail page show the same times and figures. A correction that cannot be measured reads as before, except that its longest stretch is never longer than its time asleep; its card and detail page can then differ, as for a night you have not corrected. Wake-coloured parts of the bar outside your times are by design: the app paints its own morning wake that way. On the sleep detail page, a measured longest stretch of 0 now shows 0m instead of a dash (#355).
+- Hold alerts until asleep now remembers when a child has settled through a server restart in the same sleep window, so motion and sound alerts and wake-clip recording can resume at once (#1037).
+- Clearing alert history now also deletes the clips and pictures of cleared alerts; protected alerts and their media are kept (#934).
+- **Copy codes** now works when Nightlight is opened over plain http. If it can't copy the backup codes, the dialog selects them so you can copy them by hand.
+- The public demo no longer shows a **Setup status and picture check** row in Settings → About as if setup were half done: the demo's sample household is now marked as fully set up.
+
 ## [0.48.0] - 2026-11-15
 
 ### Added

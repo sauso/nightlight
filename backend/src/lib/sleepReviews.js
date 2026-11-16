@@ -1,6 +1,6 @@
 import db from '../db.js';
 import {
-  computeNight, lastCompletedNightDate, childTracksSleep, zonedToUtc, toSqlUtc, storeNightBeforeCorrection,
+  computeNight, computeNightForDisplay, lastCompletedNightDate, childTracksSleep, zonedToUtc, toSqlUtc, storeNightBeforeCorrection,
   displayContextFor, parseSummaryFacts,
 } from './sleepAnalysis.js';
 import {
@@ -8,6 +8,8 @@ import {
   VERDICTS, WRONG_REASONS,
 } from './bedTransitions.js';
 import { findQuickReversals, findAllLingeringBedMotion, LINGERING_WINDOW_MS } from './bedTransitionRules.js';
+import { correctedSpanFigures } from './correctedSpan.js';
+import { logger } from './logger.js';
 
 // What actually happened last night, as told by the person who was there.
 //
@@ -28,6 +30,161 @@ import { findQuickReversals, findAllLingeringBedMotion, LINGERING_WINDOW_MS } fr
 export { VERDICTS, WRONG_REASONS };
 
 const getReviewStmt = db.prepare('SELECT * FROM sleep_reviews WHERE child_id = ? AND night_date = ?');
+const storedSpanNight = db.prepare('SELECT status, onset_at, wake_at, in_bed_at, window_end, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ?');
+const writeSpanFigures = db.prepare('UPDATE sleep_reviews SET span_figures = ? WHERE child_id = ? AND night_date = ?');
+// #355 review (Opus M4, Codex M2): the nightly step runs every 30 minutes, and a correction it cannot
+// rebuild (samples gone, a night no longer scored) would otherwise pay a full computeNight on every tick
+// for 30 days. One attempt per correction per detector revision per process: the key carries the review's
+// reviewed_at (a new save is a new correction) and the stored night's computed_at (a re-stored night is a
+// new basis, so it earns one more try; this goes beyond "child|night|reviewed_at" on purpose). In memory
+// only: a restart retries once, which is the cost of not adding a column for it.
+const failedSnapshotAttempts = new Set();
+// A failure is logged once per key per process, so a bad night cannot fill the log at every tick.
+const loggedSnapshotFailures = new Set();
+const attemptKey = (childId, nightDate, reviewedAt, computedAt) =>
+  `${childId}|${nightDate}|${reviewedAt || ''}|${computedAt || ''}`;
+
+function logSnapshotFailure(key, error) {
+  if (loggedSnapshotFailures.has(key)) return;
+  loggedSnapshotFailures.add(key);
+  logger.error(`[sleep] correction snapshot ${key} failed: ${error.message}`);
+}
+
+// Tests only: both sets live for the process, and one test file reuses a child and night across tests.
+export function _resetCorrectionSnapshotAttemptsForTests() {
+  failedSnapshotAttempts.clear();
+  loggedSnapshotFailures.clear();
+}
+
+function parsedSnapshot(value) {
+  if (!value) return null;
+  try { const parsed = JSON.parse(value); return parsed?.v === 1 ? parsed : null; }
+  catch { return null; }
+}
+
+function validSnapshot(review, stored) {
+  if (!stored?.computed_at) return null;
+  const snapshot = parsedSnapshot(review.span_figures);
+  // #355, Opus/Codex plan review 2026-11-16: the two corrected times and
+  // the stored detector revision must all match. A fresh display compute is
+  // never the authority for these five card and detail figures.
+  // #355 review (Codex High; a staging night read 08:04 on the card and 08:02
+  // on the detail page): an endpoint the parent did not correct is compared
+  // with the STORED row's time, never a fresh compute's, so a fresh compute
+  // that drifts can neither invalidate the snapshot nor split the two pages.
+  // Callers pass the stored sleep_nights row as `stored`.
+  // Fix round 2 (Opus M2): times are compared to the MINUTE. The figures are measured on whole minutes
+  // (correctedSpan.js floors both ends), and the review page re-sends a time as HH:MM on every later save
+  // (NightReview.jsx), so a wake picked from a frame (with seconds) came back seconds-less on a note-only
+  // save and threw away a snapshot that, after 30 days, could never be measured again.
+  const onset = review.true_onset_at || stored?.onset_at;
+  const wake = review.true_wake_at || stored?.wake_at;
+  return snapshot && sameMinute(snapshot.onset_at, onset) && sameMinute(snapshot.wake_at, wake)
+    && snapshot.night_computed_at === stored?.computed_at ? snapshot : null;
+}
+
+// Two stored UTC times ('YYYY-MM-DD HH:MM:SS') in the same minute. Missing on either side is not a match.
+function sameMinute(a, b) {
+  return typeof a === 'string' && typeof b === 'string' && a.slice(0, 16) === b.slice(0, 16);
+}
+
+export function storedCorrectedNightWithSnapshot(childId, nightDate) {
+  const review = getReviewStmt.get(childId, nightDate);
+  const stored = db.prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(childId, nightDate);
+  if (!review || !stored || stored.status !== 'ok' || !validSnapshot(review, stored)) return null;
+  return applyCorrection(childId, stored);
+}
+
+// The span_figures value a save of `review` (the merged row about to be written) should store.
+// #355 review (Opus H1), the rules in order:
+//   - the review stops correcting a sleep time, or its times equal the stored detector night's: null, so
+//     un-correcting restores the detector's night exactly. The ONLY case that throws a snapshot away;
+//   - the stored snapshot is still valid for these times and this stored row: KEEP it, with no compute. A
+//     note, a dismissal or an event answer saved after the samples have expired (30 days) would otherwise
+//     compute a night with no basis and wipe the one measurement that can never be made again;
+//   - otherwise measure it from a fresh compute. When that compute fails, or the night is not a finished
+//     scored `ok` night with a basis, the answer is null: nothing measured fits these times, and any stored
+//     snapshot was already found invalid for them. A compute that THROWS is caught and logged once, so it
+//     cannot turn the parent's save into a 500 (the review is saved without a snapshot; the nightly step
+//     tries again).
+export function correctionSnapshot(childId, nightDate, review) {
+  const stored = storedSpanNight.get(childId, nightDate);
+  const existing = getReviewStmt.get(childId, nightDate);
+  const old = stored && existing && validSnapshot({ ...review, span_figures: existing.span_figures }, stored);
+  if (!stored || stored.status !== 'ok' || nightNotOverYet(stored)) return old ? existing.span_figures : null;
+  const onset = review.true_onset_at || stored.onset_at;
+  const wake = review.true_wake_at || stored.wake_at;
+  if (!onset || !wake || (onset === stored.onset_at && wake === stored.wake_at)) return null;
+  if (old) return existing.span_figures;
+  try {
+    const fresh = computeNightForDisplay(childId, nightDate, { includeTimeline: true, mode: 'auto' });
+    if (fresh.status !== 'ok' || nightNotOverYet(fresh) || !fresh.span_basis) return null;
+    const figures = correctedSpanFigures(fresh.span_basis, onset, wake);
+    return figures ? JSON.stringify({ v: 1, onset_at: onset, wake_at: wake,
+      night_computed_at: stored.computed_at, ...figures }) : null;
+  } catch (error) {
+    logSnapshotFailure(attemptKey(childId, nightDate, review.reviewed_at, stored.computed_at), error);
+    return null;
+  }
+}
+
+// The nightly backfill. Resolves to how many snapshots it wrote.
+// Fix round 2 (Opus L4): one night per turn of the event loop (a setImmediate before each), so the first
+// tick after an upgrade, which can owe a full computeNight for every corrected night of the last month,
+// never holds the server for the whole backfill. Because a parent's save can land between two nights, each
+// night's review and stored row are read AFTER its yield, never from the list read at the start: a
+// snapshot measured from a review read before that save would overwrite the save's own. One run at a
+// time per process: a call while one is still going gets that run's promise.
+let refreshInFlight = null;
+export function refreshCorrectionSnapshots(nowMs = Date.now()) {
+  if (!refreshInFlight) refreshInFlight = refreshAll(nowMs).finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+
+async function refreshAll(nowMs) {
+  // #355: activity samples live for 30 days. Scanning only that date range
+  // backfills old answers and the unscored-then-locked night without
+  // repeatedly computing every historical correction.
+  const from = new Date(nowMs - 30 * 86400000).toISOString().slice(0, 10);
+  const candidates = db.prepare(`SELECT r.child_id, r.night_date
+    FROM sleep_reviews r JOIN sleep_nights n USING (child_id, night_date)
+    WHERE r.night_date >= ? AND n.status = 'ok'
+      AND (r.true_onset_at IS NOT NULL OR r.true_wake_at IS NOT NULL)`).all(from);
+  let refreshed = 0;
+  for (const { child_id: childId, night_date: nightDate } of candidates) {
+    await new Promise((resolve) => setImmediate(resolve));
+    // Reading the two rows can only fail with the database itself (closed, locked); such a night is
+    // skipped and logged once, like any other failure, and the rest still run.
+    try { if (refreshOne(childId, nightDate)) refreshed++; }
+    catch (error) { logSnapshotFailure(`${childId}|${nightDate}`, error); }
+  }
+  return refreshed;
+}
+
+// One night of the backfill, read fresh. True when it wrote a snapshot.
+function refreshOne(childId, nightDate) {
+  const r = getReviewStmt.get(childId, nightDate);
+  const stored = storedSpanNight.get(childId, nightDate);
+  if (!r || !stored || stored.status !== 'ok' || (!r.true_onset_at && !r.true_wake_at)) return false;
+  if (nightNotOverYet(stored) || validSnapshot(r, stored)) return false;
+  if ((r.true_onset_at || stored.onset_at) === stored.onset_at
+      && (r.true_wake_at || stored.wake_at) === stored.wake_at) return false;
+  const key = attemptKey(childId, nightDate, r.reviewed_at, stored.computed_at);
+  if (failedSnapshotAttempts.has(key)) return false;
+  // #355 review (Opus M4): one night is isolated from the rest. correctionSnapshot already catches its
+  // compute; this also catches anything else (the write itself, a malformed row), so one bad night can
+  // neither stop the nights after it nor the nightly job that called this. Either way the night is
+  // remembered, so it is not recomputed on every tick.
+  try {
+    const snapshot = correctionSnapshot(childId, nightDate, r);
+    if (snapshot) { writeSpanFigures.run(snapshot, childId, nightDate); return true; }
+    failedSnapshotAttempts.add(key);
+  } catch (error) {
+    failedSnapshotAttempts.add(key);
+    logSnapshotFailure(key, error);
+  }
+  return false;
+}
 
 // Both in-bed columns are in the INSERT AND in the ON CONFLICT SET (plan review R5). Missing from the SET,
 // a second save of the same night would silently keep the FIRST in-bed answer, which is exactly the
@@ -39,10 +196,10 @@ const upsertReviewStmt = db.prepare(
   `INSERT INTO sleep_reviews
      (child_id, night_date, true_onset_at, true_wake_at, true_onset_transition_id,
       true_wake_transition_id, true_in_bed_at, true_in_bed_transition_id, computed_onset_at,
-      computed_wake_at, note, dismissed, nobody_in_bed, answered_by_user_id, answered_by_username, reviewed_at)
+      computed_wake_at, note, dismissed, nobody_in_bed, span_figures, answered_by_user_id, answered_by_username, reviewed_at)
    VALUES (@child_id, @night_date, @true_onset_at, @true_wake_at, @true_onset_transition_id,
            @true_wake_transition_id, @true_in_bed_at, @true_in_bed_transition_id, @computed_onset_at,
-           @computed_wake_at, @note, @dismissed, @nobody_in_bed, @answered_by_user_id, @answered_by_username,
+           @computed_wake_at, @note, @dismissed, @nobody_in_bed, @span_figures, @answered_by_user_id, @answered_by_username,
            datetime('now'))
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      true_onset_at            = excluded.true_onset_at,
@@ -56,6 +213,7 @@ const upsertReviewStmt = db.prepare(
      note                     = excluded.note,
      dismissed                = excluded.dismissed,
      nobody_in_bed            = excluded.nobody_in_bed,
+     span_figures             = excluded.span_figures,
      answered_by_user_id      = excluded.answered_by_user_id,
      answered_by_username     = excluded.answered_by_username,
      reviewed_at              = datetime('now')`
@@ -443,7 +601,7 @@ export function getNightReview(childId, nightDate) {
 // `actor` and `answered` (#552) decide who the review says ANSWERED it; see previewNightReview. The route
 // passes both. The defaults (no actor, not an answer) keep whatever name is stored, so a caller that says
 // nothing about who is saving can never put a name on, or take one off, an answer.
-export function saveNightReview(childId, nightDate, patch = {}, { storeFirst = true, actor = null, answered = false } = {}) {
+export function saveNightReview(childId, nightDate, patch = {}, { storeFirst = true, actor = null, answered = false, spanFigures = undefined } = {}) {
   const next = previewNightReview(childId, nightDate, patch, { actor, answered });
   if (inBedAfterOnset(next)) {
     // The route refuses this first with a 400 (above applyVerdicts). Reaching this throw means a caller
@@ -451,6 +609,9 @@ export function saveNightReview(childId, nightDate, patch = {}, { storeFirst = t
     throw new Error('true_in_bed_at cannot be after true_onset_at — in bed comes before asleep');
   }
   if (storeFirst && reviewCorrectsNight(next)) storeNightBeforeCorrection(childId, nightDate);
+  // #355: the route computes before writing verdicts and passes its snapshot;
+  // direct callers use the same rule after their own store-first step.
+  next.span_figures = spanFigures === undefined ? correctionSnapshot(childId, nightDate, next) : spanFigures;
   upsertReviewStmt.run(next);
   return getReviewStmt.get(childId, nightDate);
 }
@@ -634,33 +795,31 @@ export function applyVerdicts(childId, nightDate, verdicts, reasons, shown = und
 // and it is returned alongside as `algo_*` so a future change can still be scored against ground truth.
 // Overlaying at display time rather than overwriting the row is what keeps both facts.
 //
-// `asleep_minutes` is re-derived from the corrected span because the two must agree — a card reading
-// "up at 05:29" above "slept 10h 15m" is visibly self-contradictory. Both awake_minutes AND
-// unknown_minutes (issue #442) are kept as measured against the ORIGINAL span rather than recomputed
-// against the corrected one — we cannot know how a correction redistributes either. A span recomputed
-// as `span - awake_minutes` alone would silently count any camera-outage minutes within the corrected
-// span as sleep again, reintroducing the exact bug #442 fixed, the moment a parent corrects a night
-// that had one. `unknown_minutes` is NULL on a row computed before that fix shipped, which `?? 0`
-// treats the same as a night with no outage — the best available answer for a row with no better
-// information, matching how `awake_minutes` is already treated.
+// #355, Opus/Codex plan review 2026-11-16: a moved `ok` span uses a snapshot
+// of the detector's minute ranges, stored with the review. Its asleep, awake,
+// unknown, wake-count and longest figures, AND its two times (#355 review,
+// Codex High: the endpoint the parent left alone included), come from that one
+// snapshot on every surface: card, list, detail page, review route. A later
+// fresh compute may drift, so it must never replace them. Unobserved minutes
+// inside or outside the basis are unknown (#442), rather than assumed asleep.
 //
-// ⚠️ KNOWN LIMIT, both directions, found by adversarial review — a documented gap, not a silent one.
-// `unknown_minutes` is a single COUNT over the ORIGINAL [onset, sleepEnd), not a set of ranges, so it
-// cannot track which specific minutes were unobserved once the span itself moves:
-//   - Shrinking the span (e.g. a later corrected onset) still subtracts the FULL original count, even
-//     though part of the original outage may now sit outside the corrected span — OVER-subtracts,
-//     understating the corrected sleep total. The safer of the two directions: nobody is told a
-//     duration is more confident than it is.
-//   - Expanding the span BACKWARD past the original onset into territory computeNight() never
-//     measured (an outage that happened before the algorithm's own onset, so it was never counted
-//     toward unknown_minutes at all) — UNDER-subtracts, silently re-admitting exactly the outage #442
-//     exists to exclude, for that specific correction shape.
-// A precise fix needs the actual unobserved MINUTE RANGES persisted, not one aggregate count, and a
-// real recompute against them — a materially bigger change than this fix's scope. Not attempted here.
-// The result is floored at zero.
+// NO VALID SNAPSHOT (a correction older than the 30-day sample window, saved
+// before #355, or one the nightly step could not rebuild): the night reads
+// exactly as it did before #355, with ONE addition. #355 review, amendment A,
+// measured on the prod and staging databases: nulling the wake figures instead
+// would have dropped old corrected nights' scores (on prod 80 to 38 and 82 to
+// 47) and moved staging's 55 corrected nights alike. So awake_minutes and
+// wake_count stay the detector's (they may not fit the corrected times, a
+// documented limit), asleep_minutes keeps the
+// span - awake - unknown derivation below, and the only change is that
+// longest_stretch_minutes is capped at asleep_minutes: a stretch longer than
+// the sleep it is part of is wrong whatever else is unknown. The score already
+// applied that cap (sleepScore.js longestKept), so no score moves. The card
+// then reads the stored row and the detail page a fresh compute, as for an
+// uncorrected night, and they can differ the same way.
 //
-// `sound_discounted_minutes` (#904, a fresh compute only; no column) is kept as measured over the ORIGINAL span too,
-// for the same reason as awake_minutes: which of its minutes fall inside a corrected span is not known here. So on a
+// `sound_discounted_minutes` (#904, a fresh compute only; no column) is kept as measured over the ORIGINAL span:
+// its minute ranges are not in the #355 snapshot, unlike awake_minutes. So on a
 // corrected night it is the DETECTOR's count, over the span the detector worked out ([its onset, its sleepEnd)), not
 // over the corrected span the night now shows: an original 540 stays 540 when the corrected times lie wholly before
 // the fault, or run past the original wake (both pinned by "a time correction keeps it" in sleep-faulty-mic.test.js).
@@ -693,8 +852,8 @@ export function applyVerdicts(childId, nightDate, verdicts, reasons, shown = und
 // when a parent's time actually DIFFERS from the one being overlaid; a supplied time string-equal to the
 // night's own (both are minute-floored UTC text, so an unchanged HH:MM round-trips exactly) changes
 // nothing. The detector's own asleep figure is the better one whenever the span is the same: it is
-// measured minute by minute, while span - awake - unknown subtracts a single aggregate of unwatched
-// minutes that may lie outside the span (#508, and the KNOWN LIMIT above).
+// measured minute by minute, while the fallback span derivation can only use
+// aggregates when a #355 correction snapshot is unavailable.
 //
 // ⚠️ "The one being overlaid" is deliberate, and NOT the review's own `computed_*` (what the review page
 // showed). Fix round 2, 2026-09-30, Opus #2, decided after trying the alternative. The review page seeds
@@ -758,14 +917,113 @@ export function applyCorrection(childId, night) {
   // nothing about the sleep is re-derived. See "AN UNCHANGED TIME" above.
   const onsetChanged = Boolean(r.true_onset_at) && r.true_onset_at !== night.onset_at;
   const wakeChanged = Boolean(r.true_wake_at) && r.true_wake_at !== night.wake_at;
+  const storedSpan = night.status === 'ok' && !nightNotOverYet(night)
+    ? storedSpanNight.get(childId, night.night_date) : null;
+  const snapshot = storedSpan ? validSnapshot(r, storedSpan) : null;
+  // #355 review (Codex High, a staging night: onset 08:04 on the card, 08:02 on
+  // the detail page): a valid snapshot owns both displayed endpoints, including
+  // the one the parent did not edit, which a later fresh compute may have moved.
+  // Its figures were measured between exactly these two times. The detector
+  // times they are compared with (`algo_*`) come from the same stored row: the
+  // score (sleepScore.js) and the page's in-bed rule (frontend inBed.js) read
+  // "onset corrected" as onset_at !== algo_onset_at, so a fresh compute's
+  // drifted onset beside the stored one would make the detail page alone treat
+  // an onset nobody corrected as corrected (no settling term, put-down hidden).
+  // Fix round 2 (Opus L2): the put-down too. The score's settling term is onset minus in_bed_at, so the
+  // stored onset beside a fresh compute's put-down could still give the detail page a different score
+  // from the card's. A put-down the parent gave stays theirs.
+  if (snapshot) {
+    out.onset_at = snapshot.onset_at;
+    out.wake_at = snapshot.wake_at;
+    out.algo_onset_at = storedSpan.onset_at ?? null;
+    out.algo_wake_at = storedSpan.wake_at ?? null;
+    out.algo_in_bed_at = storedSpan.in_bed_at ?? null;
+    if (!r.true_in_bed_at) out.in_bed_at = storedSpan.in_bed_at ?? null;
+  }
   if (wakeChanged) for (const k of SENSOR_SHADOW_KEYS) if (k in out) out[k] = null;
-  if (!onsetChanged && !wakeChanged) return out;
-  if (onset && wake) {
-    const span = Math.round((Date.parse(`${wake.replace(' ', 'T')}Z`) - Date.parse(`${onset.replace(' ', 'T')}Z`)) / 60000);
+  // #355: the fresh detector may drift until it equals the parent's answer.
+  // The snapshot still wins, or card and detail could show different totals.
+  if (!onsetChanged && !wakeChanged && !snapshot) return out;
+  if (out.onset_at && out.wake_at) {
+    const span = Math.round((Date.parse(`${out.wake_at.replace(' ', 'T')}Z`) - Date.parse(`${out.onset_at.replace(' ', 'T')}Z`)) / 60000);
     if (night.status === 'empty' && span > 0 && !nightNotOverYet(night)) return asScoredFromEmpty(out, night, span);
     out.asleep_minutes = Math.max(0, span - (night.awake_minutes ?? 0) - (night.unknown_minutes ?? 0));
   }
+  if (night.status === 'ok' && !nightNotOverYet(night)) {
+    if (snapshot) {
+      // #355: every surface reads these figures from the same stored revision,
+      // even when a later fresh compute sees different wake minutes.
+      for (const key of ['asleep_minutes', 'awake_minutes', 'unknown_minutes',
+        'wake_count', 'longest_stretch_minutes']) out[key] = snapshot[key];
+      if (Array.isArray(out.timeline)) rebuildCorrectionLists(out, snapshot, night);
+    } else {
+      // #355 review, amendment A (see NO VALID SNAPSHOT above): the detector's
+      // wake figures and the old derivation stay; only the stretch is capped.
+      if (out.longest_stretch_minutes != null && out.asleep_minutes != null)
+        out.longest_stretch_minutes = Math.min(out.longest_stretch_minutes, out.asleep_minutes);
+    }
+  }
   return out;
+}
+
+function rebuildCorrectionLists(out, snapshot, raw) {
+  const ms = (s) => Date.parse(`${s.replace(' ', 'T')}Z`);
+  const sql = (t) => new Date(t).toISOString().slice(0, 19).replace('T', ' ');
+  const step = 60000;
+  // #355 review (Opus L3): a corrected time picked from a bed-transition frame
+  // carries seconds. The detector floors such a time to its minute (txIdx), and
+  // the counted runs and timeline rows are minute aligned, so both ends are
+  // floored here too. Unfloored, the morning row never merged with a run ending
+  // in that minute, and segments started off the minute and missed their rows.
+  const onsetMs = Math.floor(ms(snapshot.onset_at) / step) * step;
+  const wakeMs = Math.floor(ms(snapshot.wake_at) / step) * step;
+  const basis = raw.span_basis;
+  if (!basis) return;
+  const inRuns = (runs, t) => runs.some((r) => t >= ms(r.start_at) && t < ms(r.end_at));
+  const counted = snapshot.wakes;
+  const morningEnd = Math.max(ms(raw.window_end), raw.wake_at ? ms(raw.wake_at) : 0, wakeMs);
+  const wakes = counted.map((w) => ({ ...w }));
+  // #355, Design 4: mirror the detector's morning-row merge rule at the
+  // corrected wake, while keeping alert queries bounded by its old morning.
+  if (wakes.length && ms(wakes[wakes.length - 1].end_at) === wakeMs) {
+    const last = wakes[wakes.length - 1];
+    last.end_at = sql(morningEnd);
+    last.minutes = Math.round((morningEnd - ms(last.start_at)) / step);
+  } else wakes.push({ start_at: sql(wakeMs), end_at: sql(morningEnd),
+    minutes: Math.round((morningEnd - wakeMs) / step) });
+  out.wakes = wakes;
+
+  const timeline = new Map(raw.timeline.map((row) => [ms(row.t), row]));
+  const startMs = Math.max(ms(basis.start_at), Math.min(ms(raw.display_start || raw.window_start), onsetMs));
+  const endMs = Math.max(ms(raw.display_end || raw.window_end), wakeMs);
+  out.display_start = sql(startMs);
+  out.display_end = sql(endMs);
+  const label = (t) => {
+    const item = timeline.get(t);
+    const rawWake = item ? item.inWake : inRuns(basis.wake_runs, t);
+    const gap = item ? item.state === 'gap' : t < ms(basis.start_at) || t >= ms(basis.end_at)
+      || inRuns(basis.gap_runs, t);
+    // Outside the correction retain the detector's wake colour, including
+    // its morning run. Inside it, only counted clipped runs are wake-ups.
+    if (t < onsetMs || t >= wakeMs) {
+      if (rawWake) return 'wake';
+      if (gap) return 'gap';
+      return t < onsetMs ? 'settling' : 'awake';
+    }
+    if (inRuns(counted, t)) return 'wake';
+    if (rawWake) return 'stir';
+    if (gap) return 'gap';
+    return item?.state === 'active' ? 'stir' : 'asleep';
+  };
+  const segments = [];
+  for (let t = startMs; t < endMs; ) {
+    const state = label(t);
+    let next = t + step;
+    while (next < endMs && label(next) === state) next += step;
+    segments.push({ state, from_at: sql(t), to_at: sql(next), minutes: (next - t) / step });
+    t = next;
+  }
+  out.segments = segments;
 }
 
 // #355. A night the detector scored `empty` that a parent then gave BOTH an asleep and a wake time becomes a
@@ -786,9 +1044,9 @@ export function applyCorrection(childId, night) {
 // to 21:00 took 60 minutes off a 21:00 to 06:00 correction it lies wholly outside (480, not 540), and turned
 // a fully watched 05:30 to 06:00 correction into "ok, 0 minutes asleep". There is no honest per-span figure on
 // the card path (the stored row has no per-minute data), and the card and the detail page must agree, so
-// neither subtracts. KNOWN LIMIT, in the README: if the cameras missed minutes inside the span the parent
-// entered, they are counted as slept. On every other corrected night the aggregate is still subtracted
-// (applyCorrection above); this differs because an `empty` night has no detector span to measure it against.
+// neither subtracts. KNOWN LIMIT: if the cameras missed minutes inside the span the parent
+// entered, they are counted as slept. A corrected `ok` night instead uses the
+// #355 minute snapshot; an `empty` night has no detector span to measure it against.
 //
 // Where the other figures come from, none of it invented:
 //   - wake_count 0 and awake_minutes 0: computeNight only returns `empty` when the whole night's in-bed peak
@@ -895,7 +1153,7 @@ const COMPUTED_ONLY_EMPTY_NULLS = ['sound_discounted_minutes'];
 // the night is `ok`, so a detector-empty night never has them. Removed rather than nulled, so a flagged
 // night's response has the same keys as a detector-empty one, not the same keys with nulls in them.
 const SCORED_NIGHT_DETAIL = [
-  'transitions', 'timeline', 'wakes', 'visits', 'segments', 'display_start', 'display_end', 'alerts', 'wakeClips',
+  'transitions', 'timeline', 'span_basis', 'wakes', 'visits', 'segments', 'display_start', 'display_end', 'alerts', 'wakeClips',
 ];
 
 // The night exactly as a detector-`empty` night of the same window would read, plus what the parent
