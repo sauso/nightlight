@@ -26,7 +26,8 @@ function run(id, status = 'completed', conclusion = 'success', headSha = sha, cr
 function exercise(t, snapshots, expected, timeout = 2) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'publish-gate-'));
   try {
-    snapshots.forEach((snapshot, i) => fs.writeFileSync(path.join(dir, `${i + 1}.json`), JSON.stringify(snapshot)));
+    snapshots.forEach((snapshot, i) => fs.writeFileSync(path.join(dir, `${i + 1}.json`),
+      typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot)));
     const fakeGh = `#!/usr/bin/env bash
 set -eu
 expected="run list --workflow test.yml --commit $GITHUB_SHA --event push --branch main --json databaseId,headSha,status,conclusion,createdAt,url --limit 20"
@@ -35,7 +36,12 @@ count=$(cat "$GATE_TEST_COUNT" 2>/dev/null || echo 0)
 count=$((count + 1))
 echo "$count" > "$GATE_TEST_COUNT"
 if [ "$count" -gt "$GATE_TEST_CASES" ]; then count=$GATE_TEST_CASES; fi
-cat "$GATE_TEST_FIXTURES/$count.json"
+fixture="$GATE_TEST_FIXTURES/$count.json"
+if [ "$(cat "$fixture")" = '__GH_FAILURE__' ]; then
+  echo 'fake gh failed' >&2
+  exit 1
+fi
+cat "$fixture"
 `;
     fs.writeFileSync(path.join(dir, 'gh'), fakeGh, { mode: 0o755 });
     const result = spawnSync(bash, [script], {
@@ -89,6 +95,20 @@ test('a re-run of the same run id uses its current attempt', { skip: skipBash },
     { status: 0, message: /waiting for test run 10.*test run 10 passed/s, calls: 2 });
 });
 
+test('a transient gh error is retried until a run passes', { skip: skipBash }, t => {
+  // stdout and stderr are joined in that order, so the stderr retry notice follows the stdout pass line: match both, any order.
+  exercise(t, ['__GH_FAILURE__', [run(10)]],
+    { status: 0, message: /^(?=[\s\S]*gh run list failed, retrying)(?=[\s\S]*test run 10 passed)/, calls: 2 });
+});
+test('persistent gh errors time out closed with the last error', { skip: skipBash }, t => {
+  exercise(t, ['__GH_FAILURE__'],
+    { status: 2, message: /timed out.*fake gh failed/s }, 0);
+});
+test('invalid gh JSON is retried until a run passes', { skip: skipBash }, t => {
+  exercise(t, ['not JSON', [run(10)]],
+    { status: 0, message: /^(?=[\s\S]*gh run list failed, retrying)(?=[\s\S]*test run 10 passed)/, calls: 2 });
+});
+
 // Check the control flow by YAML keys and expression tokens, not exact formatting.
 test('publish workflow has a read-only gate and accepts a skipped gate for dev', () => {
   const yaml = fs.readFileSync(process.env.PUBLISH_GATE_WORKFLOW ||
@@ -98,11 +118,12 @@ test('publish workflow has a read-only gate and accepts a skipped gate for dev',
   assert.ok(gate, 'gate job is missing');
   assert.ok(build, 'build-and-push job is missing');
   assert.match(yaml, /workflow_dispatch:\s*\n\s+inputs:\s*\n\s+gate_only:/);
+  assert.match(yaml, /group:.*github\.sha.*inputs\.gate_only/);
   assert.match(gate, /github\.ref.*refs\/heads\/main.*refs\/tags\/v.*inputs\.gate_only/);
   assert.match(gate, /permissions:\s*\n(?:\s+[\w-]+:\s*\w+\s*\n)*\s+actions:\s*read/);
   assert.match(gate, /GH_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/);
-  // A manual dry run waits for the test run on the branch it was dispatched on; a main push or tag build for main's.
-  assert.match(gate, /GATE_BRANCH:.*workflow_dispatch.*github\.ref_name.*'main'/);
+  // Only a branch dispatch uses its branch's test run; a tag dispatch needs main's.
+  assert.match(gate, /GATE_BRANCH:.*workflow_dispatch.*startsWith\(github\.ref,\s*'refs\/tags\/'\).*github\.ref_name.*'main'/);
   assert.match(build, /needs:\s*(?:\[[^\]]*\bgate\b[^\]]*\]|gate\b)/);
   assert.match(build, /if:.*needs\.gate\.result.*skipped/);
   assert.match(build, /if:.*!inputs\.gate_only/);

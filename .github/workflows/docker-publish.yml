@@ -22,9 +22,11 @@ permissions:
 # A release pushes a commit to main AND a v* tag - two push events, two runs of
 # identical code. The tag run's published tags are a superset of the branch run's
 # (latest + sha + semver vs latest + sha), so keying concurrency on the commit lets
-# the tag run cancel the redundant branch run instead of building twice.
+# the tag run cancel the redundant branch run instead of building twice. A dry
+# gate check must neither cancel nor be cancelled by a real publish of that SHA.
+# On push events gate_only is empty, so both real runs use the build group.
 concurrency:
-  group: docker-publish-${{ github.sha }}
+  group: docker-publish-${{ github.sha }}-${{ inputs.gate_only && 'gate' || 'build' }}
   cancel-in-progress: true
 
 jobs:
@@ -42,11 +44,9 @@ jobs:
       - name: Wait for a green push test run of this commit
         env:
           GITHUB_SHA: ${{ github.sha }}
-          # The branch whose push test run is required. A main push or a v* tag build waits for the run
-          # that tested the commit on main; a manual dispatch (the gate_only dry run from dev) waits for the
-          # run on the branch it was dispatched on, so the dry run can pass without a release (Codex review of
-          # the first build: the dev dry run would otherwise wait for a main run that never exists).
-          GATE_BRANCH: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || 'main' }}
+          # Only a branch dispatch uses that branch's push test run (so a dev dry run can pass).
+          # A tag dispatch needs main's run: a tag name is not a test branch.
+          GATE_BRANCH: ${{ github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/') && github.ref_name || 'main' }}
         run: sh scripts/publish-gate.sh
 
   build-and-push:

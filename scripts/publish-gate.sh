@@ -26,22 +26,46 @@ select_run() {
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", chunk => input += chunk);
     process.stdin.on("end", () => {
-      const runs = JSON.parse(input);
-      if (!Array.isArray(runs)) throw new Error("gh run list did not return an array");
-      const matching = runs.filter(run => run.headSha === process.env.GITHUB_SHA);
-      matching.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) ||
-        Number(b.databaseId) - Number(a.databaseId));
-      const run = matching[0];
-      console.log(run ? [run.databaseId, run.status, run.conclusion || "-", run.url].join("|") : "none");
+      try {
+        const runs = JSON.parse(input);
+        if (!Array.isArray(runs)) throw new Error("gh run list did not return an array");
+        const matching = runs.filter(run => run.headSha === process.env.GITHUB_SHA);
+        matching.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) ||
+          Number(b.databaseId) - Number(a.databaseId));
+        const run = matching[0];
+        console.log(run ? [run.databaseId, run.status, run.conclusion || "-", run.url].join("|") : "none");
+      } catch (error) {
+        console.error(error.message);
+        process.exitCode = 1;
+      }
     });
   '
 }
 
 deadline=$(($(date +%s) + GATE_TIMEOUT_S))
+last_error=
 while :; do
-  runs=$(list_runs)
-  selected=$(printf '%s\n' "$runs" | select_run)
-  if [ "$selected" = none ]; then
+  # A temporary CLI or JSON error is not evidence that tests passed or failed.
+  # Retry until the same deadline, then fail closed with the last error.
+  if runs=$(list_runs 2>&1); then
+    if selected=$(printf '%s\n' "$runs" | select_run 2>&1); then
+      :
+    else
+      last_error="invalid gh run list response: $selected"
+      echo "gate: gh run list failed, retrying: $last_error" >&2
+      selected=
+    fi
+  else
+    last_error="gh run list error: $runs"
+    echo "gate: gh run list failed, retrying: $last_error" >&2
+    selected=
+  fi
+  if [ -z "$selected" ]; then
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "gate: timed out after gh run list failed: $last_error" >&2
+      exit 2
+    fi
+  elif [ "$selected" = none ]; then
     echo "gate: waiting for a push test run on $GATE_BRANCH for $GITHUB_SHA"
     if [ "$(date +%s)" -ge "$deadline" ]; then
       echo "gate: no test run for this commit: it is never published untested" >&2
