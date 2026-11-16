@@ -372,10 +372,11 @@ describe('RecordingsCard', () => {
   ];
   const rowsOf = (container) => [...container.querySelectorAll('.alert-item--btn')];
   const PAGE = Array.from({ length: 50 }, (_, n) => ({
-    id: `page-${50 - n}`, status: 'ready', camera_name: `Camera ${50 - n}`,
+    // Numeric ids, like the real rows: the cursor URL asserted below must be one the route would accept (before_id is a decimal).
+    id: 50 - n, status: 'ready', camera_name: `Camera ${50 - n}`,
     started_at: '2026-09-02 10:00:00', created_at: '2026-09-02 10:00:00',
   }));
-  const OLDER_URL = '/recordings/child/kid-1?before_created_at=2026-09-02%2010%3A00%3A00&before_id=page-1';
+  const OLDER_URL = '/recordings/child/kid-1?before_created_at=2026-09-02%2010%3A00%3A00&before_id=1';
 
   beforeEach(() => {
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
@@ -405,6 +406,7 @@ describe('RecordingsCard', () => {
   });
 
   // ★ The point of the change: the recordings are on screen at once, in the same card as the alerts, not behind a row to open.
+  // (Since #1112 a first page is at most 50 rows and older ones load on request; this fixture is a short page, so all of it shows.)
   test('★ it is an alerts-style card: a titled list with every recording visible at once, newest first', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     const { container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
@@ -496,7 +498,7 @@ describe('RecordingsCard', () => {
 
   test('a full page exposes the last-row cursor and appends older rows only once', async () => {
     const get = vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path === OLDER_URL
-      ? [PAGE[49], { ...PAGE[49], id: 'older-1', camera_name: 'Older camera' }, { ...PAGE[49], id: 'older-1' }] : PAGE));
+      ? [PAGE[49], { ...PAGE[49], id: 900, camera_name: 'Older camera' }, { ...PAGE[49], id: 900 }] : PAGE));
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
     await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
     await user.click(screen.getByRole('button', { name: 'See all recordings' }));
@@ -529,7 +531,7 @@ describe('RecordingsCard', () => {
 
   test('deleting after paging removes locally without refetching page one', async () => {
     const get = vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path === OLDER_URL
-      ? [{ ...PAGE[49], id: 'older-1', camera_name: 'Older camera' }] : PAGE));
+      ? [{ ...PAGE[49], id: 900, camera_name: 'Older camera' }] : PAGE));
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
     await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
     await user.click(screen.getByRole('button', { name: 'See all recordings' }));
@@ -539,7 +541,7 @@ describe('RecordingsCard', () => {
     await user.click(await screen.findByRole('button', { name: 'Delete recording' }));
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(rowsOf(container)).toHaveLength(50));
-    expect(api.del).toHaveBeenCalledWith('/recordings/older-1');
+    expect(api.del).toHaveBeenCalledWith('/recordings/900');
     expect(get).toHaveBeenCalledTimes(2);
   });
 
