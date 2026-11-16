@@ -30,7 +30,7 @@ import { logger } from './logger.js';
 export { VERDICTS, WRONG_REASONS };
 
 const getReviewStmt = db.prepare('SELECT * FROM sleep_reviews WHERE child_id = ? AND night_date = ?');
-const storedSpanNight = db.prepare('SELECT status, onset_at, wake_at, window_end, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ?');
+const storedSpanNight = db.prepare('SELECT status, onset_at, wake_at, in_bed_at, window_end, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ?');
 const writeSpanFigures = db.prepare('UPDATE sleep_reviews SET span_figures = ? WHERE child_id = ? AND night_date = ?');
 // #355 review (Opus M4, Codex M2): the nightly step runs every 30 minutes, and a correction it cannot
 // rebuild (samples gone, a night no longer scored) would otherwise pay a full computeNight on every tick
@@ -73,10 +73,19 @@ function validSnapshot(review, stored) {
   // with the STORED row's time, never a fresh compute's, so a fresh compute
   // that drifts can neither invalidate the snapshot nor split the two pages.
   // Callers pass the stored sleep_nights row as `stored`.
+  // Fix round 2 (Opus M2): times are compared to the MINUTE. The figures are measured on whole minutes
+  // (correctedSpan.js floors both ends), and the review page re-sends a time as HH:MM on every later save
+  // (NightReview.jsx), so a wake picked from a frame (with seconds) came back seconds-less on a note-only
+  // save and threw away a snapshot that, after 30 days, could never be measured again.
   const onset = review.true_onset_at || stored?.onset_at;
   const wake = review.true_wake_at || stored?.wake_at;
-  return snapshot && snapshot.onset_at === onset && snapshot.wake_at === wake
+  return snapshot && sameMinute(snapshot.onset_at, onset) && sameMinute(snapshot.wake_at, wake)
     && snapshot.night_computed_at === stored?.computed_at ? snapshot : null;
+}
+
+// Two stored UTC times ('YYYY-MM-DD HH:MM:SS') in the same minute. Missing on either side is not a match.
+function sameMinute(a, b) {
+  return typeof a === 'string' && typeof b === 'string' && a.slice(0, 16) === b.slice(0, 16);
 }
 
 export function storedCorrectedNightWithSnapshot(childId, nightDate) {
@@ -119,38 +128,62 @@ export function correctionSnapshot(childId, nightDate, review) {
   }
 }
 
+// The nightly backfill. Resolves to how many snapshots it wrote.
+// Fix round 2 (Opus L4): one night per turn of the event loop (a setImmediate before each), so the first
+// tick after an upgrade, which can owe a full computeNight for every corrected night of the last month,
+// never holds the server for the whole backfill. Because a parent's save can land between two nights, each
+// night's review and stored row are read AFTER its yield, never from the list read at the start: a
+// snapshot measured from a review read before that save would overwrite the save's own. One run at a
+// time per process: a call while one is still going gets that run's promise.
+let refreshInFlight = null;
 export function refreshCorrectionSnapshots(nowMs = Date.now()) {
+  if (!refreshInFlight) refreshInFlight = refreshAll(nowMs).finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+
+async function refreshAll(nowMs) {
   // #355: activity samples live for 30 days. Scanning only that date range
   // backfills old answers and the unscored-then-locked night without
   // repeatedly computing every historical correction.
   const from = new Date(nowMs - 30 * 86400000).toISOString().slice(0, 10);
-  const candidates = db.prepare(`SELECT r.*, n.status AS night_status, n.onset_at AS night_onset,
-      n.wake_at AS night_wake, n.computed_at AS night_computed_at, n.window_end AS night_window_end
+  const candidates = db.prepare(`SELECT r.child_id, r.night_date
     FROM sleep_reviews r JOIN sleep_nights n USING (child_id, night_date)
     WHERE r.night_date >= ? AND n.status = 'ok'
       AND (r.true_onset_at IS NOT NULL OR r.true_wake_at IS NOT NULL)`).all(from);
   let refreshed = 0;
-  for (const r of candidates) {
-    const stored = { status: r.night_status, onset_at: r.night_onset, wake_at: r.night_wake,
-      computed_at: r.night_computed_at, window_end: r.night_window_end };
-    if (nightNotOverYet(stored) || validSnapshot(r, stored)) continue;
-    if ((r.true_onset_at || stored.onset_at) === stored.onset_at
-        && (r.true_wake_at || stored.wake_at) === stored.wake_at) continue;
-    const key = attemptKey(r.child_id, r.night_date, r.reviewed_at, stored.computed_at);
-    if (failedSnapshotAttempts.has(key)) continue;
-    // #355 review (Opus M4): one night is isolated from the rest. correctionSnapshot already catches its
-    // compute; this also catches anything else (the write itself, a malformed row), so one bad night can
-    // neither stop the nights after it nor the nightly job that called this.
-    try {
-      const snapshot = correctionSnapshot(r.child_id, r.night_date, r);
-      if (snapshot) { writeSpanFigures.run(snapshot, r.child_id, r.night_date); refreshed++; }
-      else failedSnapshotAttempts.add(key);
-    } catch (error) {
-      failedSnapshotAttempts.add(key);
-      logSnapshotFailure(key, error);
-    }
+  for (const { child_id: childId, night_date: nightDate } of candidates) {
+    await new Promise((resolve) => setImmediate(resolve));
+    // Reading the two rows can only fail with the database itself (closed, locked); such a night is
+    // skipped and logged once, like any other failure, and the rest still run.
+    try { if (refreshOne(childId, nightDate)) refreshed++; }
+    catch (error) { logSnapshotFailure(`${childId}|${nightDate}`, error); }
   }
   return refreshed;
+}
+
+// One night of the backfill, read fresh. True when it wrote a snapshot.
+function refreshOne(childId, nightDate) {
+  const r = getReviewStmt.get(childId, nightDate);
+  const stored = storedSpanNight.get(childId, nightDate);
+  if (!r || !stored || stored.status !== 'ok' || (!r.true_onset_at && !r.true_wake_at)) return false;
+  if (nightNotOverYet(stored) || validSnapshot(r, stored)) return false;
+  if ((r.true_onset_at || stored.onset_at) === stored.onset_at
+      && (r.true_wake_at || stored.wake_at) === stored.wake_at) return false;
+  const key = attemptKey(childId, nightDate, r.reviewed_at, stored.computed_at);
+  if (failedSnapshotAttempts.has(key)) return false;
+  // #355 review (Opus M4): one night is isolated from the rest. correctionSnapshot already catches its
+  // compute; this also catches anything else (the write itself, a malformed row), so one bad night can
+  // neither stop the nights after it nor the nightly job that called this. Either way the night is
+  // remembered, so it is not recomputed on every tick.
+  try {
+    const snapshot = correctionSnapshot(childId, nightDate, r);
+    if (snapshot) { writeSpanFigures.run(snapshot, childId, nightDate); return true; }
+    failedSnapshotAttempts.add(key);
+  } catch (error) {
+    failedSnapshotAttempts.add(key);
+    logSnapshotFailure(key, error);
+  }
+  return false;
 }
 
 // Both in-bed columns are in the INSERT AND in the ON CONFLICT SET (plan review R5). Missing from the SET,
@@ -896,11 +929,16 @@ export function applyCorrection(childId, night) {
   // "onset corrected" as onset_at !== algo_onset_at, so a fresh compute's
   // drifted onset beside the stored one would make the detail page alone treat
   // an onset nobody corrected as corrected (no settling term, put-down hidden).
+  // Fix round 2 (Opus L2): the put-down too. The score's settling term is onset minus in_bed_at, so the
+  // stored onset beside a fresh compute's put-down could still give the detail page a different score
+  // from the card's. A put-down the parent gave stays theirs.
   if (snapshot) {
     out.onset_at = snapshot.onset_at;
     out.wake_at = snapshot.wake_at;
     out.algo_onset_at = storedSpan.onset_at ?? null;
     out.algo_wake_at = storedSpan.wake_at ?? null;
+    out.algo_in_bed_at = storedSpan.in_bed_at ?? null;
+    if (!r.true_in_bed_at) out.in_bed_at = storedSpan.in_bed_at ?? null;
   }
   if (wakeChanged) for (const k of SENSOR_SHADOW_KEYS) if (k in out) out[k] = null;
   // #355: the fresh detector may drift until it equals the parent's answer.

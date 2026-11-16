@@ -4,9 +4,13 @@
 // The counting rule is DELIBERATELY re-expressed here over runs rather than shared with the
 // detector's accumulateMetrics (sleepAnalysis.js), which works on per-minute arrays inside
 // computeNightPass and stays there untouched (#355 review, Opus L5: hoisting it bought nothing and
-// changed a core file). Over the detector's own span the two must give the same five figures: the
-// test "over the detector's own span the figures equal the detector's" in sleep-night-facts.test.js
-// pins that on real nights, and the invariant tests pin the rest.
+// changed a core file). Over the detector's own span (its onset to the minute its counting stopped,
+// `sleep_end_at`) the two give the same five figures, including a run the detector's own wake cuts
+// short (fix round 2, Opus M1: the short-piece rule below once dropped such a wake-up). Two tests in
+// sleep-night-facts.test.js pin that on real nights: "over the detector's own span the figures equal
+// the detector's", and "a run cut by the detector's own wake" (an adopted exit cutting a four-minute
+// run); the invariant tests pin the rest. Spans a parent moved are where the rules here are
+// judgements (stated below).
 const WAKE_ACTIVE_MIN = 5; // Keep equal to sleepAnalysis.js's detector threshold.
 
 const minute = (value) => Math.floor(Date.parse(`${value.replace(' ', 'T')}Z`) / 60000);
@@ -39,18 +43,23 @@ export function correctedSpanFigures(basis, onset_at, wake_at) {
   const activeRuns = mergedRuns(basis.active_runs);
   // A basis without the detector's onset (none is produced today) treats no minute as pre-onset.
   const detectorOnset = basis.onset_at ? minute(basis.onset_at) : onset;
+  // Fix round 2 (Opus M1): the corrected wake falls in the minute where the detector itself stopped
+  // counting, as on an onset-only correction or a save that re-sends the detector's own wake. A run
+  // cut there was cut by the detector, which counted it as a wake-up however short the piece.
+  const wakeIsDetectorEnd = Boolean(basis.sleep_end_at) && minute(basis.sleep_end_at) === wake;
   const wakes = [];
   for (const [a, b] of wakeRuns) {
     const from = Math.max(a, onset);
     const to = Math.min(b, wake);
     if (to <= from) continue;
     // #355: clipping at onset gives awake time but cannot invent a wake-up at
-    // the start of the parent's night. A run cut by the corrected wake counts
-    // only if the piece is at least WAKE_ACTIVE_MIN minutes long (#355 review,
-    // Opus L2): a stated approximation, because the detector compares that
-    // minimum with a run's ACTIVE minutes, and a clipped piece can hold quiet
-    // minutes the detector bridged. Shorter pieces stay awake minutes (a stir).
-    if (a < onset || (b > wake && to - from < WAKE_ACTIVE_MIN)) continue;
+    // the start of the parent's night. A run cut by a corrected wake EARLIER
+    // than the detector's counts only if the piece is at least WAKE_ACTIVE_MIN
+    // minutes long (#355 review, Opus L2): a stated approximation, because the
+    // detector compares that minimum with a run's ACTIVE minutes, and a clipped
+    // piece can hold quiet minutes the detector bridged. Shorter pieces stay
+    // awake minutes (a stir). Not applied at the detector's own wake (above).
+    if (a < onset || (b > wake && !wakeIsDetectorEnd && to - from < WAKE_ACTIVE_MIN)) continue;
     wakes.push({ start_at: sql(from), end_at: sql(to), minutes: to - from });
   }
 

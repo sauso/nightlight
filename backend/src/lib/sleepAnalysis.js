@@ -3198,6 +3198,11 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     };
     out.span_basis = {
       start_at: minuteTime(0), end_at: minuteTime(basisEnd), onset_at: minuteTime(onset),
+      // #355 fix round 2 (Opus M1): where the detector's own counting stopped (sleepEnd: its wake
+      // minute, or the window end when it reported no wake). accumulateMetrics counts a run that this
+      // boundary cuts as a full wake-up however short the piece, so correctedSpan.js must not apply
+      // its short-piece rule at this minute, only at a wake a parent moved earlier.
+      sleep_end_at: minuteTime(sleepEnd),
       wake_runs: runsOf((i) => Boolean(inWake[i])),
       gap_runs: runsOf((i) => metricsState[i] === null),
       // #355 review (Opus M1): the wake walk starts at the detector's onset, so

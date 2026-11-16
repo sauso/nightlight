@@ -26419,8 +26419,8 @@
   {
     "label": "#355-F7 onset-clipped run is not a wake-up",
     "file": "backend/src/lib/correctedSpan.js",
-    "find": "    if (a < onset || (b > wake && to - from < WAKE_ACTIVE_MIN)) continue;",
-    "replace": "    if (b > wake && to - from < WAKE_ACTIVE_MIN) continue;",
+    "find": "    if (a < onset || (b > wake && !wakeIsDetectorEnd && to - from < WAKE_ACTIVE_MIN)) continue;",
+    "replace": "    if (b > wake && !wakeIsDetectorEnd && to - from < WAKE_ACTIVE_MIN) continue;",
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
     "namePattern": "later onset skips an early wake"
@@ -26428,11 +26428,20 @@
   {
     "label": "#355-F7 short wake-end clip is a stir",
     "file": "backend/src/lib/correctedSpan.js",
-    "find": "    if (a < onset || (b > wake && to - from < WAKE_ACTIVE_MIN)) continue;",
+    "find": "    if (a < onset || (b > wake && !wakeIsDetectorEnd && to - from < WAKE_ACTIVE_MIN)) continue;",
     "replace": "    if (a < onset) continue;",
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
     "namePattern": "wake-end clipping counts five minutes"
+  },
+  {
+    "label": "#355-F7 short-piece rule applied at the detector's own wake",
+    "file": "backend/src/lib/correctedSpan.js",
+    "find": "    if (a < onset || (b > wake && !wakeIsDetectorEnd && to - from < WAKE_ACTIVE_MIN)) continue;",
+    "replace": "    if (a < onset || (b > wake && to - from < WAKE_ACTIVE_MIN)) continue;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "own wake stays a wake-up"
   },
   {
     "label": "#355-F7 gap and outside minutes stay unknown",
@@ -26455,11 +26464,20 @@
   {
     "label": "#355-F7 snapshot requires matching corrected times",
     "file": "backend/src/lib/sleepReviews.js",
-    "find": "snapshot.onset_at === onset && snapshot.wake_at === wake",
+    "find": "sameMinute(snapshot.onset_at, onset) && sameMinute(snapshot.wake_at, wake)",
     "replace": "true",
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
     "namePattern": "snapshot agrees on stored and fresh reads"
+  },
+  {
+    "label": "#355-F7 snapshot times compared to the second",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "sameMinute(snapshot.onset_at, onset) && sameMinute(snapshot.wake_at, wake)",
+    "replace": "snapshot.onset_at === onset && snapshot.wake_at === wake",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "re-sends a frame-picked wake"
   },
   {
     "label": "#355-F7 snapshot requires matching stored detector revision",
@@ -26543,18 +26561,27 @@
     "namePattern": "active minutes before detector onset"
   },
   {
-    "label": "#355-F7 one failing night stops the nightly refresh",
+    "label": "#355-F7 a night whose write throws is retried every tick",
     "file": "backend/src/lib/sleepReviews.js",
-    "find": "    } catch (error) {\n      failedSnapshotAttempts.add(key);\n      logSnapshotFailure(key, error);\n    }",
-    "replace": "    } catch (error) {\n      throw error;\n    }",
+    "find": "  } catch (error) {\n    failedSnapshotAttempts.add(key);\n    logSnapshotFailure(key, error);\n  }",
+    "replace": "  } catch (error) {\n    throw error;\n  }",
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
     "namePattern": "a night the nightly step cannot write"
   },
   {
+    "label": "#355-F7 nightly refresh computes every night in one turn",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    await new Promise((resolve) => setImmediate(resolve));",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "yields between nights"
+  },
+  {
     "label": "#355-F7 unrebuildable night retried every tick",
     "file": "backend/src/lib/sleepReviews.js",
-    "find": "    if (failedSnapshotAttempts.has(key)) continue;",
+    "find": "  if (failedSnapshotAttempts.has(key)) return false;",
     "replace": "    /* mutant: no memory of failed attempts */",
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],

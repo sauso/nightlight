@@ -281,7 +281,28 @@ describe('#355 corrected span figures', () => {
     }
   });
 
-  test('snapshot agrees on stored and fresh reads, invalidates on time or detector revision, and backfills', (t) => {
+  test('a run cut by the detector\'s own wake stays a wake-up, also after an onset-only correction', (t) => {
+    // Fix round 2 (Opus M1, its probe): in-bed movement 06:26-06:31 and an exit at 06:30:30, so the detector
+    // adopts 06:30 and counts the four minutes before it as a wake-up. The short-piece rule is for a wake a
+    // parent moved EARLIER; applied at the detector's own wake it dropped that wake-up (1 became 0).
+    t.mock.timers.enable({ apis: ['Date'], now: noon() });
+    layNight({ bed: [PUT_DOWN, [at(6, 26, 1), at(6, 31, 1)]] });
+    insertTransition(TRANSITION.OUT_OF_BED, at(6, 30, 1, 30));
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    assert.equal(hhmm(night.wake_at), '06:30', 'precondition: the exit is adopted');
+    assert.equal(night.wake_count, 1, 'precondition: the detector counts the cut run');
+    const own = correctedSpanFigures(night.span_basis, night.onset_at, night.wake_at);
+    assert.deepEqual(
+      [own.asleep_minutes, own.awake_minutes, own.unknown_minutes, own.wake_count, own.longest_stretch_minutes],
+      [night.asleep_minutes, night.awake_minutes, night.unknown_minutes, night.wake_count, night.longest_stretch_minutes]);
+    computeAndStoreNight(CHILD, DATE);
+    saveNightReview(CHILD, DATE, { trueOnsetAt: sqlTime(at(19, 50)) });
+    assert.equal(applyCorrection(CHILD, storedRow()).wake_count, 1, 'an onset-only correction keeps it');
+    // A wake the parent moved EARLIER, cutting the same run to three minutes, still leaves a stir.
+    assert.equal(correctedSpanFigures(night.span_basis, night.onset_at, sqlTime(at(6, 29, 1))).wake_count, 0);
+  });
+
+  test('snapshot agrees on stored and fresh reads, invalidates on time or detector revision, and backfills', async (t) => {
     nightWith(t, { bed: [WAKE_23] });
     computeAndStoreNight(CHILD, DATE);
     const first = sqlTime(at(5, 0, 1));
@@ -302,12 +323,12 @@ describe('#355 corrected span figures', () => {
     db.prepare('UPDATE sleep_reviews SET span_figures = json_set(span_figures, ? , ?) WHERE child_id = ? AND night_date = ?')
       .run('$.wake_at', sqlTime(at(4, 0, 1)), CHILD, DATE);
     assert.equal(applyCorrection(CHILD, storedRow()).wake_count, storedRow().wake_count);
-    assert.equal(refreshCorrectionSnapshots(noon()), 1);
+    assert.equal(await refreshCorrectionSnapshots(noon()), 1);
     assert.equal(applyCorrection(CHILD, storedRow()).wake_count, stored.wake_count);
     db.prepare('UPDATE sleep_nights SET computed_at = ? WHERE child_id = ? AND night_date = ?')
       .run(sqlTime(at(12, 5, 1)), CHILD, DATE);
     assert.equal(applyCorrection(CHILD, storedRow()).wake_count, storedRow().wake_count);
-    assert.equal(refreshCorrectionSnapshots(noon()), 1);
+    assert.equal(await refreshCorrectionSnapshots(noon()), 1);
     assert.equal(applyCorrection(CHILD, storedRow()).wake_count, stored.wake_count);
     saveNightReview(CHILD, DATE, { trueWakeAt: null });
     assert.equal(db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE).span_figures, null);
@@ -391,15 +412,39 @@ describe('#355 corrected span figures', () => {
     saveNightReview(CHILD, DATE, { trueWakeAt: sqlTime(at(5, 0, 1)) });
     const card = applyCorrection(CHILD, storedRow());
     const fresh = computeNight(CHILD, DATE, { includeTimeline: true });
-    const drifted = { ...fresh, onset_at: sqlTime(at(19, 43)) };
+    // The fresh compute has drifted on the onset and on the put-down (fix round 2, Opus L2).
+    const drifted = { ...fresh, onset_at: sqlTime(at(19, 43)), in_bed_at: sqlTime(at(19, 35)) };
     const detail = applyCorrection(CHILD, drifted);
-    for (const key of ['onset_at', 'wake_at', 'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes'])
+    for (const key of ['onset_at', 'wake_at', 'in_bed_at', 'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes'])
       assert.equal(detail[key], card[key], key);
     // The detector times beside them come from the same stored row, so the detail page does not read the
     // drifted onset as one the parent corrected (the score's and inBed.js's `onset_at !== algo_onset_at`).
-    assert.deepEqual([detail.algo_onset_at, detail.algo_wake_at], [card.algo_onset_at, card.algo_wake_at]);
+    assert.deepEqual([detail.algo_onset_at, detail.algo_wake_at, detail.algo_in_bed_at],
+      [card.algo_onset_at, card.algo_wake_at, card.algo_in_bed_at]);
     assert.equal(detail.onset_at !== detail.algo_onset_at, false, 'the onset nobody corrected is not read as corrected');
     assert.equal(toScoringInput(detail).span_moved_minutes, toScoringInput(card).span_moved_minutes);
+    assert.deepEqual(toScoringInput(detail).metrics.settle_minutes, toScoringInput(card).metrics.settle_minutes,
+      'the settling term pairs the same put-down with the same onset on both pages');
+  });
+
+  test('a later save that re-sends a frame-picked wake as HH:MM keeps the snapshot after samples expire', async (t) => {
+    // Fix round 2 (Opus M2). A wake picked from a bed-transition frame carries seconds; the review page re-sends
+    // the time it shows as HH:MM with every later save (NightReview.jsx), here with a note, the real client's body.
+    nightWith(t, { bed: [WAKE_23] });
+    computeAndStoreNight(CHILD, DATE);
+    saveNightReview(CHILD, DATE, { trueWakeAt: sqlTime(at(5, 0, 1, 37)) });
+    const saved = db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE).span_figures;
+    assert.equal(JSON.parse(saved).wake_at, sqlTime(at(5, 0, 1, 37)), 'precondition: the snapshot carries the seconds');
+    const card = applyCorrection(CHILD, storedRow());
+    db.prepare('DELETE FROM activity_samples').run();
+    const res = await putReview({ true_wake_local: '05:00', note: 'A cold' });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.review.true_wake_at, sqlTime(at(5, 0, 1)), 'precondition: the seconds were dropped');
+    assert.equal(res.body.review.span_figures, saved, 'the same minute keeps the measurement');
+    const after = applyCorrection(CHILD, storedRow());
+    for (const key of ['asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes']) {
+      assert.equal(after[key], card[key], key);
+    }
   });
 
   test('PUT stores, replaces and clears the correction snapshot in the review row', async (t) => {
@@ -438,16 +483,18 @@ describe('#355 corrected span figures', () => {
     assert.equal(result.body.review.span_figures, null, 'the old snapshot no longer matches the changed time');
   });
 
-  test('nightly refresh fills an unscored correction and skips an old date', (t) => {
+  test('nightly refresh fills an unscored correction and skips an old date', async (t) => {
     nightWith(t, { bed: [WAKE_23] });
     saveNightReview(CHILD, DATE, { trueWakeAt: sqlTime(at(5, 0, 1)) });
     assert.equal(db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE).span_figures, null);
     computeAndStoreNight(CHILD, DATE);
-    assert.equal(refreshCorrectionSnapshots(noon() + 30 * 86400000), 0);
-    assert.equal(refreshCorrectionSnapshots(noon() + 29 * 86400000), 1,
+    // The night's date is DATE; noon() is the next day. 29 days later the night is 30 calendar days back (kept);
+    // 30 days later it is 31 back (skipped). A 29- or 31-day window fails one of the two.
+    assert.equal(await refreshCorrectionSnapshots(noon() + 30 * 86400000), 0);
+    assert.equal(await refreshCorrectionSnapshots(noon() + 29 * 86400000), 1,
       'the inclusive boundary keeps day 30 but excludes day 31');
     assert.ok(db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE).span_figures);
-    assert.equal(refreshCorrectionSnapshots(noon()), 0);
+    assert.equal(await refreshCorrectionSnapshots(noon()), 0);
   });
 
   test('nightly job fills a missing snapshot after storing the night', async (t) => {
@@ -463,23 +510,23 @@ describe('#355 corrected span figures', () => {
     assert.ok(db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?').get(CHILD, DATE).span_figures);
   });
 
-  test('unrebuildable correction is tried once per review in this process', (t) => {
+  test('unrebuildable correction is tried once per review in this process', async (t) => {
     nightWith(t, { bed: [WAKE_23] });
     computeAndStoreNight(CHILD, DATE);
     saveNightReview(CHILD, DATE, { trueWakeAt: sqlTime(at(5, 0, 1)) });
     db.prepare('UPDATE sleep_reviews SET span_figures = NULL WHERE child_id = ? AND night_date = ?').run(CHILD, DATE);
     db.prepare('DELETE FROM activity_samples').run();
-    assert.equal(refreshCorrectionSnapshots(noon()), 0);
+    assert.equal(await refreshCorrectionSnapshots(noon()), 0);
     layNight({ bed: [PUT_DOWN, MORNING, WAKE_23] });
-    assert.equal(refreshCorrectionSnapshots(noon()), 0,
+    assert.equal(await refreshCorrectionSnapshots(noon()), 0,
       'the same reviewed-at candidate is not recomputed on the next tick');
   });
 
-  test('a night the nightly step cannot write does not stop the next night, and is logged once', (t) => {
-    // #355 review (Opus M4): one bad night must not end the refresh for every night after it. The failure is
-    // real, not mocked: a trigger makes the database refuse the first night's write, as a full disk would.
+  // Two corrected nights in a row with their snapshots missing, both finished. Returns the reader of a night's
+  // span_figures. The second night is laid like the first, one day later.
+  const NEXT = '2026-07-02';
+  function twoCorrectedNights(t) {
     nightWith(t, { bed: [WAKE_23] });
-    const NEXT = '2026-07-02';
     layNight({ from: at(16, 30, 1), to: at(10, 0, 2), bed: [[at(19, 30, 1), at(19, 40, 1)], [at(6, 0, 2), at(7, 0, 2)]] });
     t.mock.timers.setTime(at(12, 0, 2).getTime()); // both windows closed more than 3 hours ago
     computeAndStoreNight(CHILD, DATE);
@@ -488,14 +535,27 @@ describe('#355 corrected span figures', () => {
     saveNightReview(CHILD, DATE, { trueWakeAt: sqlTime(at(5, 0, 1)) });
     saveNightReview(CHILD, NEXT, { trueWakeAt: sqlTime(at(5, 0, 2)) });
     db.prepare('UPDATE sleep_reviews SET span_figures = NULL').run();
-    const figures = (date) => db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?')
+    return (date) => db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?')
       .get(CHILD, date).span_figures;
+  }
+
+  test('a night the nightly step cannot write does not stop the next night, and is not retried', async (t) => {
+    // #355 review (Opus M4): one bad night must not end the refresh for every night after it. The failure is
+    // real, not mocked: a trigger makes the database refuse the first night's write, as a full disk would.
+    const figures = twoCorrectedNights(t);
     const errors = t.mock.method(logger, 'error', () => {});
     db.exec(`CREATE TRIGGER nf_refuse_snapshot BEFORE UPDATE OF span_figures ON sleep_reviews
              WHEN NEW.night_date = '${DATE}' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`);
+    // computeNight's first statement, prepared per call: counting it counts computes (as in the lock tests).
+    const prepare = t.mock.method(db, 'prepare');
+    const computes = () => prepare.mock.calls.filter((c) => c.arguments[0] === 'SELECT id FROM cameras WHERE child_id = ?').length;
     try {
-      assert.equal(refreshCorrectionSnapshots(Date.now()), 1);
-      assert.equal(refreshCorrectionSnapshots(Date.now()), 0);
+      assert.equal(await refreshCorrectionSnapshots(Date.now()), 1);
+      const before = computes();
+      assert.equal(await refreshCorrectionSnapshots(Date.now()), 0);
+      // Fix round 2 (Opus L3): the night whose write threw is remembered, so the next tick does not pay
+      // another computeNight for it (the log line alone could not show that: it is also once per night).
+      assert.equal(computes(), before, 'the failed night is not recomputed on the next tick');
     } finally {
       db.exec('DROP TRIGGER nf_refuse_snapshot');
     }
@@ -503,6 +563,23 @@ describe('#355 corrected span figures', () => {
     assert.ok(figures(NEXT), 'the night after the failure was still filled');
     assert.equal(errors.mock.calls.filter((c) => String(c.arguments[0]).includes('correction snapshot')).length, 1,
       'two ticks, one log line');
+  });
+
+  test('the nightly refresh yields between nights and reads each night after its yield', async (t) => {
+    // Fix round 2 (Opus L4): one night per turn of the event loop, so the first tick after an upgrade cannot
+    // hold the server for a month of computes. And a save landing between two nights must not be overwritten
+    // by a snapshot measured from the review as it was before that save.
+    const figures = twoCorrectedNights(t);
+    const filled = () => [DATE, NEXT].filter((d) => figures(d)).length;
+    const run = refreshCorrectionSnapshots(Date.now());
+    assert.equal(filled(), 0, 'nothing is computed before the first yield');
+    const seen = await new Promise((resolve) => setImmediate(() => resolve(filled())));
+    assert.equal(seen, 1, 'one night per turn of the event loop');
+    const pending = [DATE, NEXT].find((d) => !figures(d));
+    const wake = pending === DATE ? sqlTime(at(4, 0, 1)) : sqlTime(at(4, 0, 2));
+    saveNightReview(CHILD, pending, { trueWakeAt: wake }); // a parent's save between the two nights
+    assert.equal(await run, 1, 'the refresh leaves the night the save already measured');
+    assert.equal(JSON.parse(figures(pending)).wake_at, wake, 'the save\'s own snapshot survives');
   });
 
   test('saved correction figures still reach the detail page after raw samples expire', async (t) => {

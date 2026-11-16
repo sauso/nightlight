@@ -760,9 +760,11 @@ than 15 minutes inside the sleep were not watched, or when the wake time is unce
 detected, or the detector [set aside an early exit](#an-exit-far-earlier-than-usual-does-not-end-the-night)).
 A wake time you gave in the morning review counts as certain, also when you left it as it was. Unwatched
 minutes are never counted as sleep, and with more than 15 of them the longest stretch is left out of the
-score. The one exception is a moved time the app could not measure (see
-[After you correct a night](#after-you-correct-a-night)): its asleep total is an estimate, and it can include
-minutes the cameras did not see.
+score. Two kinds of corrected night are exceptions, and either can count minutes the cameras did not see
+as sleep: a moved time the app could not measure (see [After you correct a night](#after-you-correct-a-night)),
+whose asleep total is an estimate, and a "no one in the bed" night you gave both times, whose asleep total
+is the time between your two times (it has no score; see
+[Known limits, all documented rather than fixed](#known-limits-all-documented-rather-than-fixed)).
 
 ### After you correct a night
 
@@ -1161,7 +1163,10 @@ card and the detail page then show the same two times and the same figures for m
 unknown, wake-ups, and longest stretch, also after the samples are gone. Minutes the cameras did not see
 inside your times are unknown. If you give an asleep time earlier than the app's, any minute in between with
 movement or sound counts as awake but never as a wake-up: the app did not look for wake-ups before its own
-asleep time, so this is a judgement, not a measurement. If neither sleep time moves from the app's saved
+asleep time, so this is a judgement, not a measurement. It is stricter than the rest of the night, where a
+short stir still counts as asleep. If you give a wake-up time earlier than the app's and it cuts a wake-up to
+under five minutes, those minutes count as awake but not as a wake-up, like a stir; a wake-up cut by the
+app's own wake-up time still counts. If neither sleep time moves from the app's saved
 night, its figures stay the app's own. This is different from **Recompute this night**, which re-runs the
 detector: correcting records what *you* know, recomputing re-asks the *app*.
 
