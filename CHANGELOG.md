@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- Docker publishes from `main` and `v*` tags now wait for a passing `main` push test run of the same commit; a failed run blocks the publish. Dev pushes remain ungated, and the weekly rebuild remains separate.
+
 - The Docker image now runs Node 26 during the #751 staging soak. Node 24 stays supported in CI and `.nvmrc` until the soak ends; releases from dev to main are on hold during it.
 
 - The recording setting now explains that Recent alerts keeps at most 30 days and 2,000 unprotected entries, with older alerts and their clips and pictures removed as new alerts are recorded (#933).

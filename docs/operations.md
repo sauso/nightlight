@@ -206,6 +206,17 @@ Images published by that workflow (and by the weekly rebuild) also carry an **SB
 attestation (#566). `docker buildx imagetools inspect sauso/nightlight:latest` lists them; a registry page may
 show them as extra `unknown/unknown` entries, and `docker pull` ignores them.
 
+### Publish test gate
+
+Publishing from `main` or a `v*` release tag waits for the latest `main` push test run of that exact commit
+to pass. A failed test run on `main` blocks `:latest`; a `dev` push still publishes `:dev` without this gate.
+The publish workflow waits up to 45 minutes for a test run to appear and finish, retrying temporary
+GitHub API errors within that time. If tests fail, fix the problem, re-run the failed test workflow,
+then re-run the publish workflow. To check the gate without publishing an image, run
+`gh workflow run docker-publish.yml --ref dev -f gate_only=true`. A manual run started from a branch waits
+for that branch's push test run (here `dev`), while a `main` push or any release tag run waits for the
+`main` run. `weekly-rebuild.yml` is separate and tests its rebuilt image before moving a tag.
+
 During the #751 staging soak, the `:dev` build uses moving major-version tags for its runtime Node 26
 and MediaMTX 1 base images; `:latest` remains on Node 24 while releases are on hold. These tags are used rather
 than fixed digests (#555 item 5). This picks up compatible base updates on rebuild, but rebuilding the
