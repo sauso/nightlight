@@ -13,7 +13,7 @@ import { StrictMode } from 'react';
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, render, act, fireEvent } from '@testing-library/react';
 import { Routes, Route, useLocation, useNavigate, useNavigationType, HashRouter } from 'react-router-dom';
-import { renderAs, renderAsAdmin, ADMIN, CAREGIVER, forEachRole } from './helpers/render.jsx';
+import { renderAs, renderAsAdmin, ADMIN, CAREGIVER, forEachRole, enabledButton } from './helpers/render.jsx';
 import UserSettings from '../src/pages/UserSettings.jsx';
 import SettingsUsers from '../src/pages/SettingsUsers.jsx';
 import AcceptInvite from '../src/pages/AcceptInvite.jsx';
@@ -522,6 +522,8 @@ describe('the setup guide: adding a caregiver', () => {
     const onAdded = vi.fn();
     const { user } = renderAs(ADMIN, <SetupCaregivers onAdded={onAdded} />);
     const group = await screen.findByRole('group', { name: 'How they get a password' });
+    // The guide's form is disabled until its demo check answers; a click or keystroke before that is a silent no-op (#1146).
+    await enabledButton('Send an invite');
     expect(within(group).getByRole('button', { name: 'Set a password' })).toHaveAttribute('aria-pressed', 'true');
     await user.type(screen.getByLabelText('Password'), 'typed-then-dropped');
     await user.click(within(group).getByRole('button', { name: 'Send an invite' }));
@@ -537,7 +539,7 @@ describe('the setup guide: adding a caregiver', () => {
 
   test('★ the panel replaces the form, holds the reload, and Done brings the form back with the person listed', async () => {
     const { user } = renderAs(ADMIN, <SetupCaregivers />);
-    await user.click(await screen.findByRole('button', { name: 'Send an invite' }));
+    await user.click(await enabledButton('Send an invite'));
     await user.type(screen.getByLabelText('First name'), 'Robin');
     await user.type(screen.getByLabelText('Username'), 'robin');
     await user.click(screen.getByRole('button', { name: 'Create and show invite' }));
@@ -558,7 +560,7 @@ describe('the setup guide: adding a caregiver', () => {
 
   test('★ focus goes to the panel when it appears and back to the first field of the form on Done (never left on <body>)', async () => {
     const { user } = renderAs(ADMIN, <SetupCaregivers />);
-    await user.click(await screen.findByRole('button', { name: 'Send an invite' }));
+    await user.click(await enabledButton('Send an invite'));
     expect(screen.getByLabelText('First name'), 'opening the guide must not steal focus').not.toHaveFocus();
     await user.type(screen.getByLabelText('Username'), 'robin');
     await user.click(screen.getByRole('button', { name: 'Create and show invite' }));
@@ -570,7 +572,7 @@ describe('the setup guide: adding a caregiver', () => {
   test('a refused invite shows the reason and no panel', async () => {
     postSpy.mockRejectedValue(new Error('That username is already taken'));
     const { user } = renderAs(ADMIN, <SetupCaregivers />);
-    await user.click(await screen.findByRole('button', { name: 'Send an invite' }));
+    await user.click(await enabledButton('Send an invite'));
     await user.type(screen.getByLabelText('Username'), 'robin');
     await user.click(screen.getByRole('button', { name: 'Create and show invite' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('That username is already taken');

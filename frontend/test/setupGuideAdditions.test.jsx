@@ -18,7 +18,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+// The guide's form is DISABLED until the demo check has answered (it must not let a read-only demo type), so
+// `findByLabelText` resolves at once on a field that ignores typing. Wait for it to enable, or every test that types
+// first passes only when the mocked request beats the keystrokes (#1146: it went red with a slow mock).
 async function fill(user, { first = '', last = '', username = 'nanny', password = 'correct horse' } = {}) {
+  const usernameField = await screen.findByLabelText('Username');
+  await waitFor(() => expect(usernameField).toBeEnabled());
   if (first) await user.type(await screen.findByLabelText('First name'), first);
   if (last) await user.type(screen.getByLabelText('Last name'), last);
   await user.type(await screen.findByLabelText('Username'), username);

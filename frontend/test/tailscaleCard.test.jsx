@@ -29,6 +29,17 @@ function card(view = base, options = {}) {
 beforeEach(() => { demo.value = null; });
 afterEach(() => { vi.useRealTimers(); });
 
+// Waits until the hook has SHOWN its first view, under fake timers too. `await act(async () => {})` only drains microtasks, so
+// it assumed the mocked request answered at once; with NIGHTLIGHT_TEST_LATENCY_MS (#1146) the answer is a timer, the hook still
+// had no view, and the polling interval these tests count had not even been started. It moves fake time forward 10 ms at a time,
+// each step inside its own act() so React commits the view between looks (`vi.waitFor` does not flush React under fake timers).
+const firstView = async (hook) => {
+  for (let step = 0; step < 100 && hook.result.current.view === null; step++) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  }
+  expect(hook.result.current.view).not.toBeNull();
+};
+
 test.each([
   [base, 'Turn on Tailscale'],
   [{ ...base, enabled: true, state: 'starting' }, 'Retry'],
@@ -267,7 +278,7 @@ test.each([
   const get = vi.spyOn(api, 'get').mockResolvedValue(view);
   vi.useFakeTimers();
   const hook = renderHook(() => useTailscale());
-  await act(async () => {});
+  await firstView(hook);
   expect(get).toHaveBeenCalledTimes(1);
   await act(async () => { await vi.advanceTimersByTimeAsync(interval); });
   expect(get).toHaveBeenCalledTimes(2);
@@ -294,7 +305,7 @@ describe('a lost connection', () => {
     get.mockResolvedValue(views[views.length - 1]);
     vi.useFakeTimers();
     const hook = renderHook(() => useTailscale());
-    await act(async () => {});
+    await firstView(hook);
     return { hook, get, tick: () => act(async () => { await vi.advanceTimersByTimeAsync(30000); }) };
   };
 
@@ -323,7 +334,8 @@ describe('a lost connection', () => {
     vi.useRealTimers();
     vi.spyOn(api, 'get').mockResolvedValue({ ...waiting, online: false });
     const other = renderHook(() => useTailscale());
-    await act(async () => {});
+    // Real timers here: the first load must have answered, or load() below returns early (one request at a time).
+    await waitFor(() => expect(other.result.current.view).not.toBeNull());
     await act(async () => { await other.result.current.load(); });
     await act(async () => { await other.result.current.load(); });
     expect(other.result.current.view.state).toBe('needs-sign-in');

@@ -92,7 +92,9 @@ test('timeout aborts the in-flight WHEP POST', async () => {
     return new Promise(() => {});
   });
   const result = probeLowLatency({ mediamtxPath: 'cam' });
-  for (let i = 0; i < 10 && requests.length === 0; i++) await Promise.resolve();
+  // The probe fetches the ICE servers (api.get) before it POSTs, and a slow answer to that is a fake timer here (#1146):
+  // move fake time in small steps until the POST appears, well inside the 10 s deadline this test then lets run out.
+  for (let i = 0; i < 100 && requests.length === 0; i++) await vi.advanceTimersByTimeAsync(10);
   expect(requests).toHaveLength(1);
   expect(requests[0].options.signal.aborted).toBe(false);
   await vi.advanceTimersByTimeAsync(10000);
