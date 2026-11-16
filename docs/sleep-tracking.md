@@ -192,9 +192,9 @@ Known limits. For the first three, use **Show with today's settings**, or have a
 If a camera reports temperature/humidity over **MQTT** (set
 up under **Settings → Integrations → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
 tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
-the same time axis. A **"Sleep & room temperature"** card compares wake-ups on the child's warmer
-vs cooler nights, so you can spot whether a warm room tends to mean more waking — a pattern, not
-a cause. It reads the child's 30 most recent tracked nights with a temperature (fixed, not a
+the same time axis. A **"Sleep & room temperature"** card compares wake-ups per watched hour of the
+sleep window on a child's warmer and cooler nights. It can suggest a pattern, not a cause. It reads
+the child's 30 most recent tracked nights with a temperature and watched time (fixed, not a
 setting). From the first such night until there are 5 it reads "Collecting nights" with the count
 so far. From 5, a room whose temperature varied by less than 1°C across those nights is reported
 as "barely changed": that says nothing about sleep, only that the room did not change enough to
@@ -204,8 +204,16 @@ compare. Otherwise the nights are split at the median temperature, and the card 
 is the same in any home or climate). Nights at exactly the median temperature belong to neither
 group, so the first comparison needs at least 21 nights (10 cooler, 10 warmer and one at the
 median). Until both groups reach 10 the card reads "Not enough nights yet" with how many it has
-of each, and shows no verdict and no averages. Once both groups have 10, the wording and numbers
-are exactly what they were before. Known limit: each night's average temperature is rounded to
+of each, and shows no verdict and no averages. A warmer or cooler headline also needs the
+correlation and the two groups shown to point in the same direction, and it must still hold when
+any one night is left out. If it does not, the card says there is a hint but it is not reported as a
+pattern yet, without showing comparison averages. The footer shows the number of tracked nights
+and how many are in each group. The "wake-ups avg" columns put each group's average hourly rate
+onto the same average watched night, so the two columns match what the headline compares. With
+equal watched time every night, these are the ordinary wake-up averages. Known limits: the rate is
+per watched hour of the configured window, not per hour slept; the card uses stored detector wake
+totals rather than later time corrections (#755); and leaving out one night checks single-night
+influence, not whether a pattern is causal. Each night's average temperature is rounded to
 0.1°C, so in a very steady room where many nights share the median value (all of which join
 neither group) one group can stay under 10, and the card keeps saying "Not enough nights yet",
 for as long as the room stays that steady.

@@ -3952,6 +3952,7 @@ const INSIGHT_MIN_GROUP_NIGHTS = 10;
 function pearson(xs, ys) {
   const n = xs.length;
   if (n < 2) return null;
+  if (Math.max(...ys) === Math.min(...ys)) return null; // exact constant rates can leave rounding dust after centering
   const mx = xs.reduce((s, x) => s + x, 0) / n;
   const my = ys.reduce((s, y) => s + y, 0) / n;
   let num = 0, dx = 0, dy = 0;
@@ -3964,11 +3965,24 @@ function pearson(xs, ys) {
 }
 
 const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
+const wakeRate = (row) => row.wake_count * 60 / row.coverage_minutes;
+
+function leaveOneOutStable(temps, rates, verdictClass) {
+  // Owner decision 2026-11-17 (#365, Codex plan review): a single night must not carry a headline.
+  // This hard gate is judgement, not a measured confidence level; it rechecks the r class only, not
+  // group sizes, because the groups and their median were fixed using all eligible nights.
+  for (let i = 0; i < temps.length; i++) {
+    const remainingR = pearson(temps.filter((_, j) => j !== i), rates.filter((_, j) => j !== i));
+    if (verdictClass === 'warm_more_wakes' ? remainingR == null || remainingR < INSIGHT_R
+      : remainingR == null || remainingR > -INSIGHT_R) return false;
+  }
+  return true;
+}
 
 // Does room temperature correlate with this child's sleep, across their recent stored nights? Uses the
 // per-night avg_temperature stored on each 'ok' night (so it needs no re-scan of sensor history). Splits
-// the nights at the median temperature into a warmer half and a cooler half and compares wake-ups + sleep
-// duration, and reports a Pearson r for temp↔wakes. All temperatures are Celsius (the client converts to
+// the nights at the median temperature into a warmer half and a cooler half and compares wake-up rates
+// per watched hour of the window + sleep duration, and reports a Pearson r for temp↔rate. All temperatures are Celsius (the client converts to
 // the user's unit). Returns { status }: 'off' | 'insufficient' | 'ok'. The client renders the wording.
 //
 // ⚠️ A night a parent marked "no one was in the bed" is EXCLUDED, even though its stored row still
@@ -3981,10 +3995,10 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   if (!childTracksSleep(childId)) return { status: 'off' };
   const rows = db
     .prepare(
-      `SELECT n.night_date, n.wake_count, n.asleep_minutes, n.avg_temperature, n.avg_humidity
+      `SELECT n.night_date, n.wake_count, n.asleep_minutes, n.coverage_minutes, n.avg_temperature, n.avg_humidity
          FROM sleep_nights n
          WHERE n.child_id = ? AND n.status = 'ok' AND n.avg_temperature IS NOT NULL
-           AND n.wake_count IS NOT NULL AND n.asleep_minutes IS NOT NULL
+           AND n.wake_count IS NOT NULL AND n.asleep_minutes IS NOT NULL AND n.coverage_minutes > 0
            AND NOT EXISTS (SELECT 1 FROM sleep_reviews r WHERE r.child_id = n.child_id AND r.night_date = n.night_date AND r.nobody_in_bed = 1)
          ORDER BY n.night_date DESC LIMIT ?`
     )
@@ -3995,11 +4009,15 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   }
 
   const temps = rows.map((r) => r.avg_temperature);
-  const wakes = rows.map((r) => r.wake_count);
+  // Owner decision 2026-11-17 (#365, Codex plan review): use wake-ups per watched hour of the
+  // configured window, not per hour slept. Sleep is an outcome and short spans can inflate that rate.
+  // The denominator is observed coverage, not an estimate of time between onset and wake.
+  const rates = rows.map(wakeRate);
+  const averageCoverageHours = mean(rows.map((r) => r.coverage_minutes)) / 60;
   const asleep = rows.map((r) => r.asleep_minutes);
   const spread = Math.max(...temps) - Math.min(...temps);
 
-  const rWakes = pearson(temps, wakes);
+  const rWakes = pearson(temps, rates);
   const rAsleep = pearson(temps, asleep);
 
   // Median split into cooler/warmer halves (the middle night, on an odd count, drops out of both).
@@ -4011,7 +4029,9 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   const half = (set) => ({
     nights: set.length,
     avg_temp: Math.round(mean(set.map((r) => r.avg_temperature)) * 10) / 10,
-    avg_wakes: Math.round(mean(set.map((r) => r.wake_count)) * 10) / 10,
+    // Owner decision 2026-11-17 (#365, Codex plan review): both columns use the SAME average
+    // observed night so they agree with the rate verdict. This scale is judgement, not measurement.
+    avg_wakes: Math.round(mean(set.map(wakeRate)) * averageCoverageHours * 10) / 10,
     avg_asleep_minutes: Math.round(mean(set.map((r) => r.asleep_minutes))),
   });
 
@@ -4025,13 +4045,26 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   let verdict = 'none';
   if (spread < INSIGHT_TEMP_SPREAD) verdict = 'flat';
   else if (cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';
-  else if (rWakes != null && rWakes >= INSIGHT_R) verdict = 'warm_more_wakes';
-  else if (rWakes != null && rWakes <= -INSIGHT_R) verdict = 'warm_fewer_wakes';
+  // Owner decision 2026-11-17 (#365, Codex plan review): median-tied nights affect r but appear
+  // in neither column. A directional headline needs the displayed groups to agree with its direction.
+  else if (rWakes != null && rWakes >= INSIGHT_R &&
+    mean(warm.map(wakeRate)) > mean(cool.map(wakeRate))) verdict = 'warm_more_wakes';
+  else if (rWakes != null && rWakes <= -INSIGHT_R &&
+    mean(warm.map(wakeRate)) < mean(cool.map(wakeRate))) verdict = 'warm_fewer_wakes';
+
+  let direction;
+  if (verdict === 'warm_more_wakes' || verdict === 'warm_fewer_wakes') {
+    if (!leaveOneOutStable(temps, rates, verdict)) {
+      direction = verdict === 'warm_more_wakes' ? 'more' : 'fewer';
+      verdict = 'unstable';
+    }
+  }
 
   return {
     status: 'ok',
     nights_analyzed: rows.length,
     verdict,
+    ...(direction ? { direction } : {}),
     min_group_nights: INSIGHT_MIN_GROUP_NIGHTS, // additive (#365): the UI says "N of 10" with it
     temp_wake_r: rWakes == null ? null : Math.round(rWakes * 100) / 100,
     temp_asleep_r: rAsleep == null ? null : Math.round(rAsleep * 100) / 100,
