@@ -1,0 +1,85 @@
+name: Published image scan
+
+# REPORT ONLY (#566): scan the published :dev and :latest images after Monday's rebuild.
+# Read each image's table in the job summary and download its JSON artifact for detail.
+# Findings are triaged by a human; this does not gate publishing (the publish gate is separate).
+# workflow_dispatch works once this file is on the default branch (main); until then the
+# pull_request path trigger is the live evidence for this new workflow.
+on:
+  schedule:
+    - cron: '0 18 * * 2' # Tuesdays 18:00 UTC, after Monday's 16:00 UTC rebuild
+  workflow_dispatch: {}
+  pull_request:
+    paths: ['.github/workflows/image-scan.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan sauso/nightlight:${{ matrix.tag }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [dev, latest]
+    steps:
+      # WHY two invocations: a readable table belongs in the summary; JSON is kept as an artifact.
+      - name: Scan image for readable findings
+        id: table
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: sauso/nightlight:${{ matrix.tag }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          output: trivy-table.txt
+          exit-code: '0'
+
+      - name: Scan image for JSON report
+        id: json
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: sauso/nightlight:${{ matrix.tag }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: trivy.json
+          exit-code: '0'
+
+      - name: Summarise scan
+        if: always()
+        continue-on-error: true
+        env:
+          TAG: ${{ matrix.tag }}
+          TABLE_OUTCOME: ${{ steps.table.outcome }}
+          JSON_OUTCOME: ${{ steps.json.outcome }}
+        run: |
+          echo "### sauso/nightlight:$TAG" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$TABLE_OUTCOME" != success ] || [ "$JSON_OUTCOME" != success ] || [ ! -s trivy.json ] || ! jq empty trivy.json >/dev/null 2>&1; then
+            echo 'Scan unavailable (image pull, vulnerability database, or scan setup error). Check the step logs; no finding status is inferred.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            count=$(jq '[.Results[]?.Vulnerabilities[]?] | length' trivy.json)
+            if [ "$count" -eq 0 ]; then
+              echo 'No matching findings (HIGH or CRITICAL with a fix available).' >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "Findings: $count matching vulnerabilities. Human triage is required; this report does not block publishing." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            if [ -s trivy-table.txt ]; then
+              echo '```text' >> "$GITHUB_STEP_SUMMARY"
+              cat trivy-table.txt >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+      - name: Upload JSON report
+        if: always() && hashFiles('trivy.json') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: trivy-${{ matrix.tag }}-json
+          path: trivy.json
