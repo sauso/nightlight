@@ -26419,8 +26419,8 @@
   {
     "label": "#355-F7 onset-clipped run is not a wake-up",
     "file": "backend/src/lib/correctedSpan.js",
-    "find": "    if (a < onset || (b > wake && !wakeIsDetectorEnd && to - from < WAKE_ACTIVE_MIN)) continue;",
-    "replace": "    if (b > wake && !wakeIsDetectorEnd && to - from < WAKE_ACTIVE_MIN) continue;",
+    "find": "    if (a < onset || (b > wake && !countedByDetector && to - from < WAKE_ACTIVE_MIN)) continue;",
+    "replace": "    if (b > wake && !countedByDetector && to - from < WAKE_ACTIVE_MIN) continue;",
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
     "namePattern": "later onset skips an early wake"
@@ -26428,7 +26428,7 @@
   {
     "label": "#355-F7 short wake-end clip is a stir",
     "file": "backend/src/lib/correctedSpan.js",
-    "find": "    if (a < onset || (b > wake && !wakeIsDetectorEnd && to - from < WAKE_ACTIVE_MIN)) continue;",
+    "find": "    if (a < onset || (b > wake && !countedByDetector && to - from < WAKE_ACTIVE_MIN)) continue;",
     "replace": "    if (a < onset) continue;",
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
@@ -26437,11 +26437,47 @@
   {
     "label": "#355-F7 short-piece rule applied at the detector's own wake",
     "file": "backend/src/lib/correctedSpan.js",
-    "find": "    if (a < onset || (b > wake && !wakeIsDetectorEnd && to - from < WAKE_ACTIVE_MIN)) continue;",
-    "replace": "    if (a < onset || (b > wake && to - from < WAKE_ACTIVE_MIN)) continue;",
+    "find": "    const countedByDetector = detectorEnd !== null && a < detectorEnd && wake >= detectorEnd;",
+    "replace": "    const countedByDetector = false;",
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
     "namePattern": "own wake stays a wake-up"
+  },
+  {
+    "label": "#355-F7 detector-counted run dropped at a later corrected wake",
+    "file": "backend/src/lib/correctedSpan.js",
+    "find": "    const countedByDetector = detectorEnd !== null && a < detectorEnd && wake >= detectorEnd;",
+    "replace": "    const countedByDetector = detectorEnd !== null && a < detectorEnd && wake === detectorEnd;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "stays a wake-up at a later corrected wake"
+  },
+  {
+    "label": "#355-F7 morning run treated as a detector-counted wake-up",
+    "file": "backend/src/lib/correctedSpan.js",
+    "find": "    const countedByDetector = detectorEnd !== null && a < detectorEnd && wake >= detectorEnd;",
+    "replace": "    const countedByDetector = detectorEnd !== null && wake >= detectorEnd;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "includes its morning run as awake time"
+  },
+  {
+    "label": "#355-F7 parent's put-down replaced by the stored one",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "    if (!r.true_in_bed_at) out.in_bed_at = storedSpan.in_bed_at ?? null;",
+    "replace": "    out.in_bed_at = storedSpan.in_bed_at ?? null;",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "put-down the parent gave stays theirs"
+  },
+  {
+    "label": "#355-F7 overlapping nightly refreshes both run",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (!refreshInFlight) refreshInFlight = refreshAll(nowMs).finally(() => { refreshInFlight = null; });",
+    "replace": "  refreshInFlight = refreshAll(nowMs).finally(() => { refreshInFlight = null; });",
+    "expect": "killed",
+    "tests": ["sleep-night-facts.test.js"],
+    "namePattern": "yields between nights"
   },
   {
     "label": "#355-F7 gap and outside minutes stay unknown",

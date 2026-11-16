@@ -1164,9 +1164,10 @@ unknown, wake-ups, and longest stretch, also after the samples are gone. Minutes
 inside your times are unknown. If you give an asleep time earlier than the app's, any minute in between with
 movement or sound counts as awake but never as a wake-up: the app did not look for wake-ups before its own
 asleep time, so this is a judgement, not a measurement. It is stricter than the rest of the night, where a
-short stir still counts as asleep. If you give a wake-up time earlier than the app's and it cuts a wake-up to
-under five minutes, those minutes count as awake but not as a wake-up, like a stir; a wake-up cut by the
-app's own wake-up time still counts. If neither sleep time moves from the app's saved
+short stir still counts as asleep. If your wake-up time cuts a wake-up to under five minutes, those minutes
+count as awake but not as a wake-up, like a stir. The exception is a wake-up the app counted itself (one that
+began before its own wake-up time): it still counts when your time is the app's or later. Its morning
+wake-up, which begins at that time, is not one of those. If neither sleep time moves from the app's saved
 night, its figures stay the app's own. This is different from **Recompute this night**, which re-runs the
 detector: correcting records what *you* know, recomputing re-asks the *app*.
 

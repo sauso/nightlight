@@ -248,6 +248,11 @@ describe('#355 corrected span figures', () => {
     const later = correctedSpanFigures(night.span_basis, night.onset_at, sqlTime(at(6, 45, 1)));
     assert.ok(later.awake_minutes > earlier.awake_minutes);
     assert.equal(later.wake_count, earlier.wake_count + 1);
+    // Fix round 3: the morning run BEGINS at the detector's wake, so the detector never counted it. A later
+    // wake that cuts it to two minutes leaves those minutes awake but adds no wake-up (the short-piece rule).
+    const justAfter = correctedSpanFigures(night.span_basis, night.onset_at, sqlTime(at(6, 2, 1)));
+    assert.equal(justAfter.awake_minutes, earlier.awake_minutes + 2);
+    assert.equal(justAfter.wake_count, earlier.wake_count, 'a two-minute piece of the morning run is a stir');
   });
 
   test('random spans on one real basis preserve all figure invariants', (t) => {
@@ -300,6 +305,26 @@ describe('#355 corrected span figures', () => {
     assert.equal(applyCorrection(CHILD, storedRow()).wake_count, 1, 'an onset-only correction keeps it');
     // A wake the parent moved EARLIER, cutting the same run to three minutes, still leaves a stir.
     assert.equal(correctedSpanFigures(night.span_basis, night.onset_at, sqlTime(at(6, 29, 1))).wake_count, 0);
+  });
+
+  test('a run the detector counted stays a wake-up at a later corrected wake', (t) => {
+    // Fix round 3 (Opus M1 again). The detector stops counting at 06:30 (exit 06:30:30) inside a run that
+    // goes on to 06:40, and counts its first three minutes as a wake-up. A parent's wake one or two minutes
+    // LATER cuts the same run to four or five minutes: still that counted wake-up (round 2 dropped it at
+    // 06:31). A wake EARLIER than the detector's keeps the short-piece rule (06:29: two minutes, a stir).
+    // The other side, a morning run that BEGINS at the detector's wake, is pinned in "a wake later than the
+    // detector includes its morning run as awake time".
+    t.mock.timers.enable({ apis: ['Date'], now: noon() });
+    // In the bed until the exit, then moving about the room: one active run, 06:27 to 06:40.
+    layNight({ bed: [PUT_DOWN, [at(6, 27, 1), at(6, 31, 1)]], room: [[at(6, 31, 1), at(6, 40, 1)]] });
+    insertTransition(TRANSITION.OUT_OF_BED, at(6, 30, 1, 30));
+    const night = computeNight(CHILD, DATE, { includeTimeline: true });
+    assert.equal(hhmm(night.wake_at), '06:30', 'precondition: the exit is adopted');
+    assert.equal(night.wake_count, 1, 'precondition: the detector counts the run it cut');
+    const runs = night.span_basis.wake_runs.map((r) => `${hhmm(r.start_at)}-${hhmm(r.end_at)}`);
+    assert.ok(runs.includes('06:27-06:40'), `precondition: one run 06:27-06:40 (${runs})`);
+    const count = (h, m) => correctedSpanFigures(night.span_basis, night.onset_at, sqlTime(at(h, m, 1))).wake_count;
+    assert.deepEqual([count(6, 29), count(6, 30), count(6, 31), count(6, 32)], [0, 1, 1, 1]);
   });
 
   test('snapshot agrees on stored and fresh reads, invalidates on time or detector revision, and backfills', async (t) => {
@@ -425,6 +450,24 @@ describe('#355 corrected span figures', () => {
     assert.equal(toScoringInput(detail).span_moved_minutes, toScoringInput(card).span_moved_minutes);
     assert.deepEqual(toScoringInput(detail).metrics.settle_minutes, toScoringInput(card).metrics.settle_minutes,
       'the settling term pairs the same put-down with the same onset on both pages');
+  });
+
+  test('a put-down the parent gave stays theirs beside a snapshot, on the card and the detail page', (t) => {
+    // Fix round 3 (Opus, L2 untested in round 2): with a valid snapshot the put-down comes from the stored row,
+    // UNLESS the parent gave one. The detector's own put-down (`algo_in_bed_at`) is the stored row's on both.
+    nightWith(t, { bed: [WAKE_23] });
+    computeAndStoreNight(CHILD, DATE);
+    const inBed = sqlTime(at(19, 20));
+    saveNightReview(CHILD, DATE, { trueInBedAt: inBed, trueWakeAt: sqlTime(at(5, 0, 1)) });
+    assert.ok(JSON.parse(db.prepare('SELECT span_figures FROM sleep_reviews WHERE child_id = ? AND night_date = ?')
+      .get(CHILD, DATE).span_figures), 'precondition: a valid snapshot');
+    const card = applyCorrection(CHILD, storedRow());
+    const fresh = computeNight(CHILD, DATE, { includeTimeline: true });
+    const detail = applyCorrection(CHILD, { ...fresh, in_bed_at: sqlTime(at(19, 35)) });
+    for (const [name, night] of [['card', card], ['detail', detail]]) {
+      assert.equal(night.in_bed_at, inBed, `${name}: the parent's put-down`);
+      assert.equal(night.algo_in_bed_at, storedRow().in_bed_at ?? null, `${name}: the stored detector put-down`);
+    }
   });
 
   test('a later save that re-sends a frame-picked wake as HH:MM keeps the snapshot after samples expire', async (t) => {
@@ -572,6 +615,9 @@ describe('#355 corrected span figures', () => {
     const figures = twoCorrectedNights(t);
     const filled = () => [DATE, NEXT].filter((d) => figures(d)).length;
     const run = refreshCorrectionSnapshots(Date.now());
+    // Fix round 3: one run at a time. A call while one is going (the next 30-minute tick, if a backfill were
+    // that slow) joins it rather than starting a second walk over the same nights.
+    assert.equal(refreshCorrectionSnapshots(Date.now()), run, 'a call during a run gets that run');
     assert.equal(filled(), 0, 'nothing is computed before the first yield');
     const seen = await new Promise((resolve) => setImmediate(() => resolve(filled())));
     assert.equal(seen, 1, 'one night per turn of the event loop');
@@ -580,6 +626,9 @@ describe('#355 corrected span figures', () => {
     saveNightReview(CHILD, pending, { trueWakeAt: wake }); // a parent's save between the two nights
     assert.equal(await run, 1, 'the refresh leaves the night the save already measured');
     assert.equal(JSON.parse(figures(pending)).wake_at, wake, 'the save\'s own snapshot survives');
+    const after = refreshCorrectionSnapshots(Date.now());
+    assert.notEqual(after, run, 'once a run has finished, the next call starts a new one');
+    assert.equal(await after, 0);
   });
 
   test('saved correction figures still reach the detail page after raw samples expire', async (t) => {
