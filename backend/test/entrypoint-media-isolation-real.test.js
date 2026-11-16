@@ -2,8 +2,9 @@
 // decision with a stubbed launcher; only this file shows that what media-probe.sh checks is what the kernel does, and
 // that the probe can tell a working media-exec.sh from a broken one.
 //
-// It needs ROOT (to drop to other uids) and util-linux's setpriv. CI runs it as root inside node:24-alpine, the image's
-// own base, after `apk add setpriv` (.github/workflows/test.yml), and fails that step if anything here is skipped.
+// It needs ROOT (to drop to other uids) and util-linux's setpriv. CI runs this BusyBox check as root inside
+// node:24-alpine after `apk add setpriv` (.github/workflows/test.yml), and fails if anything is skipped.
+// During the #751 SOAK, production's base is node:26-alpine.
 // Everywhere else it is skipped, with the reason.
 //
 // What runs for real: entrypoint.sh's isolation block, setpriv (both drops), timeout, media-exec.sh, media-probe.sh.
