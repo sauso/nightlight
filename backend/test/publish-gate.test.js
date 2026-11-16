@@ -120,7 +120,18 @@ test('publish workflow has a read-only gate and accepts a skipped gate for dev',
   assert.match(yaml, /workflow_dispatch:\s*\n\s+inputs:\s*\n\s+gate_only:/);
   assert.match(yaml, /group:.*github\.sha.*inputs\.gate_only/);
   assert.match(gate, /github\.ref.*refs\/heads\/main.*refs\/tags\/v.*inputs\.gate_only/);
-  assert.match(gate, /permissions:\s*\n(?:\s+[\w-]+:\s*\w+\s*\n)*\s+actions:\s*read/);
+  // The gate job's `permissions:` block must grant actions: read. Read line by line, not with a nested-quantifier
+  // regex: CodeQL flagged the first version as a ReDoS (js/redos, found on the 0.49.0 release PR), and a block read
+  // by indentation is also clearer about where the block ends.
+  const gateLines = gate.split(/\r?\n/);
+  const permAt = gateLines.findIndex((l) => /^\s*permissions:\s*$/.test(l));
+  assert.ok(permAt >= 0, 'gate job has no permissions block');
+  const permIndent = gateLines[permAt].search(/\S/);
+  const permBlock = [];
+  for (let i = permAt + 1; i < gateLines.length && (gateLines[i].trim() === '' || gateLines[i].search(/\S/) > permIndent); i++) {
+    permBlock.push(gateLines[i].trim());
+  }
+  assert.ok(permBlock.includes('actions: read'), `gate permissions are ${JSON.stringify(permBlock)}, expected actions: read`);
   assert.match(gate, /GH_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/);
   // Only a branch dispatch uses its branch's test run; a tag dispatch needs main's.
   assert.match(gate, /GATE_BRANCH:.*workflow_dispatch.*startsWith\(github\.ref,\s*'refs\/tags\/'\).*github\.ref_name.*'main'/);
