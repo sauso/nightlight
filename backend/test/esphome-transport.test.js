@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openEspHomeClient } from 'esphome-client';
 import { MockClient, MockTransport } from 'esphome-client/testing';
-import { openDevice, validEsphomeKey } from '../src/lib/esphomeTransport.js';
+import { openDevice, validEsphomeKey, classifyEsphomeError } from '../src/lib/esphomeTransport.js';
 
 const KEY = Buffer.alloc(32, 7).toString('base64');
 const sensor = { key: 1, id: 'sensor-heart_rate', type: 'sensor', objectId: 'heart_rate',
@@ -192,6 +192,18 @@ test('#506 an ignored AbortSignal still bounds a connection test', async () => {
     { signal: abort.signal, open: () => new Promise(() => {}) });
   abort.abort();
   await assert.rejects(pending, { code: 'TIMEOUT' });
+});
+
+// #1116: the error classes are matched by NAME (a class imported from the library would not exist in an older install),
+// so a plain Error carrying the library's class name is exactly what the classifier sees.
+test('#1116 a connection lost while a request waits reads as the timeout sentence, like the AbortError it replaced', () => {
+  const named = (name) => Object.assign(new Error('internal detail that must not be forwarded'), { name });
+  for (const name of ['ConnectionLostError', 'AbortError']) {
+    const safe = classifyEsphomeError(named(name));
+    assert.equal(safe.code, 'TIMEOUT', name);
+    assert.equal(safe.message, 'The device did not respond in time.', name);
+  }
+  assert.equal(classifyEsphomeError(named('SomethingElseEntirely')).code, 'OTHER', 'an unknown class is still the generic sentence');
 });
 
 test('#506 MockTransport confirms the installed client accepts a cancelled open', async () => {

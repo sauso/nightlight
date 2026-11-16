@@ -27,6 +27,11 @@ export function classifyEsphomeError(error) {
     case 'EncryptionRequiredError':
     case 'EncryptionKeyMissingError': return esphomeError('KEY_NEEDED');
     case 'ConnectionRefusedError': return esphomeError('REFUSED');
+    // #1116: esphome-client 2.1.0 rejects a request whose connection drops while it waits with ConnectionLostError;
+    // under 2.0.0 the same moment surfaced as an AbortError, which already read as the timeout sentence. Unnamed, it
+    // fell through to the generic "Could not talk to the device.", so a device that dropped mid-request read as
+    // something unknown. The same sentence as before keeps the wording from changing with a library bump.
+    case 'ConnectionLostError':
     case 'ConnectionTimeoutError':
     case 'NoiseHandshakeTimeoutError':
     case 'TimeoutError':
