@@ -74,7 +74,11 @@ describe('openMediaFile: what the app will open', () => {
     assert.ok(f, 'a plain file must open');
     try {
       assert.equal(f.size, BODY.length);
-      assert.ok(f.mtime instanceof Date);
+      // Not `instanceof Date`: fs hands back a native Date, and the weekly future-clock run (#570, scripts/clock-shift.mjs)
+      // replaces the global Date with a subclass, so that check failed only there (#1124, red since 2026-10-26). What matters is
+      // a real, valid date, whichever Date class the process has.
+      assert.equal(Object.prototype.toString.call(f.mtime), '[object Date]');
+      assert.ok(Number.isFinite(f.mtime.getTime()), 'the mtime must be a valid date');
       const buf = Buffer.alloc(BODY.length);
       fs.readSync(f.fd, buf, 0, buf.length, 0);
       assert.equal(buf.toString(), BODY);
