@@ -217,8 +217,7 @@ then re-run the publish workflow. To check the gate without publishing an image,
 for that branch's push test run (here `dev`), while a `main` push or any release tag run waits for the
 `main` run. `weekly-rebuild.yml` is separate and tests its rebuilt image before moving a tag.
 
-During the #751 staging soak, the `:dev` build uses moving major-version tags for its runtime Node 26
-and MediaMTX 1 base images; `:latest` remains on Node 24 while releases are on hold. These tags are used rather
+The build uses moving major-version tags for its runtime Node 24 and MediaMTX 1 base images, rather
 than fixed digests (#555 item 5). This picks up compatible base updates on rebuild, but rebuilding the
 same Nightlight commit later may produce different image contents. The revision label identifies the
 app commit, not identical image bytes; use the published image digest when you need that exact image.

@@ -1,21 +1,20 @@
 # #971: the Tailscale version and both verified tarball digests are committed in
 # Stage 4, not fetched as metadata during a build. Bump them only in a reviewed
 # PR; the weekly rebuild must retain the reviewed pin.
-# #751 SOAK: all Node stages run node:26-alpine while .nvmrc and CI stay on Node 24.
-# The stage-1 24.18.1 pin also goes: the image now follows the Node 26 major tag.
-# Node was previously pinned to 24.18.1 to dodge a hard
+# Runtime Node tracks the 24 major again. It was previously pinned to 24.18.1 to dodge a hard
 # abort: 24.19.0 added per-object environment cleanup hooks to node::ObjectWrap
 # (nodejs/node#63642), and better-sqlite3 <= 11 subclassed ObjectWrap, so its wrapped objects
 # registered a cleanup hook whose removal path asserted env != nullptr and abort()ed during our
 # teardown ("RemoveEnvironmentCleanupHook: Assertion failed: (env) != nullptr"). better-sqlite3
 # 13's ground-up N-API rewrite no longer touches node::ObjectWrap, which removes the trigger
-# entirely. The #751 SOAK checks Node 26 shutdown and media behaviour before support moves from 24.
-# The runtime follows node:26-alpine (patch/minor within the 26 major). Previously verified on
-# staging: clean graceful shutdown (exit 0, no abort assertion) on 24.x with sqlite 13.
-# KEEP better-sqlite3 >= 13; a downgrade can bring back the ObjectWrap abort at teardown.
+# entirely — so the exact pin is no longer needed and the runtime follows node:24-alpine (patch/
+# minor within the 24 major), matching how the MediaMTX base is pinned to its major. Verified on
+# staging: clean graceful shutdown (exit 0, no abort assertion) on current 24.x with sqlite 13.
+# KEEP better-sqlite3 >= 13 while on this tag; if it's ever downgraded below 13, re-pin Node to
+# 24.18.1 or the abort at teardown returns.
 
 # --- Stage 1: build the React frontend ---
-FROM node:26-alpine AS frontend-build
+FROM node:24.18.1-alpine AS frontend-build
 WORKDIR /frontend
 # npm ci against the committed lockfile, not npm install against version ranges -
 # the image gets the exact dependency tree that was tested, instead of whatever
@@ -40,7 +39,7 @@ FROM bluenviron/mediamtx:1 AS mediamtx-binary
 # musl prebuilt binary (prebuilds/linuxmusl-*.node) and loads that, so no compile happens
 # today - but keeping the toolchain here means the build still works unchanged if a future
 # dependency (or a better-sqlite3 without a matching prebuild) does need to compile.
-FROM node:26-alpine AS backend-deps
+FROM node:24-alpine AS backend-deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
 COPY backend/package.json backend/package-lock.json ./
@@ -53,7 +52,7 @@ RUN npm ci --omit=dev
 # 73a48057aaf5f60e4f770b398e9b7af576b01dbe. A version bump requires a
 # reviewed PR updating these pins; the weekly rebuild never moves them.
 # BUILDPLATFORM runs wget/tar natively for either target arch, so no QEMU is needed.
-FROM --platform=$BUILDPLATFORM node:26-alpine AS tailscale-binaries
+FROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries
 ARG TARGETARCH
 RUN case "$TARGETARCH" in amd64|arm64) ;; *) echo TAILSCALE_UNSUPPORTED_ARCH >&2; exit 1 ;; esac
 RUN apk add --no-cache wget
@@ -69,7 +68,7 @@ RUN case "$TARGETARCH" in \
     sh /tmp/fetch-tailscale.sh "$TARGETARCH" "$TAILSCALE_VERSION" "$sha" /tailscale-bin
 
 # --- Stage 5: combined runtime (app + MediaMTX + FFmpeg) ---
-FROM node:26-alpine
+FROM node:24-alpine
 WORKDIR /app
 
 # ffmpeg: transcodes camera audio (many IP cameras use G711, which HLS can't carry).
@@ -128,8 +127,9 @@ COPY backend/package.json ./
 
 # Drop the base image's bundled npm. npm is the package manager, not part of the running app
 # (the container runs `node src/index.js`; entrypoint.sh only uses su-exec/node) - but the copy
-# that ships in node:26-alpine adds unused dependencies to the runtime image. The #751 SOAK
-# keeps removing it, as on Node 24, to limit the scanner findings and attack surface.
+# that ships in node:24-alpine drags in its own vulnerable transitive deps (tar/undici/
+# brace-expansion/ip-address DoS + SSRF CVEs) that image scanners (Docker Scout/Trivy) flag on an
+# otherwise-clean image. Removing it clears those findings and trims the attack surface.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 COPY backend/src ./src
