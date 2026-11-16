@@ -9,9 +9,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- A weekly report-only scan of the published `:dev` and `:latest` images lists high and critical vulnerabilities for human review. It starts running weekly once the workflow reaches `main`.
+
 ### Changed
 
 - Docker publishes from `main` and `v*` tags now wait for a passing `main` push test run of the same commit; a failed run blocks the publish. Dev pushes remain ungated, and the weekly rebuild remains separate.
+- GitHub workflow actions are pinned to commit SHAs; Dependabot keeps their pins current. Dependabot leaves React and React DOM major upgrades for the planned React 19 migration (#634); Dependabot reads this setting from `main`, so it applies after the next release.
 
 - The Docker image now runs Node 26 during the #751 staging soak. Node 24 stays supported in CI and `.nvmrc` until the soak ends; releases from dev to main are on hold during it.
 

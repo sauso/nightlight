@@ -223,6 +223,8 @@ than fixed digests (#555 item 5). This picks up compatible base updates on rebui
 same Nightlight commit later may produce different image contents. The revision label identifies the
 app commit, not identical image bytes; use the published image digest when you need that exact image.
 
+Once it reaches `main` (GitHub runs scheduled workflows only from the default branch), the [image scan](../.github/workflows/image-scan.yml) runs every Tuesday and checks the published `:dev` and `:latest` images for high and critical vulnerabilities with fixes available. Read each image's table in the run summary and download its JSON report from the run artifacts. This is a report for human triage, not a release gate; a scan that could not run is marked separately from one with findings. Workflow actions are pinned to commit SHAs, and Dependabot proposes updates to those pins.
+
 ### The weekly rebuild
 
 Every Monday, `:latest` (from `main`) and `:dev` (from `dev`) are rebuilt with freshly pulled base
