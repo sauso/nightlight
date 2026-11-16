@@ -18,7 +18,7 @@ import { reconcileClipRing } from '../lib/clipCapture.js';
 import { purgeChild, purgeFailureReason } from '../lib/entityPurge.js';
 import { isRecording } from '../lib/recordings.js';
 import { TRANSITION, framesForNight } from '../lib/bedTransitions.js';
-import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
+import { getNightReview, saveNightReview, previewNightReview, correctionSnapshot, storedCorrectedNightWithSnapshot, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
   reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant,
   parseTransitionId, reviewForBrowser } from '../lib/sleepReviews.js';
 import { wakeRange } from '../lib/wakeRange.js';
@@ -518,9 +518,24 @@ router.get('/:id/sleep/:date', (req, res) => {
     // whose saved row is missing or unscored is still recompute-eligible: comparing the saved row against an
     // overlaid preview would show the parent's times as what Save would store.
     const raw = contextChoice !== undefined && req.query.raw === '1';
-    const overlaid = raw ? night : applyCorrection(req.params.id, night);
+    let overlaid = raw ? night : applyCorrection(req.params.id, night);
+    // #355: after samples expire or a later compute stops scoring the night,
+    // a valid stored correction snapshot still has the five measured figures;
+    // serve that saved night without inventing a timeline from the parent's
+    // timestamps. In-progress nights still show their live detector answer.
+    // Decided on the FRESH night, not the overlaid one (#355 review, Opus L1):
+    // a fresh `empty` night that the parent's two times promote to `ok`
+    // (asScoredFromEmpty) is still not a scored detector night with a minute
+    // basis, and without this it showed the promoted figures beside a card
+    // reading the snapshot's.
+    const savedCorrection = !raw && includeTimeline && night.in_progress !== true
+      && (night.status !== 'ok' || !night.span_basis)
+      ? storedCorrectedNightWithSnapshot(req.params.id, req.params.date) : null;
+    if (savedCorrection) overlaid = savedCorrection;
     // The score, AFTER the correction (or without it for `raw`), from the context this night was really computed
-    // with: see the list above the route. The saved row is only read if the fresh night is `no_data`.
+    // with: see the list above the route. attachScore's own saved-row fallback
+    // runs on no_data; #355's correction fallback above also handles a later
+    // fresh compute that stops scoring a previously corrected night.
     const shown = attachScore(child, overlaid, {
       context: contextChoice === 'stored' ? context
         : night.scoring_view?.applied === 'stored' ? night.scoring_view.stored
@@ -532,6 +547,7 @@ router.get('/:id/sleep/:date', (req, res) => {
         return row && !raw ? applyCorrection(req.params.id, row) : row;
       },
     });
+    if (savedCorrection && shown.score) shown.score_source = 'stored';
     // `transition_frames` (#907, ADDED to the shape; every existing key is unchanged): the saved bed-transition
     // pictures the sleep detail page may offer on its Room activity rows, [{ id, type, at }]. Built HERE from the
     // finished night, not inside computeNight: it moves no computed number, and `transitions` (the two adopted
@@ -960,6 +976,14 @@ router.put('/:id/review/:date', (req, res) => {
   // events) comes after it, which is harmless: the store writes no answer and no lock, only the pass the
   // nightly job owes the night anyway (see storeNightBeforeCorrection).
   if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);
+  // #355: the correction snapshot is worked out here, after the store-first
+  // step (it is measured against the row that step leaves) and before
+  // applyVerdicts writes. Its own compute failing is caught inside it (#355
+  // review, Opus H1: a failed measurement must not fail the parent's save), but
+  // anything else it throws must still be a 500 with no verdict written, the
+  // rule above. Pinned by "a later save whose correction snapshot throws" in
+  // review-in-bed-and-lock.test.js.
+  const spanFigures = correctionSnapshot(req.params.id, req.params.date, merged);
 
   // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside
   // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.
@@ -985,7 +1009,7 @@ router.put('/:id/review/:date', (req, res) => {
   // `storeFirst: false`: done above already, and a second store would compute the night again. `actor` is
   // the username from the session, never the first name (see lib/actor.js).
   const actor = actorOf(req);
-  const review = saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false, actor, answered });
+  const review = saveNightReview(req.params.id, req.params.date, patch, { storeFirst: false, actor, answered, spanFigures });
   // reviewForBrowser: the stored row names the answerer by account id as well as username, and this response
   // goes to caregivers too. A dismissal or an empty save keeps SOMEONE ELSE's answer (and id) on the row, so
   // without it the saver would receive another person's account id (#552 release review).

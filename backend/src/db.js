@@ -333,6 +333,7 @@ db.exec(`
     note TEXT,
     dismissed INTEGER NOT NULL DEFAULT 0,
     nobody_in_bed INTEGER NOT NULL DEFAULT 0,
+    span_figures TEXT,
     reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
     answered_by_user_id TEXT,
     answered_by_username TEXT,
@@ -567,6 +568,12 @@ for (const col of ['true_onset_transition_id', 'true_wake_transition_id', 'true_
 // no way to tell which stored onsets came from the old "Put down here" button).
 if (!sleepReviewColumns.includes('true_in_bed_at')) {
   db.exec('ALTER TABLE sleep_reviews ADD COLUMN true_in_bed_at TEXT');
+}
+
+// #355, Opus/Codex plan review 2026-11-16: old reviews have no measured
+// correction snapshot until the bounded nightly backfill reaches them.
+if (!sleepReviewColumns.includes('span_figures')) {
+  db.exec('ALTER TABLE sleep_reviews ADD COLUMN span_figures TEXT');
 }
 
 // "No one was in the bed" — a parent saying the detector's whole night was about an empty bed (added

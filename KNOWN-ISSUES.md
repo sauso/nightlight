@@ -726,16 +726,19 @@ closing sentence.
   this nightly rule and is not handled live. And a camera that has delivered no video since the server started
   (for example one with no video feed at all) keeps its sound in the live watcher, while this rule counts its
   minutes as unwatched.
-- **A parent's corrected night** subtracts the night's stored unknown minutes from the corrected span as
-  one total (an existing limit of corrections). A recompute that adds many unknown minutes to a corrected
-  night can therefore shrink its displayed sleep more than the stall alone explains. Since a corrected
-  night's saved summary is locked (docs/sleep-tracking.md, "A night you have corrected is locked"), that no longer happens
-  to the child's card after the correction is saved; the figure stops changing but is not made exact. The
-  sleep detail page works the night out fresh each time, so it can still show it. Since a finished night is
-  shown with the camera, timezone and window it was saved with (docs/sleep-tracking.md, "Finished nights use
-  the settings they were saved with"), a later change of camera, timezone or window no longer adds to that
-  difference for a night saved with its settings recorded; a change to the detection rules, or data recorded
-  after the night was locked, still can.
+- **A parent's corrected night.** When a parent moves the asleep or wake-up time of a night the app
+  scored, the app measures the night between the parent's times while its camera samples still exist
+  (about 30 days): when the review is saved, and in the nightly update for corrections saved earlier.
+  Minutes outside the measured range, or in a video gap, are unknown, and the child's card and the
+  sleep detail page show the same saved times and figures, also after the samples expire. A correction
+  the app cannot measure (one saved before this change whose samples are gone, or one it could not
+  rebuild) keeps the earlier behaviour: the night's stored unknown minutes are subtracted from the
+  corrected span as one total, so the asleep figure is an estimate that can count unwatched minutes as
+  sleep or leave out some sleep; wake-ups and minutes awake stay the detector's and may not match the
+  corrected times; and the longest stretch is capped at the asleep total. The card then reads the stored
+  night and the detail page a fresh calculation, as for an uncorrected night, so the two can differ.
+  Wake-coloured segments outside the corrected span are by design: the detector paints its morning run
+  as a wake.
 
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.

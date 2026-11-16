@@ -3180,6 +3180,37 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     }
   }
   if (includeTimeline) {
+    // #355, Opus/Codex plan review 2026-11-16: the timeline stops at
+    // totalMin, but #352 can measure a later wake in metricsState/inWake.
+    // Export the final arrays' full measured range without changing any
+    // detector figure or the timeline's existing length.
+    const basisEnd = Math.max(totalMin, sleepEnd);
+    const runsOf = (present) => {
+      const runs = [];
+      for (let i = 0; i < basisEnd; ) {
+        if (!present(i)) { i++; continue; }
+        let k = i + 1;
+        while (k < basisEnd && present(k)) k++;
+        runs.push({ start_at: minuteTime(i), end_at: minuteTime(k) });
+        i = k;
+      }
+      return runs;
+    };
+    out.span_basis = {
+      start_at: minuteTime(0), end_at: minuteTime(basisEnd), onset_at: minuteTime(onset),
+      // #355 fix round 2 (Opus M1): where the detector's own counting stopped (sleepEnd: its wake
+      // minute, or the window end when it reported no wake). accumulateMetrics counts a run that this
+      // boundary cuts as a full wake-up however short the piece, so correctedSpan.js must not apply
+      // its short-piece rule at this minute, only at a wake a parent moved earlier.
+      sleep_end_at: minuteTime(sleepEnd),
+      wake_runs: runsOf((i) => Boolean(inWake[i])),
+      gap_runs: runsOf((i) => metricsState[i] === null),
+      // #355 review (Opus M1): the wake walk starts at the detector's onset, so
+      // movement before it is in no wake run. A parent's EARLIER onset still
+      // needs it: correctedSpan.js counts these minutes awake, never as a
+      // wake-up. Only before onset, and only minutes not already in a run.
+      active_runs: runsOf((i) => i < onset && metricsState[i] === true && !inWake[i]),
+    };
     out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : s ? 'active' : 'quiet', inWake: inWake[i], out: outAt[i] }));
 
     // The counted awakenings, with clock times + duration — powers the "where the wake-ups were" list.
@@ -4204,6 +4235,20 @@ export function runNightlySleepJob() {
       }
     }
     if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies).`);
+    // #355, Opus/Codex plan review 2026-11-16: after storing nights, backfill
+    // correction snapshots while their minute samples still exist.
+    // #355 review (Opus M4, Codex M2): deferred with setImmediate so it never
+    // runs inside this pass, which boot calls directly for its first tick. It
+    // may compute up to a month of corrected nights; each failure is isolated
+    // and remembered inside refreshCorrectionSnapshots. The import stays
+    // dynamic: sleepReviews.js already imports this module, so a static import
+    // here would be a module cycle (the same reason CORRECTED_REVIEW_SQL,
+    // above, reads sleep_reviews itself).
+    setImmediate(() => {
+      import('./sleepReviews.js')
+        .then((m) => m.refreshCorrectionSnapshots())
+        .catch((e) => logger.error(`[sleep] correction snapshot refresh failed: ${e.message}`));
+    });
     // Which of these actually go out, and under what name, is decided per child inside the two functions (#397, #398).
     if (fresh.length > 0) notifySleepReports(fresh);
     if (followups.length > 0) notifySleepReportUpdates(followups);
