@@ -554,7 +554,7 @@ export function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel
           // ONLY an increase is progress. ffmpeg 7+ prints a `progress=continue` block every 0.5 s from its main
           // thread even while a worker thread is hung, with the counters frozen (read in ffmpeg 7.x's source by the
           // plan review, not run here), so "any output resets the timer" would never cut a hung encode. The
-          // Dockerfile installs whatever ffmpeg node:24-alpine's `apk add ffmpeg` resolves to, so the major version
+          // #751 SOAK: Dockerfile installs whatever ffmpeg node:26-alpine's `apk add ffmpeg` resolves to; its major
           // can change with no diff here: this rule has to hold for either behaviour, and "a counter went up" does.
           if (v > run.seen[m[1]]) {
             run.seen[m[1]] = v;
