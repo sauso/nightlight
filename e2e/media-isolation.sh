@@ -100,7 +100,8 @@ check_iso_processes() { # container on|off app_uid app_gid
   while read -r pid; do
     st=$(cat "/proc/$pid/status" 2>/dev/null) || continue
     name=$(status_field "$st" Name)
-    if [ "$name" = MainThread ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qE '(^| |/)node( |$)'; then
+    # Node 24 reports its main thread as "MainThread", Node 26 as "node-MainThread" (#751): accept both.
+    if { [ "$name" = MainThread ] || [ "$name" = node-MainThread ]; } && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qE '(^| |/)node( |$)'; then
       name=node
     fi
     uid=$(status_field "$st" Uid); gid=$(status_field "$st" Gid); groups=$(status_field "$st" Groups)
