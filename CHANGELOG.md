@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- The Docker image now runs Node 26 during the #751 staging soak. Node 24 stays supported in CI and `.nvmrc` until the soak ends; releases from dev to main are on hold during it.
+
 - The recording setting now explains that Recent alerts keeps at most 30 days and 2,000 unprotected entries, with older alerts and their clips and pictures removed as new alerts are recorded (#933).
 - The nightly timelapse now shows on each night's own page, in a card directly under the Timeline, instead of on the child's page (it shows that night's timelapse only, with no strip of other nights; a night without one shows no card). On the child's page, **Recordings** is now a list like **Recent alerts**: the newest three recordings with a thumbnail, the camera and the time, and a **See all recordings** button for the rest, instead of one row you had to open first. Nothing changes on the server or in how many timelapses and recordings are kept.
 - Child settings: **Remove child** is a red button at the bottom of the page again (it had moved into the ⋯ menu), and its confirmation says plainly that it permanently deletes everything for the child. The confirmation's list now also names the child's ESPHome sensor readings (heart rate and so on), which were already deleted with the child.

@@ -206,7 +206,8 @@ Images published by that workflow (and by the weekly rebuild) also carry an **SB
 attestation (#566). `docker buildx imagetools inspect sauso/nightlight:latest` lists them; a registry page may
 show them as extra `unknown/unknown` entries, and `docker pull` ignores them.
 
-The build uses moving major-version tags for its runtime Node 24 and MediaMTX 1 base images, rather
+During the #751 staging soak, the `:dev` build uses moving major-version tags for its runtime Node 26
+and MediaMTX 1 base images; `:latest` remains on Node 24 while releases are on hold. These tags are used rather
 than fixed digests (#555 item 5). This picks up compatible base updates on rebuild, but rebuilding the
 same Nightlight commit later may produce different image contents. The revision label identifies the
 app commit, not identical image bytes; use the published image digest when you need that exact image.
