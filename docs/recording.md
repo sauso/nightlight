@@ -9,7 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **Protected clips** | An admin protects an alert or wake clip | As for the original clip | Never removed automatically | In the protected clips list |
-| **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page (the newest three, then **See all recordings**) |
+| **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page (the newest three, then **See all recordings** and **Show older recordings**) |
 | **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The **Room activity** list in the night's sleep detail, under a row you open (signed-in users only) |
 
 All three are configured under **Settings → Camera and recording → Recording** (admin only), and all three write to the same
@@ -302,8 +302,8 @@ pressing Save successfully or pressing **Discard changes** removes it. The draft
 device only and is never sent anywhere.
 
 Recordings appear in the **Recordings** card on the child's page, listed like the **Recent alerts** card beside it: the newest
-three, each with a thumbnail, the camera and the time, and a **See all recordings** button for the rest (which becomes
-**Show fewer**). **They are never deleted
+three, each with a thumbnail, the camera and the time, and a **See all recordings** button for the loaded rows (which becomes
+**Show fewer**). Past the newest 50, **Show older recordings** loads 50 more at a time; an exact last page of 50 takes one more tap to confirm the end. New recordings appear at the top on refresh, not inside older pages. **They are never deleted
 automatically** — unlike the other two kinds, these are keepsakes someone chose to keep, so deleting
 one is the only way to reclaim its space. **Only an admin can delete one**; anyone signed in, caregivers
 included, can record, watch and download (see [Who can delete](#who-can-delete)).

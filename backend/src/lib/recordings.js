@@ -514,16 +514,22 @@ export function protectedWakeClipStats() {
 //
 // The other statuses stay hidden on purpose: 'recording' and 'pending' are live, in-flight states that
 // resolve within seconds, and showing them would put a row on screen that is about to change.
-export function listChildRecordings(childId, limit = 50) {
+export function listChildRecordings(childId, options = {}) {
+  // #1112, Codex plan review 2026-11-16: preserve the positional limit for older callers.
+  const { limit = 50, before = null } = typeof options === 'number' ? { limit: options } : options;
+  // #1112, Codex plan review 2026-11-16: the id breaks same-second ties; the cursor is
+  // compared as values, so paging still works after its row has been deleted.
+  const cursorClause = before ? 'AND (r.created_at < ? OR (r.created_at = ? AND r.id < ?))' : '';
   return db
     .prepare(
       `SELECT r.id, r.camera_id, r.child_id, r.status, r.started_at, r.ended_at, r.duration_s, r.bytes,
               r.created_at, r.protected, c.name AS camera_name
          FROM recordings r LEFT JOIN cameras c ON c.id = r.camera_id
         WHERE r.child_id = ? AND r.status IN ('ready', 'failed') AND r.kind = 'manual'
-        ORDER BY r.created_at DESC LIMIT ?`
+          ${cursorClause}
+        ORDER BY r.created_at DESC, r.id DESC LIMIT ?`
     )
-    .all(childId, Math.min(200, Math.max(1, limit)));
+    .all(...(before ? [childId, before.created_at, before.created_at, before.id] : [childId]), Math.min(200, Math.max(1, limit)));
 }
 
 // A jailed { root, path } for a ready recording's MP4 (or thumbnail), or null — same containment guard

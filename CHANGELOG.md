@@ -16,6 +16,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- The Recordings card now reaches manual recordings older than the newest 50 with **Show older recordings** (#1112). Deleting one keeps the older rows already loaded.
 - ESPHome: a device that drops its connection while the app is waiting for an answer now shows "The device did not respond in time." again, instead of the generic "Could not talk to the device." (the library update in 0.49.0 started naming that case differently, #1116).
 
 ## [0.49.0] - 2026-11-16
