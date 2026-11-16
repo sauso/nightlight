@@ -17,9 +17,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - Docker publishes from `main` and `v*` tags now wait for a passing `main` push test run of the same commit; a failed run blocks the publish. Dev pushes remain ungated, and the weekly rebuild remains separate.
 - GitHub workflow actions are pinned to commit SHAs; Dependabot keeps their pins current. Dependabot leaves React and React DOM major upgrades for the planned React 19 migration (#634); Dependabot reads this setting from `main`, so it applies after the next release.
-
-- The Docker image now runs Node 26 during the #751 staging soak. Node 24 stays supported in CI and `.nvmrc` until the soak ends; releases from dev to main are on hold during it.
-
 - The recording setting now explains that Recent alerts keeps at most 30 days and 2,000 unprotected entries, with older alerts and their clips and pictures removed as new alerts are recorded (#933).
 - The nightly timelapse now shows on each night's own page, in a card directly under the Timeline, instead of on the child's page (it shows that night's timelapse only, with no strip of other nights; a night without one shows no card). On the child's page, **Recordings** is now a list like **Recent alerts**: the newest three recordings with a thumbnail, the camera and the time, and a **See all recordings** button for the rest, instead of one row you had to open first. Nothing changes on the server or in how many timelapses and recordings are kept.
 - Child settings: **Remove child** is a red button at the bottom of the page again (it had moved into the ⋯ menu), and its confirmation says plainly that it permanently deletes everything for the child. The confirmation's list now also names the child's ESPHome sensor readings (heart rate and so on), which were already deleted with the child.

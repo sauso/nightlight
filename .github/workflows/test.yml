@@ -85,9 +85,8 @@ jobs:
       # #549: entrypoint.sh's file-mode block is shell, so neither the JS mutation catalogue nor a Windows dev
       # machine can exercise it (entrypoint-umask.test.js is skipped where there are no POSIX modes). This step is
       # where it gets its evidence:
-      #   1. the same test inside node:24-alpine, as its unprivileged `node` user: BusyBox sh,
-      #      find, stat and chmod are checked here; #751 SOAK uses node:26-alpine as the image base.
-      #      Production also uses BusyBox (`npm test` above used Ubuntu's dash and GNU tools).
+      #   1. the same test inside node:24-alpine, the image's own base, as its unprivileged `node` user: BusyBox sh,
+      #      find, stat and chmod are what production runs (`npm test` above used Ubuntu's dash and GNU tools).
       #      A run that skipped anything proves nothing, hence the check on the TAP summary;
       #   2. scripts/entrypoint-umask.mutants.sh: every named mutation of the block must turn the test red.
       #   3. entrypoint-chown.test.js (#567) as ROOT in the same image (post-merge review of PR #701): its "a file
