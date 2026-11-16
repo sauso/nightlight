@@ -17,7 +17,7 @@
 //      reason rather than "try again".
 //   5. ClipDatePicker only enables days that HAVE clips, and its month arrows stop at the data.
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
-import { screen, waitFor, within, render } from '@testing-library/react';
+import { screen, waitFor, within, render, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import { nameStartsWithPrinted, accessibleName } from './helpers/accessibleName.js';
@@ -371,6 +371,11 @@ describe('RecordingsCard', () => {
     { id: 'r-e', camera_name: 'Cam E', started_at: '2026-08-30 20:15:00', duration_s: 10 },
   ];
   const rowsOf = (container) => [...container.querySelectorAll('.alert-item--btn')];
+  const PAGE = Array.from({ length: 50 }, (_, n) => ({
+    id: `page-${50 - n}`, status: 'ready', camera_name: `Camera ${50 - n}`,
+    started_at: '2026-09-02 10:00:00', created_at: '2026-09-02 10:00:00',
+  }));
+  const OLDER_URL = '/recordings/child/kid-1?before_created_at=2026-09-02%2010%3A00%3A00&before_id=page-1';
 
   beforeEach(() => {
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
@@ -487,6 +492,123 @@ describe('RecordingsCard', () => {
     const { container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
     await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
     expect(container.querySelector('.alert-list__more')).toBeNull();
+  });
+
+  test('a full page exposes the last-row cursor and appends older rows only once', async () => {
+    const get = vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path === OLDER_URL
+      ? [PAGE[49], { ...PAGE[49], id: 'older-1', camera_name: 'Older camera' }, { ...PAGE[49], id: 'older-1' }] : PAGE));
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    expect(rowsOf(container)).toHaveLength(50);
+    await user.click(screen.getByRole('button', { name: 'Show older recordings' }));
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(51));
+    expect(get).toHaveBeenCalledWith(OLDER_URL);
+    expect(screen.queryByRole('button', { name: 'Show older recordings' })).not.toBeInTheDocument();
+    expect(rowsOf(container).at(-1)).toHaveTextContent('Older camera');
+  });
+
+  test('a short first page has no older-page button', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(FIVE);
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    expect(screen.queryByRole('button', { name: 'Show older recordings' })).not.toBeInTheDocument();
+  });
+
+  test('a failed older page keeps loaded rows and offers retry', async () => {
+    vi.spyOn(api, 'get').mockImplementation((path) => path === OLDER_URL ? Promise.reject(new Error('offline')) : Promise.resolve(PAGE));
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    await user.click(screen.getByRole('button', { name: 'Show older recordings' }));
+    expect(await screen.findByText('Couldn’t load older recordings — try again.')).toBeInTheDocument();
+    expect(rowsOf(container)).toHaveLength(50);
+    expect(screen.getByRole('button', { name: 'Show older recordings' })).toBeEnabled();
+  });
+
+  test('deleting after paging removes locally without refetching page one', async () => {
+    const get = vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path === OLDER_URL
+      ? [{ ...PAGE[49], id: 'older-1', camera_name: 'Older camera' }] : PAGE));
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    await user.click(screen.getByRole('button', { name: 'Show older recordings' }));
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(51));
+    await user.click(rowsOf(container).at(-1));
+    await user.click(await screen.findByRole('button', { name: 'Delete recording' }));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(50));
+    expect(api.del).toHaveBeenCalledWith('/recordings/older-1');
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  test('the card and older-page control survive deleting down to three and zero rows', async () => {
+    const failedPage = PAGE.map((row) => ({ ...row, status: 'failed' }));
+    const get = vi.spyOn(api, 'get').mockResolvedValue(failedPage);
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    for (let remaining = 50; remaining > 0; remaining--) {
+      fireEvent.click(rowsOf(container)[0]);
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+      await waitFor(() => expect(rowsOf(container)).toHaveLength(remaining - 1));
+      if (remaining === 4) expect(screen.getByRole('button', { name: 'Show older recordings' })).toBeInTheDocument();
+    }
+    expect(container.querySelector('.card')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Show older recordings' })).toBeInTheDocument();
+    expect(get).toHaveBeenCalledTimes(1);
+  }, 30000);
+
+  test('a late older page is dropped after refresh, and a second click cannot start a second request', async () => {
+    let resolveOlder;
+    const older = new Promise((resolve) => { resolveOlder = resolve; });
+    let firstLoads = 0;
+    const get = vi.spyOn(api, 'get').mockImplementation((path) => {
+      if (path === OLDER_URL) return older;
+      firstLoads++;
+      return Promise.resolve(firstLoads === 1 ? PAGE : FIVE);
+    });
+    const { user, container, rerenderWith } = renderAsAdmin(<RecordingsCard childId="kid-1" refreshNonce={0} />);
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show older recordings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Loading older recordings…' }));
+    expect(get).toHaveBeenCalledTimes(2);
+    rerenderWith({ ui: <RecordingsCard childId="kid-1" refreshNonce={1} /> });
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    resolveOlder([{ ...PAGE[49], id: 'stale', camera_name: 'Stale camera' }]);
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+    await Promise.resolve();
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    expect(rowsOf(container)).toHaveLength(5);
+    expect(container.textContent).not.toContain('Stale camera');
+    expect(screen.queryByRole('button', { name: 'Show older recordings' })).not.toBeInTheDocument();
+  });
+
+  test('a late older page is dropped after the child changes or the card unmounts', async () => {
+    const pending = [];
+    vi.spyOn(api, 'get').mockImplementation((path) => path.includes('?before_created_at=')
+      ? new Promise((resolve) => pending.push(resolve))
+      : Promise.resolve(path.endsWith('/kid-1') ? PAGE : FIVE));
+    const { user, container, rerenderWith, unmount } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show older recordings' }));
+    rerenderWith({ ui: <RecordingsCard childId="kid-2" /> });
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    pending.shift()([{ ...PAGE[49], id: 'stale', camera_name: 'Stale camera' }]);
+    await Promise.resolve();
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    expect(rowsOf(container)).toHaveLength(5);
+    expect(container.textContent).not.toContain('Stale camera');
+    rerenderWith({ ui: <RecordingsCard childId="kid-1" /> });
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all recordings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show older recordings' }));
+    unmount();
+    pending.shift()([{ ...PAGE[49], id: 'stale', camera_name: 'Stale camera' }]);
+    await Promise.resolve();
   });
 
   test('the zone is shown on the time for a viewer in another zone, and not for one at home', async () => {
@@ -630,8 +752,9 @@ describe('RecordingsCard', () => {
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(api.del).toHaveBeenCalledWith('/recordings/r-1'));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    // It re-reads the list rather than trusting its own copy.
-    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    // #1112, Codex plan review 2026-11-16: local removal keeps any older pages already loaded.
+    await waitFor(() => expect(rowsOf(container)).toHaveLength(1));
+    expect(api.get).toHaveBeenCalledTimes(1);
   });
 
   test('a failed delete keeps the player open with a retry', async () => {

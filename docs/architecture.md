@@ -650,6 +650,8 @@ trusted in the span it was computed in. `GET /review/:date` adds `settings: { ke
 (a page from before) is not checked. Typed times keep today's zone (`localHmToUtcSql`), the zone the page shows.
 Not covered by the key: a night with no usable saved context, whose key is `''` before and after a settings change.
 
+**A child's manual recordings** are listed by `GET /api/recordings/child/:childId` (#1112). It returns a plain array, with an optional `limit` (1–200, default 50) and paired `before_created_at` and `before_id` query values for older pages. Rows are ordered by `created_at DESC, id DESC`; the last row's values form the next cursor, even if that row is later deleted.
+
 **Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
 it. `detection_events.protected` and `recordings.protected` are 0/1 clip flags. The protected-list and
 admin toggle routes are `GET /api/cameras/clips/protected`, `PUT /api/cameras/alerts/:id/protected` and
