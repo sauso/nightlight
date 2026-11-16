@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-16
+
 ### Added
 
 - A weekly report-only scan of the published `:dev` and `:latest` images lists high and critical vulnerabilities for human review. It starts running weekly once the workflow reaches `main`.
