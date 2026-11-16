@@ -232,7 +232,9 @@ describe('Pushover settings', () => {
   beforeEach(() => mockPushover());
 
   const save = async (user) => {
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    // Save is disabled until the config has loaded, and a click on a disabled button is a silent no-op: with a slow mocked
+    // answer (NIGHTLIGHT_TEST_LATENCY_MS, #1146) a test with nothing visible to wait for (a blank stored value) clicked too early.
+    await user.click(await enabledButton('Save changes'));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     return putSpy.mock.calls[0][1];
   };

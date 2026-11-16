@@ -59,7 +59,11 @@ beforeEach(() => {
   vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
   vi.spyOn(nativeBridge, 'hasActiveBackgroundAudio').mockReturnValue(false);
   vi.spyOn(push, 'initPushNotifications').mockResolvedValue(undefined);
-  vi.spyOn(nativeBridge, 'syncTailscaleEndpoint').mockResolvedValue(null);
+  // NOT `.mockResolvedValue(null)`: under NIGHTLIGHT_TEST_LATENCY_MS (#1146) that settles after a real timer, and the shell's
+  // `.then(() => saveNativeSession(...))` on it then fires AFTER the test that started it has ended, into the NEXT test's
+  // saveNativeSession spy ("nothing is saved while the sync is still out" saw a save from the previous test). Nothing in this file
+  // depends on how long the address sync takes, so it answers at once, and the one test that does hold it holds it explicitly.
+  vi.spyOn(nativeBridge, 'syncTailscaleEndpoint').mockImplementation(() => Promise.resolve(null));
 });
 
 afterEach(() => {

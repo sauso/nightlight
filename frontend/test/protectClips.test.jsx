@@ -33,8 +33,10 @@ describe('alert clip player', () => {
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
     await user.click(toggle);
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/cameras/alerts/a1/protected', { protected: false }));
-    expect(changed).toHaveBeenCalledWith('a1', false);
-    expect(screen.getByRole('button', { name: 'Protect this clip' })).toHaveAttribute('aria-pressed', 'false');
+    // The request having been SENT is not the request having ANSWERED: the parent is told, and the toggle flips, only after the
+    // answer (a slow mocked answer, NIGHTLIGHT_TEST_LATENCY_MS, is what showed this: #1146). Wait for each of those.
+    await waitFor(() => expect(changed).toHaveBeenCalledWith('a1', false));
+    expect(await screen.findByRole('button', { name: 'Protect this clip' })).toHaveAttribute('aria-pressed', 'false');
     expect(trash).not.toBeDisabled();
     expect(screen.queryByText(/Protected: kept until you unprotect it/)).toBeNull();
   });
@@ -184,7 +186,8 @@ test('Sleep Detail shows the wake lock and lets an admin unprotect it without a 
   expect(screen.queryByRole('button', { name: 'Delete clip' })).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Unprotect this clip' }));
   await waitFor(() => expect(api.put).toHaveBeenCalledWith('/recordings/w1/protected', { protected: false }));
-  expect(screen.queryByLabelText('Protected')).toBeNull();
+  // The badge goes only once the request has ANSWERED (#1146: a slow mocked answer), so wait for it to go.
+  await waitFor(() => expect(screen.queryByLabelText('Protected')).toBeNull());
 });
 
 test('Sleep Detail does not print zero after an unprotected wake clip', async () => {

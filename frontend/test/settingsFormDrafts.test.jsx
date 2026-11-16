@@ -45,6 +45,16 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+// The push-provider pages render their fields DISABLED until the config has loaded, so `findByLabelText` resolves at once
+// on a field that cannot be typed into: `user.clear` throws "only supported on editable elements" and `user.type` does
+// nothing. Wait for it to enable (#1146: it only went red when the mocked request was slow; the same wait as `enabledButton`
+// in helpers/render.jsx).
+const enabledField = async (label) => {
+  const field = await screen.findByLabelText(label);
+  await waitFor(() => expect(field).toBeEnabled());
+  return field;
+};
+
 // ---------------------------------------------------------------------------------------------- General
 describe('Settings -> General', () => {
   const mount = (extra = {}) => renderAsAdmin(<SettingsGeneral />, { settings: SETTINGS, ...extra });
@@ -256,13 +266,14 @@ describe('Settings -> push providers', () => {
   test('★ Gotify: a priority typed and not saved comes back after a reload; Send test stays held back', async () => {
     api.get.mockResolvedValue(GOTIFY);
     const first = renderAsAdmin(<SettingsPushGotify />);
-    const priority = await screen.findByLabelText(/Priority/);
+    const priority = await enabledField(/Priority/);
     await first.user.clear(priority);
     await first.user.type(priority, '8');
     first.unmount();
 
     renderAsAdmin(<SettingsPushGotify />);
-    expect((await screen.findByLabelText(/Priority/)).value).toBe('8');
+    // The restored draft lands after the load, so wait for the VALUE, not just the field.
+    await waitFor(() => expect(screen.getByLabelText(/Priority/).value).toBe('8'));
     expect(screen.getByText('Unsaved changes restored.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Send test/ })).toBeDisabled();
   });
@@ -270,7 +281,7 @@ describe('Settings -> push providers', () => {
   test('★ Gotify: a server address with a login written into it is never stored', async () => {
     api.get.mockResolvedValue(GOTIFY);
     const first = renderAsAdmin(<SettingsPushGotify />);
-    const url = await screen.findByLabelText('Server URL');
+    const url = await enabledField('Server URL');
     await first.user.clear(url);
     await first.user.type(url, `https://user:${MARK}@gotify.other`);
     await first.user.type(screen.getByLabelText(/Application token/), MARK);
@@ -279,14 +290,14 @@ describe('Settings -> push providers', () => {
 
     renderAsAdmin(<SettingsPushGotify />);
     // Nothing was stored, so the stored address is back and there is no notice.
-    expect((await screen.findByLabelText('Server URL')).value).toBe('https://gotify.example');
+    await waitFor(() => expect(screen.getByLabelText('Server URL').value).toBe('https://gotify.example'));
     expect(screen.queryByText(/Unsaved changes/)).toBeNull();
   });
 
   test('★ Gotify: a failed load neither writes nor erases a stored draft, and the page stays usable', async () => {
     api.get.mockResolvedValue(GOTIFY);
     const first = renderAsAdmin(<SettingsPushGotify />);
-    const priority = await screen.findByLabelText(/Priority/);
+    const priority = await enabledField(/Priority/);
     await first.user.clear(priority);
     await first.user.type(priority, '9');
     first.unmount();
@@ -308,7 +319,7 @@ describe('Settings -> push providers', () => {
   test('Gotify: a Save that succeeds after a FAILED load still clears an older draft (it must not come back next visit)', async () => {
     api.get.mockResolvedValue(GOTIFY);
     const first = renderAsAdmin(<SettingsPushGotify />);
-    const p1 = await screen.findByLabelText(/Priority/);
+    const p1 = await enabledField(/Priority/);
     await first.user.clear(p1);
     await first.user.type(p1, '9');
     first.unmount();
@@ -330,7 +341,7 @@ describe('Settings -> push providers', () => {
     api.get.mockResolvedValue(GOTIFY);
     putSpy.mockResolvedValue({ ...GOTIFY, priority: 8 });
     const { user } = renderAsAdmin(<SettingsPushGotify />);
-    const priority = await screen.findByLabelText(/Priority/);
+    const priority = await enabledField(/Priority/);
     await user.clear(priority);
     await user.type(priority, '8');
     expect(Object.keys(sessionStorage)).toHaveLength(1);
@@ -342,7 +353,7 @@ describe('Settings -> push providers', () => {
   test('Gotify: Discard changes returns to the saved settings and removes the draft', async () => {
     api.get.mockResolvedValue(GOTIFY);
     const { user } = renderAsAdmin(<SettingsPushGotify />);
-    const priority = await screen.findByLabelText(/Priority/);
+    const priority = await enabledField(/Priority/);
     await user.clear(priority);
     await user.type(priority, '2');
     await user.click(screen.getByRole('button', { name: 'Discard changes' }));
@@ -354,7 +365,7 @@ describe('Settings -> push providers', () => {
     api.get.mockResolvedValue(NTFY);
     const first = renderAsAdmin(<SettingsPushNtfy />);
     await screen.findByDisplayValue('saved-topic');
-    await first.user.type(screen.getByLabelText('Username (optional)'), 'someone');
+    await first.user.type(await enabledField('Username (optional)'), 'someone');
     await first.user.clear(screen.getByLabelText('Topic'));
     await first.user.type(screen.getByLabelText('Topic'), `topic-${MARK}`);
     await first.user.type(screen.getByLabelText(/Access token/), MARK);
@@ -363,7 +374,7 @@ describe('Settings -> push providers', () => {
     first.unmount();
 
     renderAsAdmin(<SettingsPushNtfy />);
-    expect((await screen.findByLabelText('Username (optional)')).value).toBe('someone');
+    await waitFor(() => expect(screen.getByLabelText('Username (optional)').value).toBe('someone'));
     expect(screen.getByLabelText('Topic').value).toBe('saved-topic');
     expect(screen.getByText('Unsaved changes restored.')).toBeInTheDocument();
   });
@@ -382,14 +393,14 @@ describe('Settings -> push providers', () => {
   test('★ Pushover: a device typed and not saved comes back after a reload; the tokens are never stored', async () => {
     api.get.mockResolvedValue(PUSHOVER);
     const first = renderAsAdmin(<SettingsPushPushover />);
-    await first.user.type(await screen.findByLabelText(/Device/), 'pixel');
+    await first.user.type(await enabledField(/Device/), 'pixel');
     await first.user.type(screen.getByLabelText('Application API token'), MARK);
     await first.user.type(screen.getByLabelText('User or group key'), MARK);
     expect(everythingStored()).not.toContain(MARK);
     first.unmount();
 
     renderAsAdmin(<SettingsPushPushover />);
-    expect((await screen.findByLabelText(/Device/)).value).toBe('pixel');
+    await waitFor(() => expect(screen.getByLabelText(/Device/).value).toBe('pixel'));
     expect(screen.getByText('Unsaved changes restored.')).toBeInTheDocument();
   });
 });

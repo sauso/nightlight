@@ -63,7 +63,10 @@ const gridOrder = () => screen.getAllByText(/^(Nursery|Playroom|Landing)$/).map(
 
 beforeEach(() => {
   latestOnDragEnd = null;
-  vi.spyOn(api, 'put').mockResolvedValue({});
+  // NOT `.mockResolvedValue({})`: `settle()` above relies on the stand-in answering with a promise, never a timer, and under
+  // NIGHTLIGHT_TEST_LATENCY_MS (#1146) that helper turns it into a timer. Then `settle` returned before the chained second
+  // PUT was sent (the count was 1, not 2), and the straggler PUT then landed in the NEXT test's spy ("sends nothing" saw one).
+  vi.spyOn(api, 'put').mockImplementation(() => Promise.resolve({}));
 });
 afterEach(() => vi.restoreAllMocks());
 
