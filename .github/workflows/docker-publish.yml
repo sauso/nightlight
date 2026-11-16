@@ -1,10 +1,18 @@
 name: Build and publish Docker image
 
+# Dev pushes publish :dev immediately. Main and v* tag publishes wait for the
+# newest main-push test run of the same commit to pass; gate_only checks the gate
+# without publishing an image.
 on:
   push:
     branches: [main, dev]
     tags: ['v*']
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      gate_only:
+        description: Check the publish gate without pushing an image
+        type: boolean
+        default: false
 
 # Least privilege (#566 bullet 5): this workflow only reads the repository (the Docker Hub push uses its own secrets, not this token), so the token it is handed is
 # limited to that instead of the repository default (which may include write).
@@ -20,7 +28,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate:
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || inputs.gate_only }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out gate script
+        uses: actions/checkout@v4
+      - name: Wait for a green push test run of this commit
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          # The branch whose push test run is required. A main push or a v* tag build waits for the run
+          # that tested the commit on main; a manual dispatch (the gate_only dry run from dev) waits for the
+          # run on the branch it was dispatched on, so the dry run can pass without a release (Codex review of
+          # the first build: the dev dry run would otherwise wait for a main run that never exists).
+          GATE_BRANCH: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || 'main' }}
+        run: sh scripts/publish-gate.sh
+
   build-and-push:
+    needs: gate
+    # A dev push skips gate. Explicitly accepting skipped, with !cancelled(),
+    # overrides needs' default success-only behaviour; a failed gate still blocks.
+    # gate_only always skips the publish, even after a successful gate check.
+    if: ${{ !cancelled() && (needs.gate.result == 'success' || needs.gate.result == 'skipped') && !inputs.gate_only }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
