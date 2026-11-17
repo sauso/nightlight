@@ -145,6 +145,9 @@ fictional demo household (`backend/src/lib/demoSeed.js`) and turned into a norma
 writes the PNGs into `docs/screenshots/`. Look at the images, update the captions in `docs/README.md` if a screen
 changed, and commit the PNGs. If Playwright's own browser is not installed, set `WALK_CHROMIUM` to a Chromium
 executable. The video is synthetic (`walkthrough/make-loop.sh`); the image ships no fonts, so it has no caption.
+The seeded child's sleep window is 19:00 to 07:00, and the child page only reads "Last night" while it is closed, so
+when you run it between about 17:00 and 08:00 UTC, `run.sh` seeds in a fixed-offset zone where it is about midday (the
+times in the pictures then read "GMT+10" or similar instead of "UTC").
 
 `playwright/tests/05-screenshots.spec.js` still captures a few screens into `playwright/screenshots/` (uploaded by
 CI as the `docs-screenshots` artifact), but only as a smoke test that those screens render. The committed images
