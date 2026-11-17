@@ -162,6 +162,50 @@ describe('#553 dataPaths: secrets, drop-in files and snapshot folders', () => {
 });
 
 describe('#553 dataPaths: ensurePrivateDir (the writers\' one way to make private/)', () => {
+  test('#1073 another boot creates private/ between statSync and lstatSync', () => {
+    const d = dir();
+    let mode = 0o755;
+    let statCalls = 0;
+    let mkdirCalls = 0;
+    let chmodCalls = 0;
+    const directory = { isSymbolicLink: () => false, isDirectory: () => true, get mode() { return mode; } };
+    const fsImpl = {
+      statSync(p) {
+        assert.equal(p, P(d));
+        if (++statCalls === 1) throw Object.assign(new Error('not found yet'), { code: 'ENOENT' });
+        return directory;
+      },
+      lstatSync(p) { assert.equal(p, P(d)); return directory; },
+      mkdirSync(p, options) {
+        assert.equal(p, P(d));
+        assert.deepEqual(options, { recursive: true, mode: 0o700 });
+        mkdirCalls += 1; // The directory already exists; recursive mkdir tolerates it.
+      },
+      chmodSync(p, nextMode) {
+        assert.equal(p, P(d));
+        mode = nextMode;
+        chmodCalls += 1;
+      },
+    };
+
+    assert.equal(ensurePrivateDir(d, { fsImpl }), P(d));
+    assert.equal(statCalls, 2, 'the winning boot\'s directory is re-statted');
+    assert.equal(mkdirCalls, 1, 'recursive mkdir is safe after the other boot wins');
+    assert.equal(chmodCalls, 1);
+    assert.equal(directory.isDirectory(), true);
+    assert.equal(mode & 0o777, 0o700);
+  });
+
+  test('#1073 a dangling symbolic link reported by lstatSync still throws', () => {
+    const d = dir();
+    const fsImpl = {
+      statSync() { throw Object.assign(new Error('dangling target'), { code: 'ENOENT' }); },
+      lstatSync(p) { assert.equal(p, P(d)); return { isSymbolicLink: () => true }; },
+      mkdirSync() { assert.fail('must not replace a dangling symbolic link'); },
+    };
+    assert.throws(() => ensurePrivateDir(d, { fsImpl }), /symbolic link to something that does not exist/);
+  });
+
   test('creates it, and makes it 0700 whatever the umask (an explicit chmod)', { skip: ON_LINUX ? false : 'POSIX modes: Linux only' }, () => {
     const d = dir();
     const old = process.umask(0o022);
