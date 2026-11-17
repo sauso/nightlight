@@ -1030,7 +1030,11 @@ body.in-pip .tile-menu-backdrop {
 .talk-btn--active {
   background: var(--accent);
   color: var(--on-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* #1093, Codex plan review 2026-11-17: var() hides unsupported color-mix until computed, so guard each enhanced paint. */
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .talk-btn--active { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
 }
 
 .pip-btn {
@@ -1462,8 +1466,9 @@ body.in-pip .tile-menu-backdrop {
 /* `flex-wrap` on the row and a 140px basis here: at 320px the name had one letter per line (phone pass) because the two buttons took the room;
    the buttons now drop to a second line when the name would be narrower than that. */
 .child-cam__info { flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.child-cam__chip { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; line-height: 1.3; min-width: 0; }
-.child-cam__dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--cam-dot); }
+/* #1093, Codex plan review 2026-11-17: keep the status dot beside the first line of a wrapped child camera name. */
+.child-cam__chip { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; font-weight: 600; line-height: 1.3; min-width: 0; }
+.child-cam__dot { flex: none; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--cam-dot); }
 .child-cam__name { min-width: 0; overflow-wrap: break-word; }
 .child-cam__state { flex: none; white-space: nowrap; font-weight: 500; }
 /* Visually hidden, still read by a screen reader (the "online" the dot stands for). */
@@ -1701,7 +1706,11 @@ body.in-pip .tile-menu-backdrop {
    (#221f3c, 1.20:1): the owner rejected exactly that look on these tabs on 2026-11-13. In the dark theme they keep the accent-tinted
    track they had before the shared look (same token mix as the old .sleep-events__tabs). Measured from the token values: inactive
    label (--text-secondary) on it 6.5:1, selected label (--on-accent on --accent) 6.7:1. The light theme keeps the shared track. */
-:root[data-theme='dark'] .seg-track--tabs { background: color-mix(in srgb, var(--accent-line) 12%, var(--bg-elevated)); }
+/* #1093, Codex plan review 2026-11-17: retain a card-coloured track on older WebViews. */
+:root[data-theme='dark'] .seg-track--tabs { background: var(--bg-elevated); }
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  :root[data-theme='dark'] .seg-track--tabs { background: color-mix(in srgb, var(--accent-line) 12%, var(--bg-elevated)); }
+}
 .seg-track--tabs .seg-track__btn { text-align: center; }
 /* UI consistency (PR-C): the Logs toolbars (Recent alerts, Camera history, Recent logs) are a SwitchRow plus two text buttons. At
    phone width they do not fit on one line, so the row wraps and each control keeps its own 44px target (`--tap`) instead of
@@ -1841,8 +1850,13 @@ body.in-pip .tile-menu-backdrop {
 /* Room-activity rows now carry a type tag (child out of the crib vs someone else in the room), so the
    right-hand side groups the tag + duration together. */
 .sleep-visit-right { display: inline-flex; align-items: center; gap: 10px; }
-.sleep-visit-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit-text); background: color-mix(in srgb, var(--sleep-visit) 15%, transparent); padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
-.sleep-visit-tag--out { color: var(--sleep-wake-text); background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
+/* #1093, Codex plan review 2026-11-17: plain tag fills survive unsupported color-mix. */
+.sleep-visit-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit-text); background: transparent; padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
+.sleep-visit-tag--out { color: var(--sleep-wake-text); background: transparent; }
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .sleep-visit-tag { background: color-mix(in srgb, var(--sleep-visit) 15%, transparent); }
+  .sleep-visit-tag--out { background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
+}
 /* Out-of-crib room-activity dot on the timeline — the child themselves out (vs teal = someone in the room). */
 .sleep-tl__visit--out { background: var(--sleep-wake); box-shadow: 0 0 0 1px var(--sleep-wake); }
 /* The onset/wake marks and the "now" line are the bar's height (30px) on purpose. Before v3.1 they were declared taller (top and
@@ -1874,6 +1888,7 @@ body.in-pip .tile-menu-backdrop {
 .sleep-tl__cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text-primary); opacity: 0.5; transform: translateX(-1px); pointer-events: none; }
 .sleep-tl__tip {
   position: absolute; bottom: calc(100% + 8px); transform: translateX(-50%);
+  max-width: 100%; box-sizing: border-box;
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28); padding: 6px 9px; z-index: 5; pointer-events: none;
   display: flex; flex-direction: column; align-items: center; gap: 1px; white-space: nowrap;
@@ -1945,7 +1960,11 @@ button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent-line); 
 .sleep-wakes__time { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-wakes__headright { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake-text); font-weight: 600; }
-.sleep-wakes__badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-wake-text); background: color-mix(in srgb, var(--sleep-wake) 14%, transparent); padding: 1px 7px 1px 5px; border-radius: 20px; }
+/* #1093, Codex plan review 2026-11-17: the wake badge needs a parse-time fallback too. */
+.sleep-wakes__badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-wake-text); background: transparent; padding: 1px 7px 1px 5px; border-radius: 20px; }
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .sleep-wakes__badge { background: color-mix(in srgb, var(--sleep-wake) 14%, transparent); }
+}
 .sleep-wakes__chev { color: var(--text-secondary); transition: transform 0.18s ease; flex: none; }
 .sleep-wakes__chev.is-open { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .sleep-wakes__chev { transition: none; } }
@@ -2316,7 +2335,11 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .clip-selectall { background: none; border: none; color: var(--accent-text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
 .clip-row { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
 .clip-row:last-child { border-bottom: none; }
-.clip-row--sel { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+/* #1093, Codex plan review 2026-11-17: selected rows keep a valid background on older WebViews. */
+.clip-row--sel { background: transparent; }
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .clip-row--sel { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+}
 .clip-row__check { display: inline-flex; flex-shrink: 0; }
 .clip-row__check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .clip-row__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: pointer; line-height: 0; border-radius: 8px; }
@@ -2844,7 +2867,11 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .nav-row:last-child { border-bottom: 0; }
 .nav-row__left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .nav-row__right { display: flex; align-items: center; gap: 6px; flex: none; color: var(--text-secondary); font-size: 14px; }
-.nav-row__chip { width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent-text); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+/* #1093, Codex plan review 2026-11-17: chip fallback before the guarded tint. */
+.nav-row__chip { width: 34px; height: 34px; border-radius: 10px; background: transparent; color: var(--accent-text); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .nav-row__chip { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+}
 .nav-row__leading { display: inline-flex; flex: none; }
 .nav-row__copy { min-width: 0; }
 .nav-row__label, .nav-row__sub { display: block; overflow-wrap: anywhere; }
@@ -3619,7 +3646,11 @@ input[type='range'] {
 .review-card__icon {
   flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--accent-line); background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-line); background: transparent;
+}
+/* #1093, Codex plan review 2026-11-17: preserve a valid icon fill before the enhanced tint. */
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .review-card__icon { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 }
 
 .review-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -3781,7 +3812,11 @@ input[type='range'] {
 .esp-add .camera-tile__sub { margin-top: 8px; }
 .esp-retention { margin-top: 22px; }
 
-.esp-from-search { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px; padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-text); font-size: 12px; font-weight: 600; } /* the .cam-chip recipe: --accent-text on a 12% tint; --accent-soft is light in BOTH themes, so accent text on it fails at night */
+/* #1093, Codex plan review 2026-11-17: the source chip keeps a valid fallback fill. */
+.esp-from-search { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px; padding: 3px 10px; border-radius: 999px; background: transparent; color: var(--accent-text); font-size: 12px; font-weight: 600; } /* the .cam-chip recipe: --accent-text on a 12% tint; --accent-soft is light in BOTH themes, so accent text on it fails at night */
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .esp-from-search { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+}
 .esp-encryption-callout { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; padding: 9px 11px; border-radius: 10px; background: var(--bg-elevated-2); font-size: 13px; }
 .esp-encryption-callout svg { flex: none; margin-top: 2px; }
 @media (hover: hover) {
@@ -3828,7 +3863,11 @@ input[type='range'] {
    shadow About and the sign-in screen already had. The header shows the bare SVG (its bar is the same colour). */
 .logo-tile { display: inline-flex; flex-shrink: 0; background: var(--bar); border-radius: 25%; overflow: hidden; }
 .logo-tile img { display: block; width: 100%; height: 100%; }
-.logo-tile--glow { box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent); }
+/* #1093, Codex plan review 2026-11-17: keep the glow when color-mix is unavailable. */
+.logo-tile--glow { box-shadow: 0 8px 30px var(--accent-soft); }
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .logo-tile--glow { box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent); }
+}
 /* First-run welcome: plain bullets, not check marks. A tick means "done" everywhere else in the app and none of these steps is. */
 .setup-checklist { list-style: disc; padding-left: 24px; margin: 8px 0; }
 .setup-checklist li { padding: 9px 0; }
@@ -3935,7 +3974,8 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
    button, as siblings (a button inside a role=button row is invalid nesting). The sessions sit in a panel under the row. */
 .user-row { border-bottom: 1px solid var(--border); }
 .user-row__line { display: flex; align-items: center; gap: 4px; }
-.user-row__open { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0 12px 14px; cursor: pointer; font-size: 16px; font-weight: 500; }
+/* #1093, Codex plan review 2026-11-17: unbroken account names must wrap within the open row. */
+.user-row__open { flex: 1; min-width: 0; overflow-wrap: anywhere; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0 12px 14px; cursor: pointer; font-size: 16px; font-weight: 500; }
 /* The open area has no right padding because, on a row with sessions, the toggle's own margin supplies the gap. A row WITHOUT
    a toggle has the open area as its last child, so it would put its arrow flush against the card edge. Give that case the
    distance the toggle's chevron sits from the edge (margin 6px + the centring inside the --tap wide button around an 18px
@@ -3950,6 +3990,10 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
 .user-row__toggle[aria-expanded='true'] .user-row__toggle-chev { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .user-row__toggle-chev { transition: none; } }
 /* Inset from the row's edges and tinted like the other nested panels so it reads as belonging to the row above. */
-.user-row__sessions { padding: 0 14px 8px; background: color-mix(in srgb, var(--accent-line) 6%, var(--bg-elevated)); border-radius: 10px; margin-bottom: 8px; }
+/* #1093, Codex plan review 2026-11-17: session panels need a valid plain fill before the guarded tint. */
+.user-row__sessions { padding: 0 14px 8px; background: var(--bg-elevated); border-radius: 10px; margin-bottom: 8px; }
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .user-row__sessions { background: color-mix(in srgb, var(--accent-line) 6%, var(--bg-elevated)); }
+}
 .user-row__sessions[hidden] { display: none; }
 .user-row__sessions .list-row:last-child { border-bottom: none; }

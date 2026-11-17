@@ -410,6 +410,15 @@ describe('adding and editing a caregiver', () => {
   beforeEach(() => mockApi());
 
   describe('editing', () => {
+    test('#1093: a failed invite re-issue is announced as an alert', async () => {
+      // Codex plan review 2026-11-17: the banner was visible but had no live alert role on the edit form.
+      mockApi({ users: [ME, { ...NANNY, password_set: false, invite_expires_at: null }] });
+      postSpy.mockRejectedValue(new Error('Could not issue invite'));
+      const { user } = mountEdit();
+      await user.click(await screen.findByRole('button', { name: 'Show a new invite' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not issue invite');
+    });
+
     test('loads the caregiver into the form, with the password box empty', async () => {
       mountEdit();
       expect((await screen.findByLabelText('First name')).value).toBe('Nanny');

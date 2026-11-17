@@ -610,8 +610,8 @@ describe('timeline legend and night-event tabs', () => {
       mockSleep({ night: live('2026-08-30 15:00:00') });
       const { container } = mount();
       await screen.findByRole('tab', { name: /Wake-ups/ });
-      // 7p (start) and 1a (exactly now, the right end) are named by the row below; 9p and 11p are the 2-hourly labels between.
-      expect(tickLabels(container)).toEqual(['9p', '11p']);
+      // #1093, Codex plan review 2026-11-17: the suppressed 7p end tick no longer consumes parity, so 8p starts the sequence.
+      expect(tickLabels(container)).toEqual(['8p', '10p', '12a']);
       expect(endsOf(container)[1]).toMatch(/^Now, 1:00\s?am$/i);
     });
 
@@ -628,8 +628,8 @@ describe('timeline legend and night-event tabs', () => {
       mockSleep({ night: live('2026-08-30 13:01:00') });
       const { container } = mount();
       await screen.findByRole('tab', { name: /Wake-ups/ });
-      // Ticks at 7p..11p; labels on every second one (7p, 9p, 11p), minus the two on the bar's ends (7p at 0%, 11p at 99.6%).
-      expect(tickLabels(container)).toEqual(['9p']);
+      // #1093, Codex plan review 2026-11-17: 7p and 11p are end ticks, so eligible parity starts at 8p.
+      expect(tickLabels(container)).toEqual(['8p', '10p']);
     });
 
     test('a tick between 0.5% and 1% from the left, or between 99% and 99.5% from the right, is treated as on the end and not labelled', async () => {
@@ -639,6 +639,27 @@ describe('timeline legend and night-event tabs', () => {
       const { container } = mount();
       await screen.findByRole('tab', { name: /Wake-ups/ });
       expect(tickLabels(container)).toEqual(['8p']);
+    });
+
+    test('#1093: a live 18:58 start labels 20:00 then 22:00 after the 19:00 end tick', async () => {
+      // Codex plan review 2026-11-17: the old n-based parity labelled 21:00 and 23:00 instead.
+      mockSleep({ night: live('2026-08-30 13:30:00', { display_start: '2026-08-30 08:58:00' }) });
+      const { container, unmount } = mount();
+      await screen.findByRole('tab', { name: /Wake-ups/ });
+      expect(tickLabels(container)).toEqual(['8p', '10p']);
+      unmount();
+      // Finished nights retain the old n % every labels across aligned, offset and overnight windows.
+      for (const [start, end, expected] of [
+        ['2026-08-30 09:00:00', '2026-08-30 13:00:00', ['7p', '9p', '11p']],
+        ['2026-08-30 08:30:00', '2026-08-30 13:30:00', ['7p', '9p', '11p']],
+        ['2026-08-30 09:00:00', '2026-08-30 21:00:00', ['7p', '9p', '11p', '1a', '3a', '5a', '7a']],
+      ]) {
+        mockSleep({ night: { ...NIGHT, display_start: start, display_end: end } });
+        const finished = mount();
+        await screen.findByRole('tab', { name: /Wake-ups/ });
+        expect(tickLabels(finished.container)).toEqual(expected);
+        finished.unmount();
+      }
     });
 
     test('the left end follows the bar when it starts before the configured window', async () => {
@@ -675,6 +696,22 @@ describe('timeline legend and night-event tabs', () => {
     fireEvent.mouseMove(container.querySelector('.sleep-tl__barwrap'), { clientX: 200 });
     expect(container.querySelector('.sleep-tl__tip')).not.toBeNull();
     expect(timelineDrawingSegments).not.toHaveBeenCalled();
+  });
+
+  test('#1093: the hover bubble clamps at both bar ends while the cursor keeps the actual percentage', async () => {
+    // Codex plan review 2026-11-17: jsdom checks inline positions; a browser must verify the actual 320px geometry.
+    mockSleep({ night: NIGHT });
+    const { container } = mount();
+    await screen.findByRole('tab', { name: /Wake-ups/ });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function rect() {
+      const width = this.classList.contains('sleep-tl__tip') ? 120 : 272;
+      return { left: 0, right: width, top: 0, bottom: 30, width, height: 30, x: 0, y: 0, toJSON() {} };
+    });
+    for (const [x, left, pct] of [[0, '60px', '0%'], [136, '136px', '50%'], [272, '212px', '100%']]) {
+      fireEvent.mouseMove(container.querySelector('.sleep-tl__barwrap'), { clientX: x });
+      await waitFor(() => expect(container.querySelector('.sleep-tl__tip').style.left).toBe(left));
+      expect(container.querySelector('.sleep-tl__cursor').style.left).toBe(pct);
+    }
   });
 
   test('a new night chooses its own default instead of retaining the previous tab', async () => {
