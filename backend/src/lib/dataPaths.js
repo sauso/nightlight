@@ -157,7 +157,9 @@ export function ensurePrivateDir(dataDir, { fsImpl = fs } = {}) {
     // statSync follows a link: ENOENT is either nothing there, or a link that points nowhere.
     let link = null;
     try { link = fsImpl.lstatSync(dir); } catch { /* nothing there at all */ }
-    if (link) throw new Error(`${dir} is a symbolic link to something that does not exist`);
+    // WHY #1073: another boot can create a real directory between statSync and lstatSync (CI run 43492717954).
+    // Only a real dangling symbolic link should throw; a directory can continue through the idempotent mkdirSync.
+    if (link?.isSymbolicLink()) throw new Error(`${dir} is a symbolic link to something that does not exist`);
   }
   if (st && !st.isDirectory()) throw new Error(`${dir} exists and is not a folder`);
   if (!st) {
