@@ -28,8 +28,23 @@ trap cleanup EXIT INT TERM
 docker run --rm -v "$WORK:/out" -v "$HERE:/w:ro" --entrypoint sh "$IMAGE" /w/make-loop.sh /out/loop.mp4
 cp "$HERE/fakecam.yml" "$HERE/prepare.mjs" "$HERE/start.sh" "$WORK/"
 
+# The seed gives the fictional child a 19:00-07:00 sleep window in the seed's zone, and the child page only reads
+# "Last night" (which capture.mjs waits for) when that window is NOT open. Run in the small hours UTC and the card
+# says "Tonight" instead, so the capture timed out (2026-11-17, 02:20 UTC). When the clock is near or inside the
+# window, seed in a fixed-offset zone where it is about midday; otherwise keep UTC, the default install's zone.
+# Etc/GMT zones are signed backwards: Etc/GMT-10 is UTC+10.
+UTC_HOUR=$(date -u +%H | sed 's/^0//')
+if [ "$UTC_HOUR" -ge 9 ] && [ "$UTC_HOUR" -le 16 ]; then
+  WALK_TZ=UTC
+else
+  OFFSET=$(( (12 - UTC_HOUR + 24) % 24 ))                  # hours to add to UTC to reach about 12:00
+  [ "$OFFSET" -le 12 ] || OFFSET=$(( OFFSET - 24 ))
+  if [ "$OFFSET" -gt 0 ]; then WALK_TZ="Etc/GMT-$OFFSET"; elif [ "$OFFSET" -lt 0 ]; then WALK_TZ="Etc/GMT+$(( -OFFSET ))"; else WALK_TZ=UTC; fi
+fi
+echo "walkthrough seed zone: $WALK_TZ (UTC hour $UTC_HOUR)"
+
 start() { # name host-port extra-env
-  docker run -d --name "$1" -p "$2:4000" -e PUID=0 -e PGID=0 -e TZ=UTC $3 \
+  docker run -d --name "$1" -p "$2:4000" -e PUID=0 -e PGID=0 -e TZ=UTC -e WALKTHROUGH_TZ="$WALK_TZ" $3 \
     --tmpfs /app/data -v "$WORK:/app/demo:ro" "$IMAGE" sh /app/demo/start.sh >/dev/null
 }
 start "$SEEDED" 4101 ""
