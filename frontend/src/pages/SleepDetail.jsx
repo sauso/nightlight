@@ -1038,13 +1038,15 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
 
   useLayoutEffect(() => {
     if (!hover || !tipRef.current || !barRef.current) return;
-    const barWidth = barRef.current.getBoundingClientRect().width;
+    const width = barRef.current.getBoundingClientRect().width;
     const tipWidth = tipRef.current.getBoundingClientRect().width;
-    if (!barWidth || !tipWidth) return;
+    if (!width || !tipWidth) return;
     // #1093, Codex plan review 2026-11-17: clamp the bubble's centre, while the cursor keeps the true minute.
-    const half = Math.min(tipWidth, barWidth) / 2;
-    setTipLeft(Math.max(half, Math.min(barWidth - half, barWidth * hover.pct / 100)));
-  }, [hover]);
+    const half = Math.min(tipWidth, width) / 2;
+    setTipLeft(Math.max(half, Math.min(width - half, width * hover.pct / 100)));
+    // `barWidth` (the ResizeObserver's state, above) is a dependency so a bar that narrows while a bubble is open
+    // re-clamps it (Codex code review of #1154, P2) instead of leaving the old pixel position.
+  }, [hover, barWidth]);
 
   // A night still running: the bar is drawn from the start to NOW (display_end is clipped to the analysed minutes), so the
   // window's configured end (7 am) is not where the bar ends. The owner saw "7:00 pm ... 7:00 am" under a bar that stopped at
