@@ -615,7 +615,8 @@ router.post('/setup', setupLimiter, asyncHandler(async (req, res) => {
   // Refuse before the costly hash, but preserve the existing completed-setup answer above.
   if (refuseExposedLoopbackSetup(req, res)) return;
   const { username, password, first_name, last_name } = req.body || {};
-  if (!username || !password || password.length < 8) {
+  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.
+  if (!username || typeof password !== 'string' || password.length < 8) {
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
   }
   if (refusedUnusablePassword(res, password)) return;
@@ -852,7 +853,8 @@ router.post('/users', requireAuth, requireAdmin, asyncHandler(async (req, res) =
   // turned into an invite. Everything below is the password path, unchanged.
   if (req.body?.invite === true) return createInvitedUser(req, res);
   const { username, password, role, first_name, last_name } = req.body || {};
-  if (!username || !password || password.length < 8) {
+  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.
+  if (!username || typeof password !== 'string' || password.length < 8) {
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
   }
   if (refusedUnusablePassword(res, password)) return;
@@ -911,7 +913,8 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
     const taken = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username, req.params.id);
     if (taken) return res.status(400).json({ error: 'That username is already taken' });
   }
-  if (password !== undefined && password !== '' && password.length < 8) {
+  // As in PUT /me/password (#1093/#1095), refuse a non-text body with this 400 before hashing or writing.
+  if (password !== undefined && (typeof password !== 'string' || (password !== '' && password.length < 8))) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
   }
   if (refusedUnusablePassword(res, password)) return;
@@ -922,8 +925,7 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
     return res.status(400).json({ error: PENDING_CANNOT_BE_ADMIN });
   }
 
-  // (`newHash ?? await` only reaches the await for a non-string truthy password, where bcrypt throws as
-  // it always did, before any write.)
+  // Every nonempty password has a precomputed newHash after validation; the await fallback is unreachable.
   const password_hash = password ? (newHash ?? (await passwordHash.hash(password, 10))) : existing.password_hash;
   let photo;
   try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }

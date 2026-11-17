@@ -1,5 +1,32 @@
 [
   {
+    "label": "#hygiene password text /setup",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const { username, password, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || typeof password !== 'string' || password.length < 8) {",
+    "replace": "  const { username, password, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || !password || password.length < 8) {",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#hygiene password text /setup: malformed values"
+  },
+  {
+    "label": "#hygiene password text POST /users",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || typeof password !== 'string' || password.length < 8) {",
+    "replace": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || !password || password.length < 8) {",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#hygiene password text POST /users: malformed values"
+  },
+  {
+    "label": "#hygiene password text PUT /users/:id",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (password !== undefined && (typeof password !== 'string' || (password !== '' && password.length < 8))) {",
+    "replace": "  if (password !== undefined && password !== '' && password.length < 8) {",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#hygiene password text PUT /users/:id: malformed values"
+  },
+  {
     "label": "#978 Serve counted for any name",
     "file": "backend/src/routes/tailscale.js",
     "find": "address === `${remote.dns_name}:443` &&",
@@ -3913,8 +3940,8 @@
   {
     "label": "#E2 M5: POST /users accepts a sub-8-character password",
     "file": "backend/src/routes/auth.js",
-    "find": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  if (!username || !password || password.length < 8) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
-    "replace": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  if (!username || !password) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
+    "find": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || typeof password !== 'string' || password.length < 8) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
+    "replace": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || typeof password !== 'string') {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
     "expect": "killed",
     "tests": [
       "auth-routes-branches.test.js"
