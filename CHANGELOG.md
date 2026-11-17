@@ -11,12 +11,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- Session lists now include each session's `user_id`, and the Users screen matches sessions to accounts by that id (#1093).
 - The Sleep & room temperature card now compares wake-ups per watched hour, shows the cooler and warmer night counts, and withholds a directional pattern if the shown averages are equal or leaving out one night weakens the correlation or reverses the groups' direction (#365). It still uses stored detector wake totals; a pattern does not establish a cause.
 - The Docker image now runs Node 26 during the #751 staging soak. Node 24 stays supported in CI and `.nvmrc` until the soak ends; releases from dev to main are on hold during it.
 - **Routine dependency updates, no behaviour change intended.** Backend: `ws` 8.22.2 → 8.23.0 (the WebSocket library behind two-way talk), `onvif` 0.8.3 → 0.8.5 (camera discovery and motion events), `firebase-admin` 14.5.0 → 14.5.1 (push alerts), `express-rate-limit` 8.7.3 → 8.7.4. Web app: `lucide-react` 1.70.0 → 1.72.0 (icons). Build and test tooling (not part of the image): `vite` 8.3.6 → 8.3.8, `@vitejs/plugin-react` 6.2.1 → 6.3.0, `@testing-library/user-event` 14.6.8 → 14.6.10.
 
 ### Fixed
 
+- Changing a password now returns a validation error for malformed password fields instead of a server error (#1093).
 - Two copies of the server starting together on a fresh data folder no longer fail with a false "symbolic link" error (#1073).
 - The child page camera row now says "Status unknown" or "Connecting" instead of "Offline" when a camera is not known to be down (#1077), and focus returns to the user's row after signing out a session (#1093).
 - The Recordings card now reaches manual recordings older than the newest 50 with **Show older recordings** (#1112). Deleting one keeps the older rows already loaded.

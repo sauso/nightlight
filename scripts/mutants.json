@@ -19124,6 +19124,33 @@
     "note": "api.js clears the token and shows the sign-in form on ANY 401, so this status turns a typo into a sign-out. The find carries the comment line above it since the review of #720: the race loser's line now has the same 400 text."
   },
   {
+    "label": "#1093 malformed current password reaches the password guess check",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (typeof current_password !== 'string') {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#1093 malformed password fields return their existing 400s"
+  },
+  {
+    "label": "#1093 session list omits the stable owner id",
+    "file": "backend/src/routes/auth.js",
+    "find": "    user_id: s.user_id,",
+    "replace": "    user_id: undefined,",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#1093 own and admin session lists carry the owner user_id on every row"
+  },
+  {
+    "label": "#1093 Users sessions join by username again",
+    "file": "frontend/src/pages/SettingsUsers.jsx",
+    "find": "            const sessions = allSessions.filter((s) => s.user_id === u.id);",
+    "replace": "            const sessions = allSessions.filter((s) => s.username === u.username);",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "#1093 sessions follow user_id across a rename race and username collision"
+  },
+  {
     "label": "#697 /me/mfa/disable: a wrong password answers 401 again (signs the person out)",
     "file": "backend/src/routes/auth.js",
     "find": "return res.status(400).json({ error: 'Password is incorrect' });",

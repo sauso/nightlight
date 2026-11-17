@@ -123,13 +123,29 @@ describe('the caregiver list', () => {
     // ⚠️ These timestamps are what the API actually sends: SQLite datetimes with NO timezone marker,
     // which the component reads as UTC by appending 'Z'. Built as offsets from now so they cannot rot.
     const agoIso = (ms) => new Date(Date.now() - ms).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-    // Two accounts' sessions, the first account with TWO so its count is not 1. The API names the owner by
-    // `username` only (no user id), which is what the page joins on.
+    // #1093, Codex plan review 2026-11-17: two accounts' sessions, with two for the first owner.
+    // The API carries the stable owner id alongside its existing username.
     const SESSIONS = [
-      { id: 's1', username: 'nacho', device: 'Chrome on Windows', is_current: true, last_seen_at: agoIso(30 * 1000) },
-      { id: 's2', username: 'nanny', device: 'Safari on iPhone', is_current: false, last_seen_at: agoIso(3 * 3600 * 1000) },
-      { id: 's3', username: 'nacho', device: 'Firefox on Linux', is_current: false, last_seen_at: agoIso(2 * 24 * 3600 * 1000) },
+      { id: 's1', user_id: ME.id, username: 'nacho', device: 'Chrome on Windows', is_current: true, last_seen_at: agoIso(30 * 1000) },
+      { id: 's2', user_id: NANNY.id, username: 'nanny', device: 'Safari on iPhone', is_current: false, last_seen_at: agoIso(3 * 3600 * 1000) },
+      { id: 's3', user_id: ME.id, username: 'nacho', device: 'Firefox on Linux', is_current: false, last_seen_at: agoIso(2 * 24 * 3600 * 1000) },
     ];
+
+    test('#1093 sessions follow user_id across a rename race and username collision', async () => {
+      // #1093, Codex plan review 2026-11-17: stale and colliding usernames must not move a session to another row.
+      const renamedUsers = [{ ...ME, username: 'renamed' }, NANNY];
+      const staleSessions = [
+        { ...SESSIONS[0], username: 'nacho' },
+        { ...SESSIONS[1], username: 'renamed' },
+      ];
+      mockApi({ users: renamedUsers, sessions: staleSessions });
+      const { user } = mountList();
+      await user.click(await waitForToggle('Nacho Leone'));
+      expect(screen.getByText('Chrome on Windows (this device)')).toBeVisible();
+      expect(screen.getByText('Safari on iPhone')).not.toBeVisible();
+      await user.click(await waitForToggle('Nanny McPhee'));
+      expect(screen.getByText('Safari on iPhone')).toBeVisible();
+    });
 
     // The down arrow of an account, found by its accessible name (the count is part of it).
     const toggleFor = (name) => screen.getByRole('button', { name: new RegExp(`^Show sessions for ${name}, \\d+ active$`) });

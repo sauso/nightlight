@@ -23,12 +23,13 @@ import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { useTempDataDir, cleanupTempDataDirs, mountRouter, call, makeSession, signToken } from './helpers/harness.js';
+import { useTempDataDir, cleanupTempDataDirs, mountRouter, mountRouterTrustingProxy, call, makeSession, signToken } from './helpers/harness.js';
 
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
 const { default: authRouter } = await import('../src/routes/auth.js');
+const { passwordWorkerStats } = await import('../src/lib/passwordHash.js');
 const { generateSecret, keyUri, generateBackupCodes } = await import('../src/lib/mfa.js');
 // The app verifies with otplib v13's verifySync; generate with the SAME library so the fixture cannot
 // drift from the implementation it is testing.
@@ -225,6 +226,52 @@ describe('PUT /me/password — the CURRENT password is required', () => {
   // MUTANTS THIS KILLS: deleting the current-password check (anyone holding a token could change the
   // password); not re-hashing; not revoking other sessions.
   const login = async () => (await post('/login', { username: 'alice', password: PASSWORD })).body.token;
+
+  test('#1093 malformed password fields return their existing 400s without reaching the hash worker', async () => {
+    const token = await login();
+    // #1093, Codex plan review 2026-11-17 (#1095 review): malformed CURRENT values are not guesses.
+    // An array NEW value can be long enough for the old length test yet still cannot be hashed.
+    for (const current_password of [[], {}, 42, null]) {
+      const before = passwordWorkerStats().submitted;
+      const res = await put('/me/password', { current_password, new_password: 'a-new-long-password' }, token);
+      assert.equal(res.status, 400);
+      assert.deepEqual(res.body, { error: 'Current password is incorrect' });
+      assert.equal(passwordWorkerStats().submitted, before, 'malformed current password reached the worker');
+    }
+    const before = passwordWorkerStats().submitted;
+    const res = await put('/me/password', { current_password: PASSWORD, new_password: Array(8).fill('a') }, token);
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { error: 'New password must be at least 8 characters' });
+    assert.equal(passwordWorkerStats().submitted, before, 'malformed new password reached the worker');
+  });
+
+  test('#1093 malformed current password spends the action limiter but no password guess', async () => {
+    // #1093, Codex plan review 2026-11-17: same-source malformed calls hit the 20-request route budget.
+    // Fresh source addresses then prove those calls did not consume the 30-guess account throttle.
+    const proxyServer = await mountRouterTrustingProxy('/api/auth', authRouter);
+    try {
+      db.prepare('INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)')
+        .run('u-malformed', 'malformed', bcrypt.hashSync(PASSWORD, 4), 'caregiver');
+      const sid = makeSession(db, 'u-malformed');
+      const token = signToken({ id: 'u-malformed', username: 'malformed', role: 'caregiver', sid });
+      const request = (current_password, source) => call(`${proxyServer.url}/api/auth/me/password`, {
+        method: 'PUT', token, body: { current_password, new_password: 'a-new-long-password' },
+        headers: { 'x-forwarded-for': source },
+      });
+      for (let i = 0; i < 20; i++) {
+        const res = await request([], '198.51.100.1');
+        assert.equal(res.status, 400, `malformed request ${i + 1} was refused early by the action limiter`);
+      }
+      assert.equal((await request([], '198.51.100.1')).status, 429, 'the action limiter did not count malformed requests');
+      for (let i = 0; i < 30; i++) {
+        const res = await request('wrong', `198.51.100.${i + 2}`);
+        assert.equal(res.status, 400, `password guess ${i + 1} was charged for malformed input`);
+      }
+      assert.equal((await request('wrong', '198.51.100.40')).status, 429, 'the account guess throttle did not engage');
+    } finally {
+      await proxyServer.close();
+    }
+  });
 
   test('★ a wrong current password is refused, and the stored hash is unchanged', async () => {
     const token = await login();
@@ -549,12 +596,35 @@ const loginAs = async (u) => {
 };
 
 describe('sessions — you see and revoke your own; an admin sees everyone', () => {
+  test('#1093 own and admin session lists carry the owner user_id on every row', async () => {
+    // #1093, Codex plan review 2026-11-17: one account can have multiple sessions; assert per row.
+    makeCaregiver();
+    const adminToken = await loginAs('alice');
+    await loginAs('alice');
+    const caregiverToken = await loginAs('carol');
+    const own = await call(`${server.url}/api/auth/sessions`, { token: adminToken });
+    assert.equal(own.status, 200);
+    assert.equal(own.body.length, 2);
+    assert.ok(own.body.every((s) => s.user_id === 'u-admin'));
+    const all = await call(`${server.url}/api/auth/sessions/all`, { token: adminToken });
+    assert.equal(all.status, 200);
+    assert.equal(all.body.length, 3);
+    const ownerBySession = new Map([
+      ...sessionsFor('u-admin').map((s) => [s.id, 'u-admin']),
+      ...sessionsFor('u-care').map((s) => [s.id, 'u-care']),
+    ]);
+    assert.ok(all.body.every((s) => s.user_id === ownerBySession.get(s.id)));
+    assert.ok(all.body.some((s) => s.id === jwt.decode(caregiverToken).sid && s.user_id === 'u-care'));
+  });
+
   test('GET /sessions returns only your own, and marks the current one', async () => {
     const token = await loginAs('alice');
     await post('/login', { username: 'alice', password: PASSWORD }); // a second device
     const res = await call(`${server.url}/api/auth/sessions`, { token });
     assert.equal(res.status, 200);
     assert.equal(res.body.length, 2);
+    // #1093, Codex plan review 2026-11-17: the response is one row per session, including two for this owner.
+    assert.ok(res.body.every((s) => s.user_id === 'u-admin'));
     assert.equal(res.body.filter((s) => s.is_current).length, 1, 'exactly one session must be marked current');
     assert.equal(res.body.find((s) => s.is_current).id, jwt.decode(token).sid);
   });
@@ -566,9 +636,16 @@ describe('sessions — you see and revoke your own; an admin sees everyone', () 
   });
 
   test('an admin can, and it names the account each belongs to', async () => {
+    makeCaregiver();
+    await loginAs('carol');
+    await loginAs('alice'); // two rows for the same owner
     const res = await call(`${server.url}/api/auth/sessions/all`, { token: await loginAs('alice') });
     assert.equal(res.status, 200);
     assert.ok(res.body.some((s) => s.username === 'alice'));
+    // #1093, Codex plan review 2026-11-17: check every row, including the duplicate owner's sessions.
+    assert.equal(res.body.length, 3);
+    assert.equal(res.body.filter((s) => s.user_id === 'u-admin').length, 2);
+    assert.ok(res.body.every((s) => s.user_id === (s.username === 'alice' ? 'u-admin' : 'u-care')));
   });
 
   test('★ a caregiver cannot revoke somebody else’s session', async () => {
