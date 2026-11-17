@@ -1794,6 +1794,35 @@ describe('★ the temperature insight with too few nights in a group (#365)', ()
   });
 });
 
+describe('#365 temperature hints sensitive to one night', () => {
+  const half = (nights, avg_wakes) => ({ nights, avg_temp: 20, avg_wakes, avg_asleep_minutes: 600 });
+  for (const direction of ['more', 'fewer']) {
+    test(`unstable ${direction} shows the exact hint and evidence without comparison columns`, async () => {
+      mockSleep({ insights: {
+        status: 'ok', nights_analyzed: 21, verdict: 'unstable', direction,
+        cooler: half(10, 2), warmer: half(10, direction === 'more' ? 4 : 1),
+        overall: { avg_humidity: null },
+      } });
+      mount();
+      const body = await screen.findByText(new RegExp(`There is a hint that warmer nights go with ${direction} wake-ups`));
+      const card = body.closest('.sleep-insight');
+      expect(body.textContent).toContain('but it does not hold up if a single night is left out, so it is not reported as a pattern yet.');
+      expect(card.querySelector('.sleep-insight__cmp')).toBeNull();
+      expect(within(card).getByText('Based on 21 tracked nights (10 cooler, 10 warmer).')).toBeTruthy();
+    });
+  }
+
+  test('a directional headline shows both group counts in the footer', async () => {
+    mockSleep({ insights: {
+      status: 'ok', nights_analyzed: 21, verdict: 'warm_more_wakes',
+      cooler: half(10, 2), warmer: half(10, 4), overall: { avg_humidity: null },
+    } });
+    mount();
+    const card = (await screen.findByText(/Warmer nights tend to mean more wake-ups/)).closest('.sleep-insight');
+    expect(within(card).getByText(/Based on 21 tracked nights \(10 cooler, 10 warmer\)\./)).toBeTruthy();
+  });
+});
+
 // --- #907: the saved frame of a bed transition, from a Room activity row ------------------------------------------
 //
 // Pictures here are never real photographs. The viewer is only ever pointed at a URL; jsdom does not load images, so

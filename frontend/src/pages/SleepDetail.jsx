@@ -1320,6 +1320,20 @@ function SleepInsights({ childId, tempUnit, childName }) {
     );
   }
 
+  // Owner decision 2026-11-17 (#365, Codex plan review): a single-night-sensitive hint is not
+  // a headline. The server supplies its direction; showing averages here would imply a firm result.
+  if (ins.verdict === 'unstable') {
+    return (
+      <div className="card sleep-insight">
+        <div className="sleep-insight__title"><Sparkles size={15} aria-hidden="true" /> Sleep &amp; room temperature</div>
+        <div className="sleep-insight__body">
+          There is a hint that warmer nights go with {ins.direction === 'fewer' ? 'fewer' : 'more'} wake-ups for {name}, but it does not hold up if a single night is left out, so it is not reported as a pattern yet.
+        </div>
+        <div className="sleep-insight__foot">Based on {ins.nights_analyzed} tracked nights ({cool?.nights ?? 0} cooler, {warm?.nights ?? 0} warmer).</div>
+      </div>
+    );
+  }
+
   let headline;
   if (ins.verdict === 'warm_more_wakes') headline = `Warmer nights tend to mean more wake-ups for ${name}.`;
   else if (ins.verdict === 'warm_fewer_wakes') headline = `Warmer nights actually saw fewer wake-ups for ${name}.`;
@@ -1347,7 +1361,7 @@ function SleepInsights({ childId, tempUnit, childName }) {
         </div>
       )}
       <div className="sleep-insight__foot">
-        Based on {ins.nights_analyzed} tracked nights{ins.overall?.avg_humidity != null ? ` · ${ins.overall.avg_humidity}% avg humidity` : ''}.
+        Based on {ins.nights_analyzed} tracked nights ({cool?.nights ?? 0} cooler, {warm?.nights ?? 0} warmer).{ins.overall?.avg_humidity != null ? ` ${ins.overall.avg_humidity}% avg humidity.` : ''}
         A pattern, not a cause — lots of things affect sleep.
       </div>
     </div>
