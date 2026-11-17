@@ -65,6 +65,10 @@ export function keyUri(username, secret, issuer = 'Nightlight') {
 // reported is the one the code belongs to (otplib's `timeStep`), not the server's current one, so a
 // code from the previous step is recorded as that earlier step and cannot be used after a later one.
 export function matchTokenStep(secret, token) {
+  // Input hygiene: String() accepted an array around a real code; other types now miss like a missing
+  // code, with the same counted failure, status and message at the caller. No behaviour change for strings.
+  if (typeof token !== 'string') return null;
+  // Kept as its own line, exactly as before: the #563 catalogue entry pins that removing it is equivalent.
   if (!secret || !token) return null;
   try {
     const r = verifySync({
@@ -109,7 +113,10 @@ export async function generateBackupCodes(count = BACKUP_CODE_COUNT) {
   return { codes, hashesJson: JSON.stringify(hashes) };
 }
 
-const normalizeCode = (code) => String(code || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// Input hygiene: String() accepted an array around a real backup code (and numbers matching numeric codes).
+// Other types now miss like a missing code: same counted failure, status and message at the caller.
+// No behaviour change for strings, including punctuation, spacing and case.
+const normalizeCode = (code) => (typeof code === 'string' ? code : '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // Check a submitted backup code against the stored hashes. On a match, that hash is consumed
 // (removed) so the code can't be reused. Returns { ok, hashesJson } — hashesJson is the updated

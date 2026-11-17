@@ -208,6 +208,13 @@ test('★ keyUri never throws for an awkward username or app name: usernames are
 
 // --- matchTokenStep (#550: what the replay check keys on) -------------------------------------
 
+test('#hygiene text credentials: matchTokenStep refuses an array around a current code', () => {
+  const secret = mfa.generateSecret();
+  const code = otplib.generateSync({ secret });
+  assert.notEqual(mfa.matchTokenStep(secret, code), null);
+  assert.equal(mfa.matchTokenStep(secret, [code]), null);
+});
+
 test('matchTokenStep returns the step the code belongs to, and null for a wrong or empty code', () => {
   const secret = mfa.generateSecret();
   const now = Math.floor(Date.now() / 1000);
@@ -235,6 +242,15 @@ test('★ matchTokenStep gives a step for a LEGACY 80-bit secret too', () => {
 });
 
 // --- backup codes -----------------------------------------------------------------------------
+
+test('#hygiene text credentials: array-wrapped valid backup code is not consumed', async () => {
+  const { codes, hashesJson } = await mfa.generateBackupCodes(1);
+  const wrapped = await mfa.verifyAndConsumeBackupCode(hashesJson, [codes[0]]);
+  assert.deepEqual(wrapped, { ok: false });
+  const text = await mfa.verifyAndConsumeBackupCode(hashesJson, codes[0]);
+  assert.equal(text.ok, true, 'the refused array must leave the code available');
+  assert.equal(mfa.backupCodesRemaining(text.hashesJson), 0);
+});
 
 test('generateBackupCodes returns display codes plus a hashed JSON blob', async () => {
   const { codes, hashesJson } = await mfa.generateBackupCodes();

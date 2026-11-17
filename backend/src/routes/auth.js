@@ -102,6 +102,10 @@ function usernameKey(req) {
   return typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
 }
 
+function textOrEmpty(value) {
+  return typeof value === 'string' ? value : '';
+}
+
 // /login/mfa only: the account is inside its short-lived MFA token. DECODED, not verified — this
 // only needs to produce a stable bucket, while the route itself verifies the token before checking a
 // code. A forged token cannot buy guesses at the real code: a valid token always carries the same id,
@@ -694,10 +698,13 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   // its placeholder hash, same cost) and counted the same way, so it answers exactly like a wrong password. Its
   // placeholder is a hash of 32 random bytes nobody knows and can never match; this guard is what holds if the stored
   // hash is ever one somebody knows (an older version set a password, a database edited by hand).
+  // Input hygiene: String() also accepted an array around the real password or a number matching a numeric
+  // password. Other types now miss like a missing field: same compare cost, counted failure, status and message.
+  // No behaviour change for strings.
   const attempt = await throttledPasswordCheck(
     loginThrottle,
     loginAccountKey(username),
-    async () => (await passwordHash.compare(String(password || ''), hashToCheck)) && !!user && user.password_set === 1,
+    async () => (await passwordHash.compare(textOrEmpty(password), hashToCheck)) && !!user && user.password_set === 1,
     { known: !!user }
   );
   if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
@@ -1125,10 +1132,13 @@ router.post('/me/mfa/setup', requireAuth, sessionActionLimiter, asyncHandler(asy
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });
   // The same compare /me/mfa/disable uses (the worker-thread bcrypt of #548), under the same per-account throttle.
+  // Input hygiene: String() also accepted an array around the real password or a number matching a numeric
+  // password. Other types now miss like a missing field: same compare cost, counted failure, status and message.
+  // No behaviour change for strings.
   const attempt = await throttledPasswordCheck(
     sessionThrottle,
     req.user.id,
-    () => passwordHash.compare(String(req.body?.password || ''), user.password_hash)
+    () => passwordHash.compare(textOrEmpty(req.body?.password), user.password_hash)
   );
   if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
   if (!attempt.ok) {
@@ -1268,10 +1278,13 @@ router.post('/me/mfa/enable', requireAuth, mfaEnableUserLimiter, asyncHandler(as
 router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {
   const { password } = req.body || {};
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  // Input hygiene: String() also accepted an array around the real password or a number matching a numeric
+  // password. Other types now miss like a missing field: same compare cost, counted failure, status and message.
+  // No behaviour change for strings.
   const attempt = await throttledPasswordCheck(
     sessionThrottle,
     req.user.id,
-    async () => !!user && (await passwordHash.compare(String(password || ''), user.password_hash))
+    async () => !!user && (await passwordHash.compare(textOrEmpty(password), user.password_hash))
   );
   if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
   if (!attempt.ok) {
