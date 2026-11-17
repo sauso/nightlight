@@ -18592,8 +18592,8 @@
   {
     "label": "#548 login: synchronous compare back on the request path",
     "file": "backend/src/routes/auth.js",
-    "find": "(await passwordHash.compare(String(password || ''), hashToCheck)) && !!user",
-    "replace": "bcrypt.compareSync(String(password || ''), hashToCheck) && !!user",
+    "find": "(await passwordHash.compare(textOrEmpty(password), hashToCheck)) && !!user",
+    "replace": "bcrypt.compareSync(textOrEmpty(password), hashToCheck) && !!user",
     "expect": "killed",
     "tests": [
       "mfa-replay-and-async-bcrypt.test.js"
@@ -22218,11 +22218,56 @@
   {
     "label": "#765 mfa setup skips the password (a borrowed session can start, plant or read a secret)",
     "file": "backend/src/routes/auth.js",
-    "find": "() => passwordHash.compare(String(req.body?.password || ''), user.password_hash)",
+    "find": "() => passwordHash.compare(textOrEmpty(req.body?.password), user.password_hash)",
     "replace": "() => true",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "a first start without the right password"
+  },
+  {
+    "label": "#hygiene text credentials login refuses an array-wrapped password",
+    "file": "backend/src/routes/auth.js",
+    "find": "passwordHash.compare(textOrEmpty(password), hashToCheck)",
+    "replace": "passwordHash.compare(String(password || ''), hashToCheck)",
+    "expect": "killed",
+    "tests": ["login-account-throttle.test.js"],
+    "namePattern": "array around the real password misses"
+  },
+  {
+    "label": "#hygiene text credentials setup refuses an array-wrapped password",
+    "file": "backend/src/routes/auth.js",
+    "find": "passwordHash.compare(textOrEmpty(req.body?.password), user.password_hash)",
+    "replace": "passwordHash.compare(String(req.body?.password || ''), user.password_hash)",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "array-wrapped real password cannot start"
+  },
+  {
+    "label": "#hygiene text credentials disable refuses an array-wrapped password",
+    "file": "backend/src/routes/auth.js",
+    "find": "passwordHash.compare(textOrEmpty(password), user.password_hash)",
+    "replace": "passwordHash.compare(String(password || ''), user.password_hash)",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "array-wrapped real password is refused"
+  },
+  {
+    "label": "#hygiene text credentials TOTP refuses an array-wrapped code",
+    "file": "backend/src/lib/mfa.js",
+    "find": "  if (typeof token !== 'string') return null;",
+    "replace": "  /* hygiene mutant: text-only guard removed */",
+    "expect": "killed",
+    "tests": ["mfa.test.js", "mfa-replay-and-async-bcrypt.test.js"],
+    "namePattern": "matchTokenStep refuses an array|/login/mfa refuses an array"
+  },
+  {
+    "label": "#hygiene text credentials backup code refuses an array-wrapped code",
+    "file": "backend/src/lib/mfa.js",
+    "find": "(typeof code === 'string' ? code : '').toLowerCase().replace(/[^a-z0-9]/g, '')",
+    "replace": "String(code || '').toLowerCase().replace(/[^a-z0-9]/g, '')",
+    "expect": "killed",
+    "tests": ["mfa.test.js", "mfa-replay-and-async-bcrypt.test.js"],
+    "namePattern": "array-wrapped valid backup code is not consumed|/login/mfa refuses an array around a valid backup code"
   },
   {
     "label": "#765 a password change keeps a pending two-factor set-up",
@@ -26350,8 +26395,8 @@
   {
     "label": "#1094 invite: /login skips the compare for a pending account (a timing tell)",
     "file": "backend/src/routes/auth.js",
-    "find": "async () => (await passwordHash.compare(String(password || ''), hashToCheck))",
-    "replace": "async () => (user?.password_set === 0 ? false : await passwordHash.compare(String(password || ''), hashToCheck))",
+    "find": "async () => (await passwordHash.compare(textOrEmpty(password), hashToCheck))",
+    "replace": "async () => (user?.password_set === 0 ? false : await passwordHash.compare(textOrEmpty(password), hashToCheck))",
     "expect": "killed",
     "tests": ["auth-invite.test.js"],
     "namePattern": "even with the password its stored hash really matches",

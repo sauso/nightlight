@@ -71,6 +71,50 @@ async function tally(count, attempt) {
 }
 
 describe('POST /login: a guesser who changes address on every request is held to the free guesses', () => {
+  test('#hygiene text credentials: an array around the real password misses and spends one guess like wrong text', async () => {
+    makeUser(db, { id: 'u-c', username: 'carol', role: 'caregiver', password: 'correct-horse-1' });
+    resetPasswordThrottles('u-c', 'carol');
+    const wrapped = await login('carol', ['correct-horse-1']);
+    assert.equal(wrapped.status, 401);
+    assert.deepEqual(wrapped.body, { error: WRONG });
+    assert.equal(wrapped.body.token, undefined);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').get('u-c').n, 0);
+    const baseline = await login('alice', 'wrong');
+    assert.equal(baseline.status, 401);
+    assert.deepEqual(baseline.body, wrapped.body);
+    for (let i = 0; i < FREE_FAILURES - 1; i += 1) {
+      assert.equal((await login('carol', 'wrong')).status, 401);
+      assert.equal((await login('alice', 'wrong')).status, 401);
+    }
+    assert.equal((await login('carol', 'correct-horse-1')).status, 429, 'wrapped password did not spend a guess');
+    assert.equal((await login('alice', 'correct-horse')).status, 429, 'wrong text did not spend the same guess');
+  });
+
+  test('#hygiene text credentials: a number equal to a stored numeric password misses; text still signs in', async () => {
+    makeUser(db, { id: 'u-c', username: 'carol', role: 'caregiver', password: '12345678' });
+    resetPasswordThrottles('u-c', 'carol');
+    const number = await login('carol', 12345678);
+    assert.equal(number.status, 401);
+    assert.deepEqual(number.body, { error: WRONG });
+    assert.equal(number.body.token, undefined);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').get('u-c').n, 0);
+    for (let i = 0; i < FREE_FAILURES - 1; i += 1) assert.equal((await login('carol', 'wrong')).status, 401);
+    assert.equal((await login('carol', '12345678')).status, 429, 'the numeric miss did not spend a guess');
+    resetPasswordThrottles('u-c', 'carol');
+    const text = await login('carol', '12345678');
+    assert.equal(text.status, 200);
+    assert.ok(text.body.token);
+  });
+
+  test('guard: object, null and boolean passwords miss like missing input', async () => {
+    for (const password of [{}, null, true, undefined]) {
+      const res = await login('alice', password);
+      assert.equal(res.status, 401);
+      assert.deepEqual(res.body, { error: WRONG });
+      assert.equal(res.body.token, undefined);
+    }
+  });
+
   test('★ THE FIX: 40 guesses, each from a new address, 30 are checked and the rest are refused', async () => {
     // Without the throttle every one of the 40 reaches the password check (a fresh `ip|account` bucket each time).
     const seen = await tally(40, () => login('alice'));

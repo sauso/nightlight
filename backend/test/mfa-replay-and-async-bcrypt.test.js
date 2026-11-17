@@ -92,6 +92,33 @@ async function whileHandlerAwaitsBcrypt(send, meanwhile) {
 }
 
 describe('#550 a TOTP code cannot be replayed', () => {
+  test('#hygiene text credentials: /login/mfa refuses an array around a valid current code without a session', async () => {
+    const secret = mfaUser('text-code');
+    const code = codeAtOffset(secret);
+    const wrapped = await post('/login/mfa', { mfaToken: mfaToken('text-code'), code: [code] });
+    assert.equal(wrapped.status, 401);
+    assert.deepEqual(wrapped.body, { error: 'Incorrect code' });
+    assert.equal(wrapped.body.token, undefined);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').get('text-code').n, 0);
+    const text = await post('/login/mfa', { mfaToken: mfaToken('text-code'), code });
+    assert.equal(text.status, 200, 'the code must be valid as text');
+    assert.ok(text.body.token);
+  });
+
+  test('#hygiene text credentials: /login/mfa refuses an array around a valid backup code without consuming it', async () => {
+    const { codes, hashesJson } = await generateBackupCodes(1);
+    mfaUser('text-backup', { backupHashes: hashesJson });
+    const wrapped = await post('/login/mfa', { mfaToken: mfaToken('text-backup'), code: [codes[0]] });
+    assert.equal(wrapped.status, 401);
+    assert.deepEqual(wrapped.body, { error: 'Incorrect code' });
+    assert.equal(wrapped.body.token, undefined);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').get('text-backup').n, 0);
+    assert.equal(db.prepare('SELECT mfa_backup_codes AS codes FROM users WHERE id = ?').get('text-backup').codes, hashesJson);
+    const text = await post('/login/mfa', { mfaToken: mfaToken('text-backup'), code: codes[0] });
+    assert.equal(text.status, 200, 'the refused array must leave the backup code available');
+    assert.ok(text.body.token);
+    assert.equal(db.prepare('SELECT mfa_backup_codes AS codes FROM users WHERE id = ?').get('text-backup').codes, '[]');
+  });
   // FAILS ON OLD CODE: before this change a second submission of the same code returned 200 (the issue
   // reproduced [true, true, true]). Proven by running this file against the pre-change routes/auth.js.
   test('★ the same code is accepted once and refused the second time, with the wrong-code response', async () => {

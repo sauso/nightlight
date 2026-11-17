@@ -479,6 +479,18 @@ describe('#697 a wrong confirmation password does not look like a dead sign-in',
 describe('POST /me/mfa/disable — the password is required', () => {
   // MUTANT THIS KILLS: dropping the password check, so anyone holding a token can strip the second
   // factor off the account it belongs to.
+  test('#hygiene text credentials: array-wrapped real password is refused and leaves MFA on', async () => {
+    const token = signToken({ id: 'u-mfa', username: 'bob', role: 'caregiver', sid: makeSession(db, 'u-mfa') });
+    const wrong = await post('/me/mfa/disable', { password: 'wrong' }, token);
+    const before = db.prepare('SELECT mfa_enabled, mfa_secret, mfa_backup_codes FROM users WHERE id = ?').get('u-mfa');
+    const wrapped = await post('/me/mfa/disable', { password: [PASSWORD] }, token);
+    assert.equal(wrapped.status, 400);
+    assert.deepEqual(wrapped.body, wrong.body);
+    assert.deepEqual(wrapped.body, { error: 'Password is incorrect' });
+    assert.deepEqual(db.prepare('SELECT mfa_enabled, mfa_secret, mfa_backup_codes FROM users WHERE id = ?').get('u-mfa'), before);
+    const text = await post('/me/mfa/disable', { password: PASSWORD }, token);
+    assert.equal(text.status, 200, 'the string password must still disable MFA');
+  });
   test('★ a wrong password leaves MFA enabled', async () => {
     const { body } = await post('/login', { username: 'bob', password: PASSWORD });
     const token = (await post('/login/mfa', { mfaToken: body.mfaToken, code: totp(mfaSecret) })).body.token;
