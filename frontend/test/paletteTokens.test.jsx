@@ -451,7 +451,7 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
   // from color-mix(... var(--night-tint) ...) is "invalid at computed-value time" and the WHOLE background becomes transparent:
   // white text on the page colour. @supports is decided at parse time, so an engine without color-mix skips the block and keeps
   // the plain gradient. jsdom cannot show this, so the stylesheet text is what is checked.
-  test('★ every color-mix on the night card sits inside an @supports (color-mix) block; the plain .night rule has none', () => {
+  test('★ every variable-backed color-mix stays inside @supports; the plain .night rule has none', () => {
     expect(tintBlocks.length, 'an @supports block that tests color-mix exists').toBeGreaterThan(0);
     for (const block of tintBlocks) expect(block.condition, 'it tests a background with color-mix').toMatch(/background:\s*color-mix\(/);
     expect(tintPaint, 'the paint rule was found INSIDE the block').toContain('color-mix');
@@ -460,6 +460,10 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     const outside = outsideSupports.split('}').map((rule) => rule.replace(/\s+/g, ' ').trim());
     const offenders = outside.filter((rule) => /^\.night(--|\s|\{|$)/.test(rule) && /color-mix|--night-tint/.test(rule));
     expect(offenders, `night-card tint outside @supports: ${offenders.join(' | ')}`).toEqual([]);
+    // #1093, Codex plan review 2026-11-17: include the other variable-backed mixes in this existing audit.
+    // A legacy WebView can accept var() at parse time then discard its entire paint at computed-value time.
+    const unguarded = outside.filter((rule) => /color-mix\([^;]*var\(/.test(rule));
+    expect(unguarded, `unguarded variable-backed color-mix: ${unguarded.join(' | ')}`).toEqual([]);
     expect(nightRule).toMatch(/background: linear-gradient\(165deg, #[0-9a-f]{6} 0%, #[0-9a-f]{6} 100%\)/i);
     // The base background declaration holds no var() at all: it must stay valid on an engine that cannot compute the tint.
     expect(nightRule.match(/(?:^|[ ;{])background:[^;]*;/)?.[0], 'the plain card background').not.toContain('var(');

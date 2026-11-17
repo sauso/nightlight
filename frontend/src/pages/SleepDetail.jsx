@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { Calendar, SlidersHorizontal, ChevronDown, Moon, DoorOpen, Sunrise, Thermometer, Sparkles, Zap, AudioLines, Play, Video, HeartPulse, Wind } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -969,7 +969,9 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
   // Hover bubble: as the cursor (or a finger) moves across the bar, show the time under it, the sleep
   // status at that moment, and — if the room had a sensor — the temperature then. `null` = not hovering.
   const barRef = useRef(null);
+  const tipRef = useRef(null);
   const [hover, setHover] = useState(null);
+  const [tipLeft, setTipLeft] = useState(null);
   const [barWidth, setBarWidth] = useState(0);
   // The side gaps need actual screen space. Eight pixels leaves a visible block after both 2px gaps;
   // it is a drawing threshold, unrelated to the minutes used for sleep analysis.
@@ -1034,6 +1036,18 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
     setHover({ pct: f * 100, time: fmtMs(ms), status: labelFor(stateAt(ms)), temp: tempAt(ms), hr: vitalAt(ms, 'hr'), rr: vitalAt(ms, 'rr') });
   }
 
+  useLayoutEffect(() => {
+    if (!hover || !tipRef.current || !barRef.current) return;
+    const width = barRef.current.getBoundingClientRect().width;
+    const tipWidth = tipRef.current.getBoundingClientRect().width;
+    if (!width || !tipWidth) return;
+    // #1093, Codex plan review 2026-11-17: clamp the bubble's centre, while the cursor keeps the true minute.
+    const half = Math.min(tipWidth, width) / 2;
+    setTipLeft(Math.max(half, Math.min(width - half, width * hover.pct / 100)));
+    // `barWidth` (the ResizeObserver's state, above) is a dependency so a bar that narrows while a bubble is open
+    // re-clamps it (Codex code review of #1154, P2) instead of leaving the old pixel position.
+  }, [hover, barWidth]);
+
   // A night still running: the bar is drawn from the start to NOW (display_end is clipped to the analysed minutes), so the
   // window's configured end (7 am) is not where the bar ends. The owner saw "7:00 pm ... 7:00 am" under a bar that stopped at
   // 8:31 pm (2026-11-14). Finished nights are left exactly as they were.
@@ -1047,11 +1061,12 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
     // directly above "7:00 pm" read as a repeat.
     const every = live && totalMs <= 4 * 3600000 ? 1 : 2;
     let ms = Math.ceil(startMs / 3600000) * 3600000;
-    let n = 0;
-    for (; ms <= endMs; ms += 3600000, n++) {
+    let eligible = 0;
+    for (; ms <= endMs; ms += 3600000) {
       const pct = ((ms - startMs) / totalMs) * 100;
       const onEnd = live && (pct < 1 || pct > 99);
-      out.push({ pct, label: n % every === 0 && !onEnd ? shortHour(ms, tz) : null });
+      // #1093, Codex plan review 2026-11-17: skipped end ticks do not consume label parity.
+      out.push({ pct, label: !onEnd && eligible++ % every === 0 ? shortHour(ms, tz) : null });
     }
     return out;
   }, [startMs, endMs, totalMs, tz, live]);
@@ -1114,7 +1129,7 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
           {nowPct != null && <span className="sleep-tl__now" style={{ left: `${nowPct}%` }} title="as of now" />}
         </div>
         {hover && (
-          <div className="sleep-tl__tip" style={{ left: `${hover.pct}%` }} aria-hidden="true">
+          <div className="sleep-tl__tip" ref={tipRef} style={{ left: tipLeft == null ? `${hover.pct}%` : `${tipLeft}px` }} aria-hidden="true">
             <span className="sleep-tl__tip-time">{hover.time}</span>
             <span className="sleep-tl__tip-status">{hover.status}</span>
             {hover.temp && <span className="sleep-tl__tip-temp"><Thermometer size={11} aria-hidden="true" />{hover.temp}</span>}

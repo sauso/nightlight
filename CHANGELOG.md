@@ -19,6 +19,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ### Fixed
 
 - Changing a password now returns a validation error for malformed password fields instead of a server error (#1093).
+- Sleep timeline labels now start at the first interior hour on live nights; hover details stay inside the bar, account names wrap on narrow screens, child camera status dots align with the first line, older browsers keep colour fallbacks, and invite errors are announced (#1093).
 - Two copies of the server starting together on a fresh data folder no longer fail with a false "symbolic link" error (#1073).
 - The child page camera row now says "Status unknown" or "Connecting" instead of "Offline" when a camera is not known to be down (#1077), and focus returns to the user's row after signing out a session (#1093).
 - The Recordings card now reaches manual recordings older than the newest 50 with **Show older recordings** (#1112). Deleting one keeps the older rows already loaded.
