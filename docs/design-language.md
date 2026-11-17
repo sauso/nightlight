@@ -1040,6 +1040,7 @@ under the Timeline (`components/TimelapseCard.jsx`, see "Timelapse card" under t
    **not a live picture**: no stream is opened by opening the page. There is no "Cameras · n" heading and no Online/Offline pill or
    PTZ/TALK badges (the Cameras tab shows ONVIF, PTZ and Two-way Audio badges). Instead, one quiet muted line under the camera's name, **for every role**, says whether detection is on in words: "Motion on · Sound on", or "Motion off" / "Sound off" for what is off (from the camera's `detect_motion_enabled` and `detect_sound_enabled`; owner decision, 2026-11-13: the first version had no such line, so a caregiver could not tell). It is left out on a disabled camera and on a camera object that carries neither field. A child with no camera gets a plain card with the existing
    "No cameras assigned yet" sentence (the admin and caregiver wordings differ, as before).
+   A camera whose status check timed out reads **Status unknown**, and one that is starting reads **Connecting**, instead of **Offline** (#1077).
 2. **Recent alerts** (`components/AlertList.jsx`, `.alert-list`): the newest **three**, each row 56px or more: a 56 × 40 thumbnail,
    the kind (icon and word, "Motion" or "Sound") and under it the **clock time** in the home timezone ("3:12 AM"; an earlier day
    adds "Wed, 11 Nov, "; the zone label appears when the device is elsewhere, as on every time in the app). A row **with a clip**

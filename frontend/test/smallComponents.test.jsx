@@ -132,6 +132,25 @@ describe('ChildCameraTile', () => {
     expect(c.container.querySelector('.child-cam__sr')).toBeNull();
   });
 
+  test('#1077 a timed-out check reads Status unknown with a connecting dot, never Offline', () => {
+    // Codex plan review 2026-11-17: a timeout does not establish that the camera is down.
+    const { container } = render(<ChildCameraTile cam={{ ...CAM, statusLevel: 'offline', statusUnknown: true }} onWatch={vi.fn()} />);
+    expect(container.querySelector('.child-cam')).toHaveClass('child-cam--connecting');
+    expect(container.querySelector('.child-cam')).not.toHaveClass('child-cam--offline');
+    expect(screen.getByText('· Status unknown')).toBeInTheDocument();
+    expect(screen.queryByText(/Offline/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeInTheDocument();
+  });
+
+  test('#1077 a starting camera reads Connecting with a connecting dot', () => {
+    // Codex plan review 2026-11-17: the child row follows the Cameras tab's status words.
+    const { container } = render(<ChildCameraTile cam={{ ...CAM, statusLevel: 'connecting' }} onWatch={vi.fn()} />);
+    expect(container.querySelector('.child-cam')).toHaveClass('child-cam--connecting');
+    expect(screen.getByText('· Connecting')).toBeInTheDocument();
+    expect(screen.queryByText(/Offline/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeInTheDocument();
+  });
+
   // The Live tab hides disabled cameras (LiveMonitor filters them out), so "Watch live" there would open a page without this camera.
   test('★ a disabled camera is not offered "Watch live"; an online and an offline one are', () => {
     const a = render(<ChildCameraTile cam={{ ...CAM, disabled: 1 }} onWatch={vi.fn()} />);

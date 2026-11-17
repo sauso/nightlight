@@ -1445,7 +1445,8 @@ body.in-pip .tile-menu-backdrop {
    BOTH themes, like a camera picture and like the night card above it, so its text colours are literals that do not follow the
    theme: chip text #eef0ff on the tile's gradient is 14:1 or more, and the action's dark label on #8995ff is 6.71:1 (the same pair
    as the night card's primary action). The status dot colours are marks, not text, and each is also said in words in the chip
-   (never colour alone): online #5fd08f, offline #e0556b (the REC badge's red), disabled #b9bdf0. They are brighter than --live and
+   (never colour alone): online #5fd08f, connecting/unknown #8995ff (#1077, Codex plan review 2026-11-17),
+   offline #e0556b (the REC badge's red), disabled #b9bdf0. They are brighter than --live and
    --offline because those two are tuned for a light card and read dim on this ground. */
 .child-cam {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 64px; padding: 10px 6px 10px 16px;
@@ -1453,6 +1454,7 @@ body.in-pip .tile-menu-backdrop {
   background: linear-gradient(165deg, var(--thumb-hi) 0%, var(--thumb-lo) 100%);
 }
 .child-cam--online { --cam-dot: #5fd08f; }
+.child-cam--connecting { --cam-dot: #8995ff; }
 .child-cam--offline { --cam-dot: #e0556b; }
 .child-cam--disabled { --cam-dot: #b9bdf0; }
 /* The name and the detection line, stacked, taking the room the buttons leave. It WRAPS rather than truncating the line (phone

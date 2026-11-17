@@ -19,7 +19,7 @@
 // child's name, birthday, colour and photo: tracking and the window are shown disabled and left out of
 // their save, and Add / Remove child are admin-only. Both roles are exercised wherever the screen differs.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAs, renderAsAdmin, ADMIN, CAREGIVER } from './helpers/render.jsx';
 import ChildSettings from '../src/pages/ChildSettings.jsx';
@@ -761,6 +761,23 @@ describe('removing a child', () => {
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/children/kid-1'));
     await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
     expect(await screen.findByText('at /children')).toBeTruthy();
+  });
+
+  test('#1093 Remove and Cancel stay disabled while deleting a child', async () => {
+    // Codex plan review 2026-11-17: keep DELETE pending so the in-flight state is observable.
+    let rejectDelete;
+    delSpy.mockImplementation(() => new Promise((_resolve, reject) => { rejectDelete = reject; }));
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    const removing = await within(dialog).findByRole('button', { name: 'Removing…' });
+    await waitFor(() => expect(removing).toBeDisabled());
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(delSpy).toHaveBeenCalledWith('/children/kid-1');
+    await act(async () => { rejectDelete(new Error('Delete refused')); });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeEnabled());
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled();
   });
 
   test('cancelling closes the dialog and deletes nothing', async () => {
