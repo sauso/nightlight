@@ -535,6 +535,8 @@ const everySession = db.prepare(
 function toPublicSession(s, currentSessionId) {
   return {
     id: s.id,
+    // #1093, Codex plan review 2026-11-17: both list queries already select sessions.user_id; expose it for a stable Users join.
+    user_id: s.user_id,
     device: describeDevice(s.user_agent),
     created_at: s.created_at,
     last_seen_at: s.last_seen_at,
@@ -999,12 +1001,18 @@ router.put('/me', requireAuth, (req, res) => {
 // current one - unlike the admin reset above, this doesn't skip verification.
 router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {
   const { current_password, new_password } = req.body || {};
-  if (!new_password || new_password.length < 8) {
+  // #1093, Codex plan review 2026-11-17: an array can pass the length check and reach the hash worker (#1095 review).
+  // Keep this inside the handler: sessionActionLimiter must still count malformed requests.
+  if (typeof new_password !== 'string' || new_password.length < 8) {
     return res.status(400).json({ error: 'New password must be at least 8 characters' });
   }
-  // Before the current password is checked, so an unusable NEW password costs no guess. (An unusable CURRENT one
-  // needs nothing here: compare() answers false, the same 400 as a wrong one.)
+  // #1093, Codex plan review 2026-11-17: reject an unusable NEW password before spending a password guess.
   if (refusedUnusablePassword(res, new_password)) return;
+  // #1093, Codex plan review 2026-11-17 (#1095 review): non-string CURRENT input is malformed, not a guess.
+  // It gets the existing wrong-password 400 without entering sessionThrottle or the hash worker.
+  if (typeof current_password !== 'string') {
+    return res.status(400).json({ error: 'Current password is incorrect' });
+  }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   const attempt = await throttledPasswordCheck(
     sessionThrottle,

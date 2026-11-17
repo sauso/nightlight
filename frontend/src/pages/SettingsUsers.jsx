@@ -61,8 +61,8 @@ export default function SettingsUsers() {
     try {
       // Both reads are issued together and both states are set together. Two sequential awaits rendered the
       // rows first WITHOUT their arrows and then shifted every row that has sessions when the second reply
-      // arrived (a layout jump), and a rename landing between the two reads left the join on username empty
-      // for that account until the next load.
+      // arrived (a layout jump). #1093, Codex plan review 2026-11-17: joining by user id also keeps
+      // a rename between these reads from detaching that account's sessions.
       const [nextUsers, nextSessions] = await Promise.all([
         api.get('/auth/users'),
         api.get('/auth/sessions/all'),
@@ -116,10 +116,8 @@ export default function SettingsUsers() {
           <h2 className="card-heading">Accounts</h2>
           {users.map((u) => {
             const open = () => navigate(`/settings/users/${u.id}`);
-            // GET /auth/sessions/all returns `username` on each session but no user id (toPublicSession in
-            // routes/auth.js), and usernames are unique logins, so that is the join key. The backend is
-            // deliberately left as it is.
-            const sessions = allSessions.filter((s) => s.username === u.username);
+            // #1093, Codex plan review 2026-11-17: the stable owner id survives a rename between API reads.
+            const sessions = allSessions.filter((s) => s.user_id === u.id);
             const isOpen = expanded.has(u.id);
             const panelId = `user-sessions-${u.id}`;
             const pill = invitePill(u, (d) => day(d, { month: 'short', day: 'numeric' }));
