@@ -1031,7 +1031,7 @@ under the Timeline (`components/TimelapseCard.jsx`, see "Timelapse card" under t
    tall, 18px radius, the dark navy gradient from `--thumb-hi`/`--thumb-lo` in both themes). It used to be a 192px tile with a large
    empty bed icon where a picture would be; this tile never has a picture, so that space was always empty and pushed the page
    down (owner, staging phone 2026-11-13). The row holds, left to right, a status chip (a dot and the camera's name; offline and
-   disabled add " · Offline" / " · Disabled" in words, so the colour is never the only signal; online adds visually hidden
+   disabled add " · Offline" / " · Disabled" in words (a starting or unknown-status camera adds " · Connecting" / " · Status unknown", never red), so the colour is never the only signal; online adds visually hidden
    "(online)" only) with the detection line under it, **Watch live** (44px, `#8995ff` with `#14142a` text, the night card's action
    pair), which goes to the Live tab, and the gear. If a preview image is ever added it goes above the row at 16:9 and only when
    an image exists. It is **not offered on a
