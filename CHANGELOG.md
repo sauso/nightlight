@@ -18,6 +18,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- Creating the first admin, creating an account and changing an account's password now answer 400 (not 500) when the password is not text.
 - Sign-in, two-factor and password-confirmation fields now accept only text; a field of another type is treated as a wrong value, like a missing one.
 - Changing a password now returns a validation error for malformed password fields instead of a server error (#1093).
 - Sleep timeline labels now start at the first interior hour on live nights; hover details stay inside the bar, account names wrap on narrow screens, child camera status dots align with the first line, older browsers keep colour fallbacks, and invite errors are announced (#1093).

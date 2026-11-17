@@ -544,6 +544,23 @@ describe('POST /setup — only before there is an account', () => {
     assert.equal(res.status, 400);
     assert.equal(db.prepare('SELECT COUNT(*) c FROM users').get().c, 0);
   });
+
+  test('#hygiene password text /setup: malformed values get the short-password 400 and leave setup open', async () => {
+    db.prepare('DELETE FROM users').run();
+    const error = { error: 'Username and an 8+ character password are required' };
+    for (const password of [Array(8).fill('x'), 12345678, { value: 'long-enough' }]) {
+      const before = passwordWorkerStats().submitted;
+      const res = await post('/setup', { username: 'first', password });
+      assert.equal(res.status, 400, `${JSON.stringify(password)} returned ${res.status}`);
+      assert.deepEqual(res.body, error);
+      assert.equal(passwordWorkerStats().submitted, before, 'malformed password reached the hash worker');
+      assert.equal(db.prepare('SELECT COUNT(*) c FROM users').get().c, 0);
+      assert.equal(db.prepare('SELECT COUNT(*) c FROM sessions').get().c, 0);
+    }
+    const valid = await post('/setup', { username: 'first', password: 'a-long-enough-password' });
+    assert.equal(valid.status, 200, JSON.stringify(valid.body));
+    assert.ok(bcrypt.compareSync('a-long-enough-password', db.prepare('SELECT password_hash FROM users WHERE username = ?').get('first').password_hash));
+  });
 });
 
 describe('★★ no response ever carries a secret column', () => {
@@ -750,6 +767,22 @@ describe('user management is admin-only', () => {
     assert.doesNotMatch(JSON.stringify(res.body), /\$2[aby]\$/, 'the response returned a bcrypt hash');
   });
 
+  test('#hygiene password text POST /users: malformed values get the short-password 400 without creating an account', async () => {
+    const token = await loginAs('alice');
+    const error = { error: 'Username and an 8+ character password are required' };
+    for (const password of [Array(8).fill('x'), 12345678, { value: 'long-enough' }]) {
+      const before = passwordWorkerStats().submitted;
+      const res = await post('/users', { username: 'new-account', password }, token);
+      assert.equal(res.status, 400, `${JSON.stringify(password)} returned ${res.status}`);
+      assert.deepEqual(res.body, error);
+      assert.equal(passwordWorkerStats().submitted, before, 'malformed password reached the hash worker');
+      assert.equal(db.prepare('SELECT 1 FROM users WHERE username = ?').get('new-account'), undefined);
+    }
+    const valid = await post('/users', { username: 'new-account', password: 'a-long-enough-password' }, token);
+    assert.equal(valid.status, 201, JSON.stringify(valid.body));
+    assert.ok(bcrypt.compareSync('a-long-enough-password', db.prepare('SELECT password_hash FROM users WHERE username = ?').get('new-account').password_hash));
+  });
+
   test('an unknown role cannot be smuggled in — anything but "admin" is a caregiver', async () => {
     const token = await loginAs('alice');
     await post('/users', { username: 'eve', password: 'a-long-enough-pw', role: 'superuser' }, token);
@@ -904,6 +937,31 @@ describe('gaps found by review — the success paths nobody reached', () => {
     // None of those may have changed anything.
     const row = db.prepare('SELECT username FROM users WHERE id = ?').get('u-mfa');
     assert.equal(row.username, 'bob');
+  });
+
+  test('#hygiene password text PUT /users/:id: malformed values get the short-password 400 without changing account state', async () => {
+    const token = await admin();
+    const otherSid = makeSession(db, 'u-mfa');
+    db.prepare('INSERT INTO push_tokens (token, user_id, session_id, platform) VALUES (?,?,?,?)')
+      .run('tok-malformed-target', 'u-mfa', otherSid, 'android');
+    const beforeRow = db.prepare('SELECT * FROM users WHERE id = ?').get('u-mfa');
+    const beforeSessions = sessionsFor('u-mfa');
+    const beforeTokens = db.prepare('SELECT * FROM push_tokens WHERE user_id = ?').all('u-mfa');
+    for (const password of [Array(8).fill('x'), 12345678, { value: 'long-enough' }, null]) {
+      const beforeHashes = passwordWorkerStats().submitted;
+      const res = await put('/users/u-mfa', { password, first_name: 'Changed', role: 'admin' }, token);
+      assert.equal(res.status, 400, `${JSON.stringify(password)} returned ${res.status}`);
+      assert.deepEqual(res.body, { error: 'Password must be at least 8 characters' });
+      assert.equal(passwordWorkerStats().submitted, beforeHashes, 'malformed password reached the hash worker');
+      assert.deepEqual(db.prepare('SELECT * FROM users WHERE id = ?').get('u-mfa'), beforeRow);
+      assert.deepEqual(sessionsFor('u-mfa'), beforeSessions);
+      assert.deepEqual(db.prepare('SELECT * FROM push_tokens WHERE user_id = ?').all('u-mfa'), beforeTokens);
+    }
+    const valid = await put('/users/u-mfa', { password: 'a-brand-new-password', first_name: 'Changed' }, token);
+    assert.equal(valid.status, 200, JSON.stringify(valid.body));
+    const changed = db.prepare('SELECT first_name, password_hash FROM users WHERE id = ?').get('u-mfa');
+    assert.equal(changed.first_name, 'Changed');
+    assert.ok(bcrypt.compareSync('a-brand-new-password', changed.password_hash));
   });
 
   test('★ an admin cannot delete their OWN account', async () => {
