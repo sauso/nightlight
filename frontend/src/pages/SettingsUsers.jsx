@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, ChevronRight, ChevronDown } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -54,6 +54,8 @@ export default function SettingsUsers() {
   // starts (the sessions are a look-up, not the point of the screen). Keyed by user id so a reload
   // after a sign-out keeps the panel the admin is working in open.
   const [expanded, setExpanded] = useState(() => new Set());
+  const [pendingFocusUserId, setPendingFocusUserId] = useState(null);
+  const rowOpenRefs = useRef(new Map());
 
   async function load() {
     try {
@@ -67,12 +69,22 @@ export default function SettingsUsers() {
       ]);
       setUsers(nextUsers);
       setAllSessions(nextSessions);
+      return true;
     } catch (err) {
       setError(err.message);
+      return false;
     }
   }
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (pendingFocusUserId === null) return;
+    // #1093, Codex plan review 2026-11-17: the deleted button (and sometimes its arrow) unmounts after reload.
+    // Focus the same user's open control after render, then clear the key so a later sign-out can focus it again.
+    rowOpenRefs.current.get(pendingFocusUserId)?.focus();
+    setPendingFocusUserId(null);
+  }, [pendingFocusUserId]);
 
   const displayName = (u) => [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username;
 
@@ -84,11 +96,11 @@ export default function SettingsUsers() {
     });
   }
 
-  async function terminateSession(s) {
+  async function terminateSession(s, userId) {
     try {
       await api.del(`/auth/sessions/${s.id}`);
       if (s.is_current) { logout(); return; }
-      await load();
+      if (await load()) setPendingFocusUserId(userId);
     } catch (err) {
       setError(err.message);
     }
@@ -118,6 +130,7 @@ export default function SettingsUsers() {
                 <div className="user-row__line">
                   <div
                     className="user-row__open"
+                    ref={(node) => { if (node) rowOpenRefs.current.set(u.id, node); else rowOpenRefs.current.delete(u.id); }}
                     role="button"
                     tabIndex={0}
                     onClick={open}
@@ -156,7 +169,7 @@ export default function SettingsUsers() {
                           <div className="list-row__title">{s.device}{s.is_current ? ' (this device)' : ''}</div>
                           <div className="camera-tile__sub">Active {timeAgo(s.last_seen_at)}</div>
                         </div>
-                        <button type="button" className="icon-btn" onClick={() => terminateSession(s)}>Sign out</button>
+                        <button type="button" className="icon-btn" onClick={() => terminateSession(s, u.id)}>Sign out</button>
                       </div>
                     ))}
                   </div>

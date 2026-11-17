@@ -37,7 +37,7 @@ let delSpy;
 function mockApi({ users = USERS, sessions = [], usersFails = null } = {}) {
   vi.spyOn(api, 'get').mockImplementation((path) => {
     if (path === '/auth/users') return usersFails ? Promise.reject(new Error(usersFails)) : Promise.resolve(users);
-    if (path === '/auth/sessions/all') return Promise.resolve(sessions);
+    if (path === '/auth/sessions/all') return Promise.resolve(typeof sessions === 'function' ? sessions() : sessions);
     return Promise.resolve(null);
   });
   postSpy = vi.spyOn(api, 'post').mockResolvedValue({});
@@ -317,6 +317,38 @@ describe('the caregiver list', () => {
       await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/auth/sessions/s2'));
       expect(auth.logout).not.toHaveBeenCalled();
       await waitFor(() => expect(api.get).toHaveBeenCalledTimes(4)); // the initial pair, then the reload
+    });
+
+    test('#1093 signing out a last session returns focus to that user row after its arrow disappears', async () => {
+      // Codex plan review 2026-11-17: the reload must actually remove the clicked button and its arrow.
+      let remaining = [...SESSIONS];
+      mockApi({ sessions: () => remaining });
+      delSpy.mockImplementation(async (path) => { remaining = remaining.filter((s) => path !== `/auth/sessions/${s.id}`); });
+      const { user } = mountList();
+      const row = await sessionRow(user, 'Nanny McPhee', 'Safari on iPhone');
+      const signOut = within(row).getByRole('button', { name: 'Sign out' });
+      await user.click(signOut);
+      await waitFor(() => expect(signOut).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByRole('button', { name: /Show sessions for Nanny McPhee/ })).not.toBeInTheDocument());
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByText('Nanny McPhee').closest('.user-row__open')));
+    });
+
+    test('#1093 a second sign-out on the same user returns focus again', async () => {
+      // Codex plan review 2026-11-17: a pending key left set would make the second focus effect a no-op.
+      const extra = { ...SESSIONS[1], id: 's4', device: 'Second device' };
+      let remaining = [...SESSIONS, extra];
+      mockApi({ sessions: () => remaining });
+      delSpy.mockImplementation(async (path) => { remaining = remaining.filter((s) => path !== `/auth/sessions/${s.id}`); });
+      const { user } = mountList();
+      const first = await sessionRow(user, 'Nanny McPhee', 'Safari on iPhone');
+      const openControl = screen.getByText('Nanny McPhee').closest('.user-row__open');
+      await user.click(within(first).getByRole('button', { name: 'Sign out' }));
+      await waitFor(() => expect(first).not.toBeInTheDocument());
+      await waitFor(() => expect(document.activeElement).toBe(openControl));
+      const second = screen.getByText('Second device').closest('.list-row');
+      await user.click(within(second).getByRole('button', { name: 'Sign out' }));
+      await waitFor(() => expect(second).not.toBeInTheDocument());
+      await waitFor(() => expect(document.activeElement).toBe(openControl));
     });
 
     test('★ signing out your OWN session logs you out locally instead of reloading', async () => {
