@@ -20,9 +20,9 @@ beforeEach(() => {
 });
 after(() => { db.close(); fs.rmSync(temp, { recursive: true, force: true }); });
 
-function event(rel = 'cam/clip.mp4') {
+function event(rel = 'cam/clip.mp4', type = 'sound') {
   const id = db.prepare(`INSERT INTO detection_events
-    (camera_id, camera_name, type, clip_status, clip_path) VALUES ('cam', 'Test', 'sound', 'ready', ?)`).run(rel).lastInsertRowid;
+    (camera_id, camera_name, type, clip_status, clip_path) VALUES ('cam', 'Test', ?, 'ready', ?)`).run(type, rel).lastInsertRowid;
   return Number(id);
 }
 const file = () => path.join(CLIPS_DIR, 'cam', 'clip.mp4');
@@ -63,6 +63,26 @@ test('#1159: a ready jailed clip gets a label; off and escaped paths write nothi
   const escaped = event('../outside.mp4');
   await classifier.classify(escaped);
   assert.equal(db.prepare('SELECT audio_label FROM detection_events WHERE id = ?').get(escaped).audio_label, null);
+  await classifier.stop();
+});
+
+test('#1159: a motion alert clip is not analysed and takes no queue slot', async () => {
+  fs.writeFileSync(file(), 'clip');
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const scored = [];
+  const classifier = createAudioClassifier({ decoder: async () => new Float32Array([0]), maxWaiting: 1,
+    scorer: async () => { scored.push(1); await gate; return { label: 'cry', score: 0.9 }; } });
+  const running = classifier.classify(event());
+  const waitingId = event();
+  const waiting = classifier.classify(waitingId);
+  const motionId = event('cam/clip.mp4', 'motion');
+  await classifier.classify(motionId); // resolves at once: not queued, and it did not push the waiting sound clip out
+  assert.equal(db.prepare('SELECT audio_label FROM detection_events WHERE id = ?').get(motionId).audio_label, null);
+  release();
+  await Promise.all([running, waiting]);
+  assert.equal(db.prepare('SELECT audio_label FROM detection_events WHERE id = ?').get(waitingId).audio_label, 'cry');
+  assert.equal(scored.length, 2);
   await classifier.stop();
 });
 

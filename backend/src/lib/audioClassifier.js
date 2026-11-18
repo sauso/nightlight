@@ -117,6 +117,10 @@ export function createAudioClassifier({ decoder = decodeAlertClip, scorer, maxWa
   }
   return {
     classify: (eventId) => new Promise((resolve) => {
+      // A motion or other alert can also carry a clip (detect_record_clips). Its audio feeds neither the sleep rule nor
+      // a badge (sound alerts only), and it must not take one of the 8 waiting slots a sound clip would then lose
+      // (code review of #1160).
+      if (db.prepare('SELECT type FROM detection_events WHERE id = ?').get(eventId)?.type !== 'sound') return resolve();
       if (queue.length >= maxWaiting) { queue.shift().resolve(); logger.error('[audio] queue full; oldest alert dropped'); }
       queue.push({ eventId, resolve });
       void run();

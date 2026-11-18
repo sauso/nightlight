@@ -24930,7 +24930,7 @@
   {
     "label": "#904 the never-empty rule removed: a discounted still night becomes `empty` (and loses its frames)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound) {",
     "replace": "    if (true) {",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
@@ -24948,8 +24948,8 @@
   {
     "label": "#904 the never-empty rule counts the whole window instead of the measured span: an evening-only fault blocks `empty`",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
-    "replace": "    if (discountedIn(preMin, totalMin) === 0) {",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound) {",
+    "replace": "    if (discountedIn(preMin, totalMin) === 0 && !unwitnessedSound) {",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
     "namePattern": "discounted minutes all lie before its onset"
@@ -24966,8 +24966,8 @@
   {
     "label": "#904 the metrics extension classifies without the minute index: the fault's post-window sound is awake again",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "        const rowActive = isActiveRow(r, i);",
-    "replace": "        const rowActive = isActiveRow(r);",
+    "find": "        const rowActive = isActiveRow(r, i) &&",
+    "replace": "        const rowActive = isActiveRow(r) &&",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
     "namePattern": "qualifies only through the post-window minutes"
@@ -26784,7 +26784,7 @@
     "replace": "export const AUDIO_LABEL_MIN_SCORE = 0;",
     "expect": "killed",
     "tests": ["audioClassifier.test.js"],
-    "namePattern": "#1159: each label includes"
+    "namePattern": "#1159: cry and cough include"
   },
   {
     "label": "#1159 extension ignores sound witness",

@@ -194,6 +194,24 @@ test('#1159: sound just across and wholly after the window edge uses the same wi
   }
 });
 
+test('#1159: a cry-labelled alert still counts post-window sound', (t) => {
+  laySamples(at(19, 30), at(7, 15, 1), [[at(22, 0), at(22, 6)], [at(7, 12, 1), at(7, 15, 1)]], STILL_OCCUPIED);
+  laySamples(at(7, 15, 1), at(7, 40, 1), [], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 15, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+  const baseline = computeNight(CHILD, DATE);
+  assert.equal(hhmm(baseline.wake_at), '07:15', 'precondition: the metrics pass extends past the window');
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(7, 3, 1)), sqlTime(at(7, 8, 1)));
+  cryAlert(at(7, 5, 1, 43)); // Within two minutes of all five sound minutes in the extension.
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.wake_at), '07:15');
+  assert.equal(night.awake_minutes, baseline.awake_minutes + 5);
+  assert.equal(night.asleep_minutes, baseline.asleep_minutes - 5);
+  assert.equal(night.wake_count, baseline.wake_count + 1);
+});
+
 test('#1159: a watched still night with sustained sound remains ok, not empty', () => {
   laySamples(at(19, 30), at(7, 0, 1), [], STILL_EMPTY);
   db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
