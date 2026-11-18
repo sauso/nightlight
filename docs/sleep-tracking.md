@@ -280,8 +280,8 @@ those are averaged rather than combined.
 
 Across the night it builds a per-minute movement + sound timeline from
 the child's main camera: falling still for a sustained stretch reads as falling asleep,
-sustained movement or noise reads as an awakening (brief stirs don't count; a microphone that looks
-faulty is the one exception, see [A microphone that looks faulty](#a-microphone-that-looks-faulty)). On a completed
+sustained movement or witnessed noise reads as an awakening (brief stirs don't count; a microphone that looks
+faulty is handled separately, see [A microphone that looks faulty](#a-microphone-that-looks-faulty)). On a completed
 night, a short recorded exit-and-return can also count as an awakening even when it's too brief
 to show up as sustained movement on its own — as long as the bed is confirmed quiet in between
 and later bed movement supports the return. This only applies to trips of one to twenty minutes,
@@ -347,15 +347,24 @@ child settles.
   discarded false put-down came first. That is still later, and closer to the truth, than the false
   put-down it replaces.
 
-### Noise on its own doesn't delay bedtime
+### When sound counts as awake
 
-A bedroom microphone hears the whole house, and
-bedtime is usually its loudest hour — a sibling being settled, a TV, adults talking. So when
-working out **when your child fell asleep**, a noisy minute counts as awake only if that room
-also *moved* at around the same time. The same holds for the **first half hour** after they
-fall asleep, so the tail of the household's evening isn't reported as their first wake-up.
-After that the rule stops: mid-night the house is quiet, so a cry with no movement counts as a
-wake-up as you'd expect (unless the microphone looks faulty at the time: see the next section).
+A bedroom microphone hears the whole house. A brief sound-only minute counts as activity when
+the room also moved within two minutes, or a saved alert clip from that camera was labelled
+as crying within two minutes. After sleep begins, a stretch of **20 or more consecutive minutes**
+of sound also counts as awake without nearby movement: a child may be awake but still or out of
+view. That exception does not apply while Nightlight looks for sleep onset at bedtime. Previously,
+later noise alone could count as awake even when it was brief. Movement still counts on its own.
+A sound-only minute that stops counting is not stirring either: stirring remains a measure of
+movement in the bed.
+
+Nightlight analyses **alert clips only**, on the device. The per-camera **Save a clip when
+triggered** option (`detect_record_clips`) is off by default. A cry without an alert clip, or
+one the model misses, falls back to the movement rule. Labels live with alert history; after
+an event is removed by retention, recomputing that older night can no longer use its cry label.
+Turn off **Listen for crying, coughing and talking in alert clips** to ignore stored cry labels
+as well as stop new analysis. Stored nights are not recomputed on upgrade, so expect a one-off
+step in the sleep-score trend as newly worked-out nights use the changed rule.
 
 ### A microphone that looks faulty
 
@@ -367,9 +376,11 @@ loud only in **brief spikes** (most of the minute stayed quiet) and such minutes
 goes, is normally far shorter than that; the fault this was built for ran all night.
 
 - **Movement still counts** in those minutes, so a child who stirs or gets up is still seen.
-- **A sound that lasts is never ignored**, even during a fault: a cry or a noise that fills more than a
-  quarter of a minute keeps counting as awake.
-- **Once the microphone is fixed or replaced**, its sound counts again.
+- **A sound that lasts is not discounted as a microphone fault.** A stretch of 20 or more
+  consecutive minutes also counts as awake after sleep begins, even without nearby movement
+  or a cry-labelled alert clip.
+- **Once the microphone is fixed or replaced**, its sound is considered again under the sound
+  rule above.
 - The night's detail page says so under the summary, for example *"The microphone looked faulty for
   9h 40m, so its sound was not counted as awake time. Movement still was."* The night's API answer
   carries the count as `sound_discounted_minutes`: the minutes between falling asleep and waking whose
@@ -412,7 +423,8 @@ Known limits:
   isn't your child.
 - **Only the detail page shows the note.** The child's card and the morning sleep report show the
   saved summary, which has the corrected numbers but not the note.
-- **A night is never reported as "no one was in the bed" when sound was ignored**, because that answer
+- **A night is never reported as "no one was in the bed" when sound was discounted or an unwitnessed
+  sound-only minute stopped counting**, because that answer
   also deletes the night's timelapse frames and the ignored minutes may have been the only sign of a very
   still child. A night watched for less than 90% of its window still reads "no data", as before, because
   that answer deletes nothing. The cost: an empty bed on a camera with a faulty microphone now usually
@@ -1172,7 +1184,8 @@ card and the detail page then show the same two times and the same figures for m
 unknown, wake-ups, and longest stretch, also after the samples are gone. Minutes the cameras did not see
 inside your times are unknown. If you give an asleep time earlier than the app's, any minute in between with
 movement or sound counts as awake but never as a wake-up: the app did not look for wake-ups before its own
-asleep time, so this is a judgement, not a measurement. It is stricter than the rest of the night, where a
+asleep time, so this is a judgement from the raw pre-onset timeline, not a measurement with the later
+movement-or-cry witness rule. It is stricter than the rest of the night, where a
 short stir still counts as asleep. If your wake-up time cuts a wake-up to under five minutes, those minutes
 count as awake but not as a wake-up, like a stir. The exception is a wake-up the app counted itself (one that
 began before its own wake-up time): it still counts when your time is the app's or later. Its morning

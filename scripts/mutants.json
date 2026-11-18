@@ -24930,7 +24930,7 @@
   {
     "label": "#904 the never-empty rule removed: a discounted still night becomes `empty` (and loses its frames)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound) {",
     "replace": "    if (true) {",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
@@ -24948,8 +24948,8 @@
   {
     "label": "#904 the never-empty rule counts the whole window instead of the measured span: an evening-only fault blocks `empty`",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
-    "replace": "    if (discountedIn(preMin, totalMin) === 0) {",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound) {",
+    "replace": "    if (discountedIn(preMin, totalMin) === 0 && !unwitnessedSound) {",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
     "namePattern": "discounted minutes all lie before its onset"
@@ -24966,8 +24966,8 @@
   {
     "label": "#904 the metrics extension classifies without the minute index: the fault's post-window sound is awake again",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "        const rowActive = isActiveRow(r, i);",
-    "replace": "        const rowActive = isActiveRow(r);",
+    "find": "        const rowActive = isActiveRow(r, i) &&",
+    "replace": "        const rowActive = isActiveRow(r) &&",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
     "namePattern": "qualifies only through the post-window minutes"
@@ -26758,5 +26758,77 @@
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
     "namePattern": "fresh empty detail uses a valid saved corrected night"
+  },
+  {
+    "label": "#1159 cry witness removed",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (motionAt[j] || cryAt[j]) return true;",
+    "replace": "if (motionAt[j]) return true;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: a cry-labelled sound alert"
+  },
+  {
+    "label": "#1159 witness window widened to three minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "i - ONSET_SOUND_MOTION_WITHIN_MIN);",
+    "replace": "i - (ONSET_SOUND_MOTION_WITHIN_MIN + 1));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: a cry (three minutes away|exactly three minutes)"
+  },
+  {
+    "label": "#1159 label threshold removed",
+    "file": "backend/src/lib/audioClassifierWorker.js",
+    "find": "export const AUDIO_LABEL_MIN_SCORE = 0.30;",
+    "replace": "export const AUDIO_LABEL_MIN_SCORE = 0;",
+    "expect": "killed",
+    "tests": ["audioClassifier.test.js"],
+    "namePattern": "#1159: cry and cough include"
+  },
+  {
+    "label": "#1159 extension ignores sound witness",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "|| soundWitnessed(i));",
+    "replace": "|| soundCounts(r, i));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: sound just across"
+  },
+  {
+    "label": "#1159 setting off still uses cry labels",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "?.classify_alert_audio !== 0) {",
+    "replace": "?.classify_alert_audio >= 0) {",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: turning classification off"
+  },
+  {
+    "label": "#1159 empty-bed sound protection removed",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound",
+    "replace": "discountedIn(onset, sleepEnd) === 0",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: a watched still night"
+  },
+  {
+    "label": "#1159 sustained sound threshold lowered to two minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const SUSTAINED_SOUND_MIN = 20;",
+    "replace": "const SUSTAINED_SOUND_MIN = 2;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: unwitnessed sound-only run"
+  },
+  {
+    "label": "#1159 onset uses sustained sound exception",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "activeForOnset[i] = nearEvidence(i);",
+    "replace": "activeForOnset[i] = soundWitnessed(i);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: sustained sound at bedtime"
   }
 ]

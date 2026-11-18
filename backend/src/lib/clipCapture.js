@@ -15,6 +15,7 @@ import {
 } from './clipRecorder.js';
 import { effectiveHold, clipHoldOwner } from './ringHolds.js';
 import { markClipPending, setClipReady, setClipFailed, isProtectedEvent } from './detectionEvents.js';
+import { classifyAlertClip } from './audioClassifier.js';
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 
 // Stage 1 recording — the glue between the capture core (clipRecorder.js) and the app:
@@ -275,6 +276,8 @@ export function enqueueClip(camera, eventId, at = Date.now()) {
       // Stored relative to CLIPS_DIR (posix separator; getEventClipFile resolves it safely).
       const relPath = `${camera.id}/${eventId}.mp4`;
       setClipReady(eventId, relPath, res.probe.durationSec, res.probe.bytes);
+      // #1159: the clip is ready before analysis starts; neither the ring hold nor the alert path waits.
+      classifyAlertClip(eventId).catch((e) => logger.error(`[audio] clip ${eventId}: ${e.message}`));
       logger.info(
         `[clip] ready for "${camera.name}" event ${eventId}: ${res.probe.durationSec?.toFixed(1)}s, ` +
           `${res.probe.bytes ? (res.probe.bytes / 1e6).toFixed(2) : '?'}MB, ${res.segments} segs`

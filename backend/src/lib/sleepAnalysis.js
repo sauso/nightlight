@@ -67,7 +67,10 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // change these two keys and nothing else. The cost of the bump, the same as every earlier one: a night saved under '5'
 // now reads `algo_differs: true` on a stored-context replay, so the sleep detail page's settings line (shown only for
 // a finished night whose saved settings differ from today's) adds "first worked out under earlier detection rules".
-export const SCORING_ALGO = '6';
+// '7' (#1159): brief sound-only runs need nearby movement or a cry-labelled alert, while sustained
+// sound still counts as awake after onset. The 30-night comparison kept a confirmed morning wake
+// that would otherwise have moved 79 minutes later. Other homes may differ because clips are optional.
+export const SCORING_ALGO = '7';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
 // Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
@@ -432,7 +435,7 @@ const ONSET_LOOKBEHIND_MS = 3 * 60 * 60 * 1000;
 // An into_bed this long before a quiet run still counts as the put-down that started it (the child is
 // placed, fusses a little, then settles).
 const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
-// SOUND NEEDS A WITNESS, AT BEDTIME ONLY. A bedroom mic hears the whole house, and bedtime is when the
+// SOUND NEEDS A WITNESS. A bedroom mic hears the whole house, and bedtime is when the
 // house is at its loudest — the other child being settled, adults talking, a TV. Sound travels through
 // walls; movement does not. So for the ONSET search a sound-only minute counts as "awake" only when the
 // same room ALSO saw real movement (in the bed or elsewhere in it) within this many minutes either side.
@@ -443,26 +446,29 @@ const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
 // his brother was put to bed next door. With this rule his onset lands at 18:51 and his brother's at
 // 19:23, both matching the ground truth to the minute.
 //
-// Deliberately scoped to onset. Wake detection keeps the plain sound rule: mid-night the house is quiet,
-// so a noise in a bedroom is far more likely to be the child's own, and a child who cries without moving
-// is exactly the wake-up a parent most wants counted.
+// #1159 extends this two-minute witness through the measured span: rule E on 14 staging nights
+// changed one restless night from 242 to 435 asleep minutes without moving onset or wake.
+// On other installations a missed cry falls back to movement; a false cry keeps the former
+// sound-active behaviour for that minute.
 const ONSET_SOUND_MOTION_WITHIN_MIN = 2;
-// The same witness rule, applied to the FIRST wake run after onset for this long. Onset and the wake
-// finder read the timeline with different rules, and that seam produces a contradiction at exactly the
+// #1159: on 30 staging nights in one house, unwitnessed transient sound ran at most 12 consecutive
+// minutes, while the shortest long stretch ran 32. A confirmed morning wake moved 79 minutes late
+// when sound after a child left the bed was ignored. Twenty separates those measured cases; in a
+// quieter house short stray noises still need a witness, while a noisy household's continuous sound
+// counts as before. This threshold has not been measured in other homes.
+const SUSTAINED_SOUND_MIN = 20;
+// The original witness rule was applied to the FIRST wake run after onset for this long. Onset and the wake
+// finder read the timeline with different rules, and that seam produced a contradiction at exactly the
 // moment the cross-talk is loudest: once onset correctly ignores the sibling's bedtime next door, the
 // very same sound-only minutes are picked up moments later as the child's first awakening. Measured on
 // prod, 2026-08-27: Child A's onset moves 19:52 -> 19:21 (right), and the noise that had been delaying it
 // immediately reappears as a 10-minute 'wake' at 19:21-19:31 (wrong) - he did not stir once.
 //
-// Scoped to a grace period, not applied to the night, because the argument for discounting sound is
-// entirely about WHEN: bedtime is when the rest of the house is awake and loud. Mid-night it is quiet,
-// a noise in a bedroom is most likely the child's own, and a cry without movement is precisely the
-// wake-up a parent wants counted - so past this grace the plain rule returns. 30 minutes covers the
+// #1159 keeps this value only for the in-bed stir measure; the witness now covers the whole
+// analysed span. 30 minutes covers the
 // other child's bedtime routine (measured 19:19-19:51 on 2026-08-27).
 //
-// What this can cost: a genuine cry in the first half hour that produces NO movement in the bed at all
-// goes uncounted as an awakening. That is a narrow case (a child who cries almost always moves), and it
-// costs nothing in alerting - sound alerts and their pushes are a separate path and still fire.
+// A genuine cry without movement or a saved alert clip can still be missed; alerts remain separate.
 const POST_ONSET_SOUND_WITNESS_MIN = 30;
 // Consecutive into_bed events closer together than this are ONE settling episode, not several arrivals.
 // A child is put down, fusses, is picked up and re-settled — the detector logs each re-settle, but the
@@ -1561,12 +1567,27 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   const evidenceEndMin = inProgress
     ? totalMin
     : Math.max(totalMin, Math.round((evidenceCutoffMs - analysisStartUtc.getTime()) / 60000));
+  motionAt.length = evidenceEndMin;
+  motionAt.fill(false, totalMin);
+  // #1159: the 104 alert clips from one house supported cry as a witness; other houses may miss a
+  // cry when clips are off or an alert does not fire, in which case movement alone remains the witness.
+  // Query the scored camera and full measured span once; floor event seconds into the UTC minute bucket.
+  const cryAt = new Array(evidenceEndMin).fill(false);
+  if (db.prepare("SELECT classify_alert_audio FROM settings WHERE id = 'app'").get()?.classify_alert_audio !== 0) {
+    const alerts = db.prepare(`SELECT created_at FROM detection_events
+      WHERE camera_id = ? AND type = 'sound' AND audio_label = 'cry'
+        AND created_at >= ? AND created_at < ?`).all(scoreCams[0], analysisStartSql, txEndSql);
+    for (const { created_at } of alerts) {
+      const i = Math.floor((new Date(created_at.replace(' ', 'T') + 'Z').getTime() - analysisStartUtc.getTime()) / 60000);
+      if (i >= 0 && i < cryAt.length) cryAt[i] = true;
+    }
+  }
   // The post-window rows, from the window end (asOfSql, the main query's exclusive end, so the two never share a
   // row) to the lookahead, as the departure scan reads them; a minute past the cutoff is dropped by index below.
   const postRows = evidenceEndMin > totalMin
     ? db
       .prepare(
-        `SELECT bucket_start AS t, sound_peak, sound_p75, motion_frames FROM activity_samples
+        `SELECT bucket_start AS t, sound_peak, sound_p75, motion_peak, motion_out_peak, motion_frames FROM activity_samples
            WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
       )
       .all(...scoreCams, asOfSql, txEndSql)
@@ -1587,7 +1608,13 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // The same index ranges the two classifying loops keep: [0, totalMin) for the main loop's rows, and from
   // totalMin to the cutoff for the extension's (which stops at its own metricsEnd, never later than the cutoff).
   for (const r of rows) { const i = idxOf(r.t); if (i >= 0 && i < totalMin) noteSound(r, i); }
-  for (const r of postRows) { const i = idxOf(r.t); if (i >= totalMin && i < evidenceEndMin) noteSound(r, i); }
+  for (const r of postRows) {
+    const i = idxOf(r.t);
+    if (i < totalMin || i >= evidenceEndMin) continue;
+    noteSound(r, i);
+    if (motionSeen(r) && ((r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) ||
+      (r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE))) motionAt[i] = true;
+  }
   const soundDiscounted = discountedMinutes(soundSeen.map((m) => m && { spikeOnly: m.spike && !m.real }));
   // Does this row's SOUND count? Over SOUND_ACTIVE and not discounted. The one definition every sound reader below
   // uses: the main loop's `heard` (which feeds the onset view) and isActiveRow (which feeds `state`, so the wake
@@ -1595,6 +1622,18 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // it (a missing one reads `undefined`, which would quietly let the sound count again: the #904 extension test
   // fails if the extension's call drops it).
   const soundCounts = (r, i) => r.sound_peak != null && r.sound_peak > SOUND_ACTIVE && !soundDiscounted[i];
+  // #1159 rule E: +-2 minutes on 14 staging nights changed a restless night from 242 to 435
+  // asleep minutes without moving onset or wake. One house measured it; elsewhere a missed cry
+  // falls back to movement and a false cry keeps the previous sound-active behaviour for that minute.
+  const nearEvidence = (i) => {
+    for (let j = Math.max(0, i - ONSET_SOUND_MOTION_WITHIN_MIN);
+      j <= Math.min(cryAt.length - 1, i + ONSET_SOUND_MOTION_WITHIN_MIN); j++) {
+      if (motionAt[j] || cryAt[j]) return true;
+    }
+    return false;
+  };
+  const sustainedAt = new Array(evidenceEndMin).fill(false);
+  const soundWitnessed = (i) => nearEvidence(i) || sustainedAt[i];
   // How many discounted minutes lie in [from, to): `sound_discounted_minutes`, and the never-empty rule below.
   const discountedIn = (from, to) => {
     let n = 0;
@@ -1637,6 +1676,24 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     if (i >= preMin && r.motion_peak != null && r.motion_peak > maxBedPeak) maxBedPeak = r.motion_peak;
     if (r.motion_peak != null && r.motion_peak > bedPeakAt[i]) bedPeakAt[i] = r.motion_peak;
   }
+  // Run length uses every counted, watched sound minute, including post-window evidence. Build the
+  // whole run before marking its first minute: waiting until minute 20 would lose the start of a wake.
+  // The #904 faulty-microphone discount remains upstream in soundCounts.
+  const heardAll = new Array(evidenceEndMin).fill(false);
+  for (let i = 0; i < totalMin; i++) heardAll[i] = soundAt[i];
+  for (const r of postRows) {
+    const i = idxOf(r.t);
+    if (i >= totalMin && i < evidenceEndMin && motionSeen(r) && soundCounts(r, i)) heardAll[i] = true;
+  }
+  for (let i = 0; i < evidenceEndMin;) {
+    if (!heardAll[i] || nearEvidence(i)) { i++; continue; }
+    let end = i + 1;
+    while (end < evidenceEndMin && heardAll[end] && !nearEvidence(end)) end++;
+    if (end - i >= SUSTAINED_SOUND_MIN) {
+      for (let minute = i; minute < end; minute++) sustainedAt[minute] = true;
+    }
+    i = end;
+  }
   // Coverage is a statement about the configured window ("did we watch the night"), so it counts only
   // window minutes — the lookbehind must never inflate or dilute it. "Watched" is literal since #508: a
   // row with no video (motionSeen) left state[i] null above, so it is not coverage either.
@@ -1645,14 +1702,11 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   const result = { ...base, coverage_minutes: coverage };
   if (coverage < winMin * MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
 
-  // Treat a gap as quiet for continuity (detector momentarily down ≠ awake), but coverage above is what
-  // gates confidence. active[] is the boolean working timeline.
-  const active = state.map((s) => s === true);
+  // A gap stays distinct from confirmed quiet in the witnessed view below; coverage above gates confidence.
 
-  // The onset view of the same timeline, with uncorroborated sound discounted (see
-  // ONSET_SOUND_MOTION_WITHIN_MIN). Movement always counts; a noise counts only if this room moved around
-  // the same time. Used ONLY by the two onset helpers below — every other measurement on the night
-  // (wakes, stirs, awake minutes, the segment bar) keeps reading `active`.
+  // Onset keeps the nearby-movement-or-cry rule: before #1159 the onset search never counted
+  // unwitnessed sound, and including sustained sound moved two measured onsets five hours later.
+  // Wakes and the displayed timeline use the sustained-sound exception below.
   //
   // Tri-state, matching state[]'s convention (issue #442): a minute with no sample at all stays `null`
   // rather than falling into the same `false` as a real confirmed-quiet minute — motionAt/soundAt are
@@ -1663,11 +1717,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     if (state[i] === null) { activeForOnset[i] = null; continue; }
     if (motionAt[i]) { activeForOnset[i] = true; continue; }
     if (!soundAt[i]) { activeForOnset[i] = false; continue; }
-    let witnessed = false;
-    const from = Math.max(0, i - ONSET_SOUND_MOTION_WITHIN_MIN);
-    const to = Math.min(totalMin - 1, i + ONSET_SOUND_MOTION_WITHIN_MIN);
-    for (let j = from; j <= to; j++) if (motionAt[j]) { witnessed = true; break; }
-    activeForOnset[i] = witnessed;
+    activeForOnset[i] = nearEvidence(i);
   }
 
   // Bed transitions across the whole timeline (lookbehind included, plus a lookahead past the window end
@@ -2620,13 +2670,15 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // of view — reads as ONE wake rather than being split into sub-threshold stirs. A run qualifies when
   // it contains >= WAKE_ACTIVE_MIN active minutes; it's trimmed to its first/last active minute.
   //
-  // Reads `active` everywhere EXCEPT the first POST_ONSET_SOUND_WITNESS_MIN minutes after onset, where
-  // it reads the witnessed view for the same reason onset does — see POST_ONSET_SOUND_WITNESS_MIN. This
-  // is one view, not a branch inside the run walk, so a run that starts inside the grace and continues
-  // past it is still detected as one run (it simply stops discounting sound at the boundary).
-  const graceEnd = Math.min(totalMin, onset + POST_ONSET_SOUND_WITNESS_MIN);
+  // #1159: wake detection uses the sustained-sound exception through the full window, including
+  // the former first-30-minute grace. Onset above remains stricter.
   const activeForWake = new Array(totalMin);
-  for (let i = 0; i < totalMin; i++) activeForWake[i] = i >= onset && i < graceEnd ? activeForOnset[i] : active[i];
+  for (let i = 0; i < totalMin; i++) {
+    if (state[i] === null) activeForWake[i] = null;
+    else if (motionAt[i]) activeForWake[i] = true;
+    else if (!soundAt[i]) activeForWake[i] = false;
+    else activeForWake[i] = soundWitnessed(i);
+  }
 
   // Mark minutes belonging to a qualifying wake run within activeArr's [from, to) range, writing true
   // into inWakeArr. Factored out (issue #352) so the post-window metrics extension below can re-run the
@@ -2916,7 +2968,11 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // EMPTY_MIN_COVERAGE_FRAC becomes `no_data` too, and every other such night reads `ok` with the whole window
     // asleep. A wrong `ok` is reversible (frames kept; a parent can answer "no one was in the bed"), a wrong `empty`
     // is not. Pinned by the #904 tests "KNOWN LIMIT (a deliberate decision): an EMPTY bed with a faulty microphone".
-    if (discountedIn(onset, sleepEnd) === 0) {
+    // #1159: suppressing a watched sound cannot certify an empty bed: a final empty verdict can
+    // discard timelapse frames. Prefer reversible ok, as the faulty-microphone guard already does.
+    let unwitnessedSound = false;
+    for (let i = onset; i < sleepEnd; i++) if (soundAt[i] && !soundWitnessed(i)) { unwitnessedSound = true; break; }
+    if (discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound) {
       return {
         ...result,
         status: 'empty',
@@ -2957,6 +3013,14 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
              WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
         )
         .all(...scoreCams, minuteTime(totalMin), minuteTime(metricsEnd));
+      // Build the extension's movement context before judging any sound minute there. A later
+      // row can witness a sound two minutes earlier, including across the configured window edge.
+      for (const r of extraRows) {
+        const i = idxOf(r.t);
+        if (i < totalMin || i >= metricsEnd || !motionSeen(r)) continue;
+        if ((r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) ||
+            (r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE)) motionAt[i] = true;
+      }
       const activeMetrics = activeForWake.concat(new Array(metricsEnd - totalMin).fill(false));
       const stateMetrics = state.concat(new Array(metricsEnd - totalMin).fill(null));
       // The in-bed peaks over the same combined range (stir_minutes reads them): the main loop's, then these
@@ -2968,7 +3032,9 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
         // The same rule as the main loop (issue #508): an unwatched row is skipped, never merged, so a
         // post-window stall between window end and the departure counts as unknown, not asleep.
         if (!motionSeen(r)) continue;
-        const rowActive = isActiveRow(r, i);
+        const rowActive = isActiveRow(r, i) &&
+          ((r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) ||
+            (r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE) || soundWitnessed(i));
         if (r.motion_peak > bedPeakMetrics[i]) bedPeakMetrics[i] = r.motion_peak;
         if (rowActive) activeMetrics[i] = true;
         // OR-merge, matching the main population loop's own rule for `state` (line ~646) — TWO rows for
@@ -3211,7 +3277,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
       // wake-up. Only before onset, and only minutes not already in a run.
       active_runs: runsOf((i) => i < onset && metricsState[i] === true && !inWake[i]),
     };
-    out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : s ? 'active' : 'quiet', inWake: inWake[i], out: outAt[i] }));
+    out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : activeForWake[i] ? 'active' : 'quiet', inWake: inWake[i], out: outAt[i] }));
 
     // The counted awakenings, with clock times + duration — powers the "where the wake-ups were" list.
     const wakes = [];
@@ -3338,7 +3404,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // is real evidence of being awake, not missing data (see markWakeRuns). Found by adversarial
     // review of this fix's first draft, which only fixed the mislabel inside the sleep span.
     const label = (i) =>
-      inWake[i] ? 'wake' : state[i] === null ? 'gap' : i < onset ? 'settling' : i >= sleepEnd ? 'awake' : state[i] === true ? 'stir' : 'asleep';
+      inWake[i] ? 'wake' : state[i] === null ? 'gap' : i < onset ? 'settling' : i >= sleepEnd ? 'awake' : activeForWake[i] === true ? 'stir' : 'asleep';
     const segments = [];
     for (let i = displayStart; i < totalMin; ) {
       const l = label(i);

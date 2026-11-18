@@ -36,6 +36,7 @@ after the next release to `main`; until then, the link opens a plain new issue.
 - [Operations](operations.md) — backup, restore, permissions, upgrades and rollback
 - [Architecture](architecture.md) — implementation details
 - [Building and testing](development.md) — local development and tests
+- [Environment reference](readme-reference.md) — development-only audio model override
 - [Design language](design-language.md) — UI conventions
 - [Mutation testing](mutation-testing.md) — contributor test reference
 - [Demo mode](demo-mode.md) — public read-only demo deployments

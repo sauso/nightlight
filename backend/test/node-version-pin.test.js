@@ -45,11 +45,13 @@ export function assertDockerNodeStages(text, supported, preview) {
   const from = scanDockerNodeStages(text);
   assert.ok(from.length > 0, 'Dockerfile has no FROM lines');
   assert.ok(from.every((s) => s.image), 'every Dockerfile FROM line must be parsed');
-  assert.equal(from.length, 5, 'Dockerfile must have exactly five stages');
+  // #1159: the sixth stage is `FROM scratch AS yamnet-model`, which only downloads and checksums the two model files.
+  assert.equal(from.length, 6, 'Dockerfile must have exactly six stages');
   assert.deepEqual(from.map((s) => s.name),
-    ['frontend-build', 'mediamtx-binary', 'backend-deps', 'tailscale-binaries', null],
+    ['frontend-build', 'mediamtx-binary', 'yamnet-model', 'backend-deps', 'tailscale-binaries', null],
     'Dockerfile stage names and order must match the production build');
   assert.equal(from[1].image, 'bluenviron/mediamtx:1', 'MediaMTX stage must use the reviewed image');
+  assert.equal(from[2].image, 'scratch', 'the model stage must be FROM scratch (it runs nothing)');
   assert.ok(from.at(-1).major !== null, 'Dockerfile final stage must be a Node image');
   const stages = from.filter((s) => s.major !== null);
   assert.equal(stages.length, 4, 'Dockerfile must have exactly four Node stages');
@@ -77,15 +79,15 @@ test('every Dockerfile Node stage runs either the supported or preview major', (
 });
 
 test('Dockerfile scan includes --platform and rejects mixed stages or a non-Node final stage', () => {
-  const fixture = `FROM node:24-alpine AS frontend-build\nFROM bluenviron/mediamtx:1 AS mediamtx-binary\nFROM node:24-alpine AS backend-deps\nFROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries\nFROM node:24-alpine\n`;
-  assert.equal(scanDockerNodeStages(fixture)[3].major, 24);
+  const fixture = `FROM node:24-alpine AS frontend-build\nFROM bluenviron/mediamtx:1 AS mediamtx-binary\nFROM scratch AS yamnet-model\nFROM node:24-alpine AS backend-deps\nFROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries\nFROM node:24-alpine\n`;
+  assert.equal(scanDockerNodeStages(fixture)[4].major, 24);
   assert.equal(assertDockerNodeStages(fixture, 24, 26), 24);
   assert.throws(() => assertDockerNodeStages(fixture.replace('node:24-alpine AS tailscale-binaries', 'node:26-alpine AS tailscale-binaries'), 24, 26), /mixed/);
   assert.throws(() => assertDockerNodeStages(fixture.replace(/FROM node:24-alpine\n$/, 'FROM alpine:3.24\n'), 24, 26), /final stage/);
 });
 
 // #751, PR #1121 round 1: guard the exact image family and stage graph, including non-Node stages.
-const dockerStagesFixture = `FROM node:24-alpine AS frontend-build\nFROM bluenviron/mediamtx:1 AS mediamtx-binary\nFROM node:24-alpine AS backend-deps\nFROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries\nFROM node:24-alpine\n`;
+const dockerStagesFixture = `FROM node:24-alpine AS frontend-build\nFROM bluenviron/mediamtx:1 AS mediamtx-binary\nFROM scratch AS yamnet-model\nFROM node:24-alpine AS backend-deps\nFROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries\nFROM node:24-alpine\n`;
 
 test('Dockerfile rejects a bare Node tag', () => {
   assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replaceAll('node:24-alpine', 'node:26-alpine').replace('node:26-alpine AS frontend-build', 'node:26 AS frontend-build'), 24, 26));
@@ -97,6 +99,10 @@ test('Dockerfile rejects a different Node distro', () => {
 
 test('Dockerfile rejects an extra non-Node stage', () => {
   assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM node:24-alpine\n', 'FROM scratch AS extra\nFROM node:24-alpine\n'), 24, 26));
+});
+
+test('Dockerfile rejects a missing model stage', () => {
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM scratch AS yamnet-model\n', ''), 24, 26));
 });
 
 test('Dockerfile rejects a missing non-Node stage', () => {

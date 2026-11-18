@@ -5,6 +5,16 @@ loaded on every change; it moved here because most changes touch none of it. `CL
 **invariants** that must not be broken and points here for the explanation. Update this file when you change
 a subsystem it describes.
 
+Alert clips are analysed on the device by Google's Apache-2.0 YAMNet model (an ONNX conversion
+by andrelgomes). A single lazy Node worker runs `onnxruntime-web` on WASM; it uses about
+250–315 MB while loaded and is released after 60 seconds idle. The pinned 16 MB model and
+class map are fetched at image build time, and their licence is in `/usr/share/licenses/yamnet/`.
+The final image size increase needs a Docker build measurement. arm64 speed and memory have
+not been measured.
+
+Sleep scoring rule version `7` adds the movement-or-cry witness throughout the measured span.
+Stored nights keep their earlier rule version and are not recomputed on upgrade.
+
 **Everything ships as one Docker image, one container** — no multi-container orchestration to
 reason about. The container needs its own routable LAN IP so WebRTC has no NAT/ICE problems
 (MediaMTX advertises that IP to browsers). There are two supported ways to give it one: **host
@@ -519,8 +529,8 @@ both null and logs a fixed sentence; #700's history-read counter is restored aft
 night summary need from them is counted in `computeNight` and stored by `upsertNight` in two nullable `sleep_nights`
 columns (guarded `ALTER`s, NULL on older rows, no backfill). `stir_minutes`: minutes of `[onset, sleepEnd)` with an
 in-bed peak over `MOTION_ACTIVE` that are not in a counted wake and are at least `POST_ONSET_SOUND_WITNESS_MIN` after
-onset; sound-only and outside-the-bed-only minutes are excluded on purpose (the detail view's `stir` segment is
-broader and unchanged), and a camera with no bed zone counts all movement (its whole frame is the in-bed channel).
+onset; sound-only and outside-the-bed-only minutes are excluded on purpose (the detail view's `stir` segment
+also excludes unwitnessed sound), and a camera with no bed zone counts all movement (its whole frame is the in-bed channel).
 `summary_facts`: versioned JSON text, the same string on a fresh compute and on the stored row (read it with
 `parseSummaryFacts`): `{ v: 1, climate: { temp_min, temp_max }, sleep: { wakes: [{ start_at, minutes }],
 room_activity_wakes } }`. `wakes` are the runs `accumulateMetrics` counted, so `wakes.length === wake_count` (the

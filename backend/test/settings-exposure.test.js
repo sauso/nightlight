@@ -271,6 +271,22 @@ describe('GET /settings as a caregiver', () => {
 });
 
 describe('GET /settings as an admin', () => {
+  test('#1159: audio analysis defaults on, saves 0/1, and rejects other values', async () => {
+    assert.equal((await get(adminToken)).body.classify_alert_audio, 1);
+    for (const value of [0, 1]) {
+      const r = await call(`${server.url}/api/settings`, { method: 'PUT', token: adminToken,
+        body: { classify_alert_audio: value } });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.classify_alert_audio, value);
+    }
+    for (const value of [2, -1, 'false', null]) {
+      const r = await call(`${server.url}/api/settings`, { method: 'PUT', token: adminToken,
+        body: { classify_alert_audio: value } });
+      assert.equal(r.status, 400);
+      assert.equal(db.prepare("SELECT classify_alert_audio FROM settings WHERE id = 'app'").get().classify_alert_audio, 1);
+    }
+    assert.equal((await get()).body.classify_alert_audio, undefined);
+  });
   // The admin settings forms seed their state directly from this response, so a field dropped here is
   // a blank input on a settings page. These are the fields SettingsGeneral / SettingsCamera /
   // SettingsRecording actually bind — keep this list in step with them.

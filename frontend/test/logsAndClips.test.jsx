@@ -64,6 +64,19 @@ describe('recent alerts', () => {
     expect(within(row).getByText('+12 dB over ambient')).toBeTruthy();
   });
 
+  test('sound labels appear in the alerts feed, but other and non-sound labels do not', async () => {
+    mockAlerts([
+      { ...ALERTS[1], id: 'cry', audio_label: 'cry' },
+      { ...ALERTS[1], id: 'other', camera_name: 'Other room', audio_label: 'other' },
+      { ...ALERTS[0], id: 'motion', audio_label: 'cry' },
+    ]);
+    renderAsAdmin(<RecentAlerts />);
+    const rows = await screen.findAllByRole('listitem');
+    expect(within(rows[0]).getByText('Crying')).toBeTruthy();
+    expect(within(rows[1]).queryByText('Crying')).toBeNull();
+    expect(within(rows[2]).queryByText('Crying')).toBeNull();
+  });
+
   test('★★ the age is computed in UTC, not the viewer\'s zone', async () => {
     // A 12-hour error is the failure mode under this suite's clock: dropping the 'Z' would render
     // this three-hour-old alert as fifteen hours old. Measured in HOURS on purpose — at day
@@ -221,6 +234,17 @@ describe('clip management', () => {
   const mountClips = () => renderAsAdmin(<ClipManagement />, { route: '/settings/clips' });
 
   beforeEach(() => mockClips());
+
+  test('sound clip labels appear in the list and protected list only for sound alerts', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (path) => path === '/cameras/clips/protected'
+      ? { alerts: [{ ...CLIPS[1], id: 'protected', protected: 1, audio_label: 'cough' }], wake: [] }
+      : [{ ...CLIPS[1], audio_label: 'voice' }, { ...CLIPS[0], audio_label: 'cry' }]);
+    mountClips();
+    expect(await screen.findByText('Talking')).toBeTruthy();
+    expect(await screen.findByText('Coughing')).toBeTruthy();
+    const motion = (await screen.findAllByLabelText('Select clip'))[1].closest('.clip-row');
+    expect(within(motion).queryByText('Crying')).toBeNull();
+  });
 
   test('counts the clips and totals their size', async () => {
     // The total is the reason to be on this screen: it is how someone decides whether to delete.

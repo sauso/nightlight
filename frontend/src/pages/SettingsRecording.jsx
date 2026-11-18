@@ -82,7 +82,7 @@ function StorageCard({ storage }) {
 // (#377): all numbers and booleans, no secrets on this page.
 const DRAFT_FIELDS = [
   'clip_pre_roll_s', 'clip_post_roll_s', 'clip_retention_days', 'clip_retention_max_gb',
-  'wake_clips_enabled', 'wake_clip_seconds', 'wake_clip_retention_days',
+  'wake_clips_enabled', 'wake_clip_seconds', 'wake_clip_retention_days', 'classify_alert_audio',
   'ondemand_enabled', 'ondemand_pre_roll_s', 'ondemand_max_duration_s',
 ];
 
@@ -95,6 +95,7 @@ function valuesOf(src) {
     wake_clips_enabled: !!(src.wake_clips_enabled ?? true),
     wake_clip_seconds: src.wake_clip_seconds ?? 30,
     wake_clip_retention_days: src.wake_clip_retention_days ?? 14,
+    classify_alert_audio: Number(!!(src.classify_alert_audio ?? 1)),
     ondemand_enabled: !!(src.ondemand_enabled ?? true),
     ondemand_pre_roll_s: src.ondemand_pre_roll_s ?? 30,
     ondemand_max_duration_s: src.ondemand_max_duration_s ?? 120,
@@ -313,6 +314,13 @@ export default function SettingsRecording() {
               recordings below</strong>, which are kept until you delete them.
               {' '}Whatever you set here, Recent alerts keeps at most 30 days and 2,000 unprotected entries: older unprotected alerts, with their clips and pictures, are removed as new alerts are recorded.
             </div>
+            <SwitchRow label="Listen for crying, coughing and talking in alert clips"
+              checked={!!shown.classify_alert_audio} disabled={busy}
+              onChange={(e) => setField('classify_alert_audio', Number(e.target.checked))}>
+              After an alert clip is saved, the server listens to it on this device (nothing is sent anywhere) and adds a badge to the alert.
+              Needs “Record clips” on for the camera. Crying also helps sleep tracking: a sound with no movement only counts as awake
+              if a cry was heard. Crying, coughing and talking are best guesses.
+            </SwitchRow>
           </div>
 
           {/* --- Wake clips (sleep-tracker triggered, deliberately silent) --- */}

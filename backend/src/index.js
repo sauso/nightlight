@@ -44,6 +44,7 @@ import { stopAllMotionDetectors, reconcileMotionLeg } from './lib/motionDetector
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { reconcileClipRing, stopAllClipCapture } from './lib/clipCapture.js';
+import { stopAudioClassifier } from './lib/audioClassifier.js';
 import { stopAllRecordingsForShutdown, reconcileStaleRecordings } from './lib/recordings.js';
 import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
@@ -607,6 +608,8 @@ async function shutdown() {
   // Finish any in-flight recording before the ring goes — it cuts from the segments the ring owns.
   await recordingsFinished;
   stopAllClipCapture();
+  // #1159: no further alert cuts will queue; release loaded WASM and its worker.
+  await stopAudioClassifier();
   await stopAllTranscoders();
   stopMediaMTX();
   stopMqtt();

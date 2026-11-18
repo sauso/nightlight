@@ -228,6 +228,25 @@ describe('AlertList', () => {
     ...over,
   });
 
+  test.each([
+    ['cry', 'Crying'], ['cough', 'Coughing'], ['voice', 'Talking'],
+  ])('a sound alert labelled %s shows %s beside Sound', (audio_label, text) => {
+    const { container } = render(<AlertList alerts={[base({ type: 'sound', audio_label })]} />);
+    const row = container.querySelector('.alert-item');
+    expect(row.querySelector('.alert-item__name').textContent).toContain(`Sound${text}`);
+    expect(within(row).getByText(text)).toBeInTheDocument();
+  });
+
+  test.each(['other', null])('a sound alert labelled %s has no audio badge', (audio_label) => {
+    const { container } = render(<AlertList alerts={[base({ type: 'sound', audio_label })]} />);
+    expect(container.querySelector('.clip-protected-badge')).toBeNull();
+  });
+
+  test('a non-sound alert ignores even a cry label', () => {
+    const { container } = render(<AlertList alerts={[base({ type: 'motion', audio_label: 'cry' })]} />);
+    expect(container.querySelector('.clip-protected-badge')).toBeNull();
+  });
+
   test('renders nothing when there is nothing to show', () => {
     const a = render(<AlertList alerts={[]} />);
     expect(a.container).toBeEmptyDOMElement();
