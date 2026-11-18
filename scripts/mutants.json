@@ -26775,7 +26775,7 @@
     "replace": "i - (ONSET_SOUND_MOTION_WITHIN_MIN + 1));",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#1159: a cry three minutes away"
+    "namePattern": "#1159: a cry (three minutes away|exactly three minutes)"
   },
   {
     "label": "#1159 label threshold removed",

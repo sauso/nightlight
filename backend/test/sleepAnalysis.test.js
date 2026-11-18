@@ -212,6 +212,37 @@ test('#1159: a cry-labelled alert still counts post-window sound', (t) => {
   assert.equal(night.wake_count, baseline.wake_count + 1);
 });
 
+test('#1159: a watched still night with short unwitnessed sound bursts remains ok, not empty', () => {
+  // Without the empty-bed guard this night reads `empty` (no wake, no awake minute, no in-bed movement), and a final
+  // `empty` can delete the timelapse frames. Each burst is under the 20-minute sustained-sound bar, so only the guard
+  // keeps the night `ok` (the mutation run found the sustained-sound fixture below no longer exercised it).
+  laySamples(at(19, 30), at(7, 0, 1), [], STILL_EMPTY);
+  for (const [from, to] of [[at(1, 0, 1), at(1, 8, 1)], [at(3, 0, 1), at(3, 8, 1)]]) {
+    db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+      .run(CAM, sqlTime(from), sqlTime(to));
+  }
+  assert.equal(computeNight(CHILD, DATE).status, 'ok');
+});
+
+test('#1159: a cry exactly three minutes before or after a lone sound minute does not extend a movement wake', () => {
+  // The witness window is +-2 minutes on BOTH sides (the mutation run found only the "after" side was pinned). A lone
+  // sound minute 3 minutes after a movement wake is bridged into that wake only if a witness reaches it.
+  const build = () => {
+    laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+    db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?').run(CAM, sqlTime(at(22, 9)));
+  };
+  build();
+  const baseline = computeNight(CHILD, DATE).awake_minutes;
+  cryAlert(at(22, 6, 0, 30)); // 3 minutes before the sound minute
+  assert.equal(computeNight(CHILD, DATE).awake_minutes, baseline);
+  db.prepare('DELETE FROM detection_events').run();
+  cryAlert(at(22, 12, 0, 30)); // 3 minutes after
+  assert.equal(computeNight(CHILD, DATE).awake_minutes, baseline);
+  db.prepare('DELETE FROM detection_events').run();
+  cryAlert(at(22, 7, 0, 30)); // 2 minutes before: the control, the sound minute now counts and the wake grows
+  assert.ok(computeNight(CHILD, DATE).awake_minutes > baseline);
+});
+
 test('#1159: a watched still night with sustained sound remains ok, not empty', () => {
   laySamples(at(19, 30), at(7, 0, 1), [], STILL_EMPTY);
   db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
