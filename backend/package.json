@@ -27,7 +27,7 @@
     "jsonwebtoken": "^9.0.2",
     "mqtt": "^5.16.1",
     "onnxruntime-web": "1.22.0",
-    "onvif": "^0.8.5",
+    "onvif": "^1.0.0",
     "otplib": "^13.6.0",
     "qrcode": "^1.5.4",
     "uuid": "^14.0.3",
