@@ -26812,5 +26812,23 @@
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#1159: a watched still night"
+  },
+  {
+    "label": "#1159 sustained sound threshold lowered to two minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const SUSTAINED_SOUND_MIN = 20;",
+    "replace": "const SUSTAINED_SOUND_MIN = 2;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: unwitnessed sound-only run"
+  },
+  {
+    "label": "#1159 onset uses sustained sound exception",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "activeForOnset[i] = nearEvidence(i);",
+    "replace": "activeForOnset[i] = soundWitnessed(i);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: sustained sound at bedtime"
   }
 ]

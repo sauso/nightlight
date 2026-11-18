@@ -215,8 +215,63 @@ test('#1159: a cry-labelled alert still counts post-window sound', (t) => {
 test('#1159: a watched still night with sustained sound remains ok, not empty', () => {
   laySamples(at(19, 30), at(7, 0, 1), [], STILL_EMPTY);
   db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
-    .run(CAM, sqlTime(at(1, 0, 1)), sqlTime(at(1, 8, 1)));
+    .run(CAM, sqlTime(at(1, 0, 1)), sqlTime(at(1, 30, 1)));
   assert.equal(computeNight(CHILD, DATE).status, 'ok');
+});
+
+test('#1159: 20 consecutive sound-only minutes count from the first minute', () => {
+  soundOnlyNight();
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(2, 0, 1)), sqlTime(at(2, 20, 1)));
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.wake_count, 2);
+  assert.equal(night.timeline.find((m) => m.t === sqlTime(at(2, 0, 1))).state, 'active');
+  assert.equal(night.segments.find((s) => s.state === 'wake' && s.from_at === sqlTime(at(2, 0, 1)))?.minutes, 20);
+  assert.equal(night.segments.filter((s) => ['asleep', 'stir'].includes(s.state))
+    .reduce((n, s) => n + s.minutes, 0), night.asleep_minutes);
+});
+
+test('#1159: 19 sound-only minutes and two runs split by silence stay discounted', () => {
+  soundOnlyNight();
+  const setSound = (from, to) => db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(from), sqlTime(to));
+  setSound(at(2, 0, 1), at(2, 19, 1));
+  assert.equal(computeNight(CHILD, DATE).wake_count, 1);
+  db.prepare('UPDATE activity_samples SET sound_peak = 0 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(2, 0, 1)), sqlTime(at(2, 20, 1)));
+  setSound(at(2, 0, 1), at(2, 10, 1));
+  setSound(at(2, 11, 1), at(2, 21, 1));
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.wake_count, 1);
+  assert.equal(night.timeline.find((m) => m.t === sqlTime(at(2, 11, 1))).state, 'quiet');
+});
+
+test('#1159: sustained sound at bedtime does not delay onset', () => {
+  laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 30)));
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(19, 30)), sqlTime(at(20, 0)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:30');
+});
+
+test('#1159: sustained sound after the window counts in the metrics extension', (t) => {
+  laySamples(at(19, 30), at(7, 50, 1), [[at(22, 0), at(22, 6)], [at(7, 27, 1), at(7, 30, 1)]], STILL_OCCUPIED);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 30, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+  const baseline = computeNight(CHILD, DATE);
+  assert.equal(hhmm(baseline.wake_at), '07:30');
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(7, 1, 1)), sqlTime(at(7, 21, 1)));
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.awake_minutes, baseline.awake_minutes + 20);
+  assert.equal(night.asleep_minutes, baseline.asleep_minutes - 20);
+});
+
+test('#1159: movement followed by 60 sound-only minutes keeps the morning wake at movement', () => {
+  laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)], [at(5, 59, 1), at(6, 0, 1)]], STILL_OCCUPIED);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(6, 0, 1)), sqlTime(at(7, 0, 1)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '05:59');
 });
 
 test('#1159: the final nightly pass stores a sound-heavy still night as ok', async (t) => {

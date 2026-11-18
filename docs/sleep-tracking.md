@@ -347,14 +347,16 @@ child settles.
   discarded false put-down came first. That is still later, and closer to the truth, than the false
   put-down it replaces.
 
-### Sound needs movement or a cry alert
+### When sound counts as awake
 
-A bedroom microphone hears the whole house. A sound-only minute counts as activity throughout
-the night only when the room also moved within two minutes, or a saved alert clip from that
-camera was labelled as crying within two minutes. Previously this check applied at bedtime
-and for the first half hour only; later noise alone could count as awake. Movement still counts
-on its own. A sound-only minute that stops counting is not stirring either: stirring remains
-a measure of movement in the bed.
+A bedroom microphone hears the whole house. A brief sound-only minute counts as activity when
+the room also moved within two minutes, or a saved alert clip from that camera was labelled
+as crying within two minutes. After sleep begins, a stretch of **20 or more consecutive minutes**
+of sound also counts as awake without nearby movement: a child may be awake but still or out of
+view. That exception does not apply while Nightlight looks for sleep onset at bedtime. Previously,
+later noise alone could count as awake even when it was brief. Movement still counts on its own.
+A sound-only minute that stops counting is not stirring either: stirring remains a measure of
+movement in the bed.
 
 Nightlight analyses **alert clips only**, on the device. The per-camera **Save a clip when
 triggered** option (`detect_record_clips`) is off by default. A cry without an alert clip, or
@@ -374,10 +376,11 @@ loud only in **brief spikes** (most of the minute stayed quiet) and such minutes
 goes, is normally far shorter than that; the fault this was built for ran all night.
 
 - **Movement still counts** in those minutes, so a child who stirs or gets up is still seen.
-- **A sound that lasts is not discounted as a microphone fault**, but it still needs nearby
-  movement or a cry-labelled alert clip to count as activity in the nightly sleep figures.
-- **Once the microphone is fixed or replaced**, its sound is considered again under the same
-  movement-or-cry rule.
+- **A sound that lasts is not discounted as a microphone fault.** A stretch of 20 or more
+  consecutive minutes also counts as awake after sleep begins, even without nearby movement
+  or a cry-labelled alert clip.
+- **Once the microphone is fixed or replaced**, its sound is considered again under the sound
+  rule above.
 - The night's detail page says so under the summary, for example *"The microphone looked faulty for
   9h 40m, so its sound was not counted as awake time. Movement still was."* The night's API answer
   carries the count as `sound_discounted_minutes`: the minutes between falling asleep and waking whose

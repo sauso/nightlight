@@ -15,7 +15,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
-- A sound with no nearby movement no longer counts as awake once a child is asleep unless an alert clip was labelled as crying. Stored nights are not recomputed, so expect a step in the sleep-score trend (#1159).
+- Brief sound with no nearby movement no longer counts as awake once a child is asleep unless an alert clip was labelled as crying. Sound lasting 20 or more consecutive minutes still counts as awake, even without movement; the bedtime search for sleep onset continues to ignore it. Stored nights are not recomputed, so expect a step in the sleep-score trend (#1159).
 
 - Session lists now include each session's `user_id`, and the Users screen matches sessions to accounts by that id (#1093).
 - The Sleep & room temperature card now compares wake-ups per watched hour, shows the cooler and warmer night counts, and withholds a directional pattern if the shown averages are equal or leaving out one night weakens the correlation or reverses the groups' direction (#365). It still uses stored detector wake totals; a pattern does not establish a cause.
