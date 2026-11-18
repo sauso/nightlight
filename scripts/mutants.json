@@ -26758,5 +26758,59 @@
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
     "namePattern": "fresh empty detail uses a valid saved corrected night"
+  },
+  {
+    "label": "#1159 cry witness removed",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (motionAt[j] || cryAt[j]) return true;",
+    "replace": "if (motionAt[j]) return true;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: a cry-labelled sound alert"
+  },
+  {
+    "label": "#1159 witness window widened to three minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "i - ONSET_SOUND_MOTION_WITHIN_MIN);",
+    "replace": "i - (ONSET_SOUND_MOTION_WITHIN_MIN + 1));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: a cry three minutes away"
+  },
+  {
+    "label": "#1159 label threshold removed",
+    "file": "backend/src/lib/audioClassifierWorker.js",
+    "find": "export const AUDIO_LABEL_MIN_SCORE = 0.30;",
+    "replace": "export const AUDIO_LABEL_MIN_SCORE = 0;",
+    "expect": "killed",
+    "tests": ["audioClassifier.test.js"],
+    "namePattern": "#1159: each label includes"
+  },
+  {
+    "label": "#1159 extension ignores sound witness",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "|| soundWitnessed(i));",
+    "replace": "|| soundCounts(r, i));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: sound just across"
+  },
+  {
+    "label": "#1159 setting off still uses cry labels",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "?.classify_alert_audio !== 0) {",
+    "replace": "?.classify_alert_audio >= 0) {",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: turning classification off"
+  },
+  {
+    "label": "#1159 empty-bed sound protection removed",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound",
+    "replace": "discountedIn(onset, sleepEnd) === 0",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: a watched still night"
   }
 ]

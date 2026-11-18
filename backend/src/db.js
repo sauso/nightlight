@@ -159,6 +159,7 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_detection_events_created_at ON detection_events(created_at);
+  CREATE INDEX IF NOT EXISTS idx_detection_events_cam_time ON detection_events(camera_id, created_at);
 
   -- Historical temperature/humidity samples, one row per camera per sample tick (see
   -- lib/sensorSampler.js). MQTT temp/humidity is otherwise live-only (getReading in mqttClient);
@@ -590,6 +591,9 @@ if (!sleepReviewColumns.includes('nobody_in_bed')) {
 }
 
 const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);
+if (!settingsColumns.includes('classify_alert_audio')) {
+  db.exec('ALTER TABLE settings ADD COLUMN classify_alert_audio INTEGER NOT NULL DEFAULT 1');
+}
 // Opus plan review of #967: this is intent only; a fresh or restored database stays off.
 if (!settingsColumns.includes('tailscale_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN tailscale_enabled INTEGER NOT NULL DEFAULT 0');
@@ -960,6 +964,8 @@ if (!camerasColumns.includes('detect_record_clips')) {
 // <id>.jpg since #553; at the top level on an install not yet moved), so the in-app Alerts feed knows to show a
 // thumbnail. See lib/detectionEvents.js.
 const detectionEventsColumns = db.prepare('PRAGMA table_info(detection_events)').all().map((c) => c.name);
+if (!detectionEventsColumns.includes('audio_label')) db.exec('ALTER TABLE detection_events ADD COLUMN audio_label TEXT');
+if (!detectionEventsColumns.includes('audio_score')) db.exec('ALTER TABLE detection_events ADD COLUMN audio_score REAL');
 if (!detectionEventsColumns.includes('snapshot')) {
   db.exec('ALTER TABLE detection_events ADD COLUMN snapshot INTEGER NOT NULL DEFAULT 0');
 }

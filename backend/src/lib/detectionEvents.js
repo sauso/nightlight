@@ -172,6 +172,12 @@ export function setClipFailed(id) {
   try { setClipFailedStmt.run(id); } catch (e) { logger.error(`clip failed mark failed (${id}):`, e.message); }
 }
 
+export function setAudioLabel(eventId, label, score) {
+  if (!['cry', 'cough', 'voice', 'other'].includes(label) || !Number.isFinite(score) || score < 0 || score > 1) return false;
+  return db.prepare('UPDATE detection_events SET audio_label = ?, audio_score = ? WHERE id = ?')
+    .run(label, score, eventId).changes > 0;
+}
+
 // A jailed { root, path } for an event's ready clip MP4, or null (used by the serving route).
 // Validates the stored relative path stays under CLIPS_DIR, then returns CLIPS_DIR + that relative
 // path; the route serves it with serveMediaFile (mediaFiles.js), which opens it once and re-checks it.
@@ -248,7 +254,7 @@ export function deleteClipForEvent(id) {
 export function getClips(limit = 2000) {
   return db
     .prepare(
-      `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot, clip_duration_s, clip_bytes, protected
+      `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot, clip_duration_s, clip_bytes, protected, audio_label, audio_score
        FROM detection_events
        WHERE clip_status = 'ready' AND clip_path IS NOT NULL
        ORDER BY id DESC LIMIT ?`
@@ -259,7 +265,7 @@ export function getClips(limit = 2000) {
 // Protection outlives the recent-list limits; keep every protected alert reachable.
 export function getProtectedClips() {
   return db.prepare(`SELECT id, camera_id, camera_name, type, detail, created_at, snapshot,
-                            clip_duration_s, clip_bytes, protected
+                            clip_duration_s, clip_bytes, protected, audio_label, audio_score
                        FROM detection_events
                       WHERE protected <> 0 AND clip_status = 'ready' AND clip_path IS NOT NULL
                       ORDER BY id DESC`).all();

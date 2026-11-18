@@ -9,7 +9,7 @@ import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
+import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, mountRouter, call } from './helpers/harness.js';
 
 useTempDataDir();
 
@@ -65,6 +65,35 @@ test('recordDetectionEvent inserts a row and returns its id', () => {
 test('recordDetectionEvent defaults detail to null', () => {
   const id = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.SOUND);
   assert.equal(rowOf(id).detail, null);
+  assert.equal(rowOf(id).audio_label, null);
+  assert.equal(rowOf(id).audio_score, null);
+});
+
+test('#1159: classified labels persist and are additive in the alerts list', () => {
+  const id = ev.recordDetectionEvent('cam-1', 'Test camera', ev.ALERT.SOUND);
+  assert.equal(ev.setAudioLabel(id, 'cry', 0.9), true);
+  const listed = ev.getRecentDetectionEvents().find((r) => r.id === id);
+  assert.equal(listed.audio_label, 'cry');
+  assert.equal(listed.audio_score, 0.9);
+  assert.equal(ev.setAudioLabel(id, 'invalid', 0.2), false);
+});
+
+test('#1159: GET /api/cameras/alerts exposes the new fields without dropping old ones', async () => {
+  const { default: camerasRouter } = await import('../src/routes/cameras.js');
+  const server = await mountRouter('/api/cameras', camerasRouter);
+  try {
+    const admin = makeUser(db, { id: 'audio-admin', username: 'audio-admin', role: 'admin' });
+    const token = signToken({ id: admin.id, username: admin.username, role: 'admin', sid: makeSession(db, admin.id) });
+    const id = ev.recordDetectionEvent('cam-1', 'Test camera', ev.ALERT.SOUND, 'sound');
+    ev.setAudioLabel(id, 'cry', 0.9);
+    const response = await call(`${server.url}/api/cameras/alerts`, { token });
+    assert.equal(response.status, 200);
+    const row = response.body.find((r) => r.id === id);
+    assert.equal(row.audio_label, 'cry');
+    assert.equal(row.audio_score, 0.9);
+    assert.equal(row.detail, 'sound');
+    assert.equal(row.camera_name, 'Test camera');
+  } finally { await server.close(); }
 });
 
 test('the camera name is denormalised, so history survives the camera being renamed or deleted', () => {

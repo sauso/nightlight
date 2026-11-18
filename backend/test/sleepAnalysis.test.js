@@ -18,7 +18,7 @@ import path from 'node:path';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
 process.env.DATA_DIR = TMP;
 
-const { computeNight, detectMidnightEpisodes, quietStretchBeforeExit } = await import('../src/lib/sleepAnalysis.js');
+const { computeNight, runNightlySleepJob, detectMidnightEpisodes, quietStretchBeforeExit } = await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
 const CHILD = 'test-child';
@@ -85,7 +85,131 @@ before(() => {
 beforeEach(() => {
   db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
   db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
-  db.prepare('DELETE FROM detection_events WHERE camera_id = ?').run(CAM);
+  db.prepare('DELETE FROM detection_events').run();
+  db.prepare("UPDATE settings SET classify_alert_audio = 1 WHERE id = 'app'").run();
+});
+
+// #1159: a plain sound run used to count as a wake after the former 30-minute grace.
+function soundOnlyNight() {
+  laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(1, 0, 1)), sqlTime(at(1, 8, 1)));
+}
+function cryAlert(time, { camera = CAM, type = 'sound', label = 'cry' } = {}) {
+  db.prepare('INSERT INTO detection_events (camera_id, camera_name, type, created_at, audio_label) VALUES (?, ?, ?, ?, ?)')
+    .run(camera, 'Test camera', type, sqlTime(time), label);
+}
+
+test('#1159: unwitnessed sound-only run is not a wake and the timeline agrees', () => {
+  soundOnlyNight();
+  db.prepare('UPDATE activity_samples SET motion_peak = 0.2 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(at(3, 0, 1))); // a genuine one-minute stir belongs in displayed sleep
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.status, 'ok');
+  assert.equal(night.timeline.find((m) => m.t === sqlTime(at(1, 4, 1))).state, 'quiet');
+  assert.equal(night.segments.filter((s) => ['asleep', 'stir'].includes(s.state))
+    .reduce((n, s) => n + s.minutes, 0), night.asleep_minutes);
+  assert.equal(night.wake_count, 1, 'only the movement run at 22:00 wakes');
+});
+
+test('#1159: a cry-labelled sound alert within two minutes rescues a sound wake', () => {
+  soundOnlyNight();
+  cryAlert(at(1, 3, 1, 43));
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.wake_count, 2);
+});
+
+test('#1159: a cry three minutes away, another camera, another type, and other labels do not rescue', () => {
+  soundOnlyNight();
+  cryAlert(at(0, 57, 1));
+  cryAlert(at(1, 3, 1), { camera: 'other-camera' });
+  cryAlert(at(1, 3, 1), { type: 'motion' });
+  for (const label of [null, 'other', 'voice', 'cough']) cryAlert(at(1, 3, 1), { label });
+  assert.equal(computeNight(CHILD, DATE).wake_count, 1);
+});
+
+test('#1159: turning classification off ignores a previously stored cry label', () => {
+  soundOnlyNight();
+  cryAlert(at(1, 3, 1));
+  db.prepare("UPDATE settings SET classify_alert_audio = 0 WHERE id = 'app'").run();
+  assert.equal(computeNight(CHILD, DATE).wake_count, 1);
+});
+
+test('#1159: movement within two minutes witnesses sound; movement and movement-plus-sound stay active', () => {
+  soundOnlyNight();
+  const baseline = computeNight(CHILD, DATE);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(22, 0)), sqlTime(at(22, 6)));
+  assert.equal(computeNight(CHILD, DATE).wake_count, baseline.wake_count);
+  db.prepare('UPDATE activity_samples SET motion_peak = 0.2 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(at(1, 3, 1)));
+  assert.equal(computeNight(CHILD, DATE).wake_count, baseline.wake_count + 1);
+});
+
+test('#1159: a cry at bedtime can delay onset without movement', () => {
+  laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(19, 30)), sqlTime(at(19, 40)));
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 30)));
+  const noCry = computeNight(CHILD, DATE);
+  cryAlert(at(19, 32, 0, 43));
+  const withCry = computeNight(CHILD, DATE);
+  assert.equal(hhmm(noCry.onset_at), '19:30');
+  assert.equal(hhmm(withCry.onset_at), '19:35');
+});
+
+test('#1159: a cry on a different day cannot witness tonight', () => {
+  soundOnlyNight();
+  cryAlert(at(1, 3, 0));
+  assert.equal(computeNight(CHILD, DATE).wake_count, 1);
+});
+
+test('#1159: UTC minute buckets witness a cry across a daylight-saving change', () => {
+  const start = new Date('2026-10-03T09:30:00Z');
+  const end = new Date('2026-10-03T20:00:00Z');
+  laySamples(start, end, [[new Date('2026-10-03T12:00:00Z'), new Date('2026-10-03T12:06:00Z')]], STILL_OCCUPIED);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, '2026-10-03 16:00:00', '2026-10-03 16:08:00');
+  assert.equal(computeNight(CHILD, '2026-10-03').wake_count, 1);
+  db.prepare(`INSERT INTO detection_events (camera_id, camera_name, type, created_at, audio_label)
+    VALUES (?, 'Test camera', 'sound', '2026-10-03 16:03:43', 'cry')`).run(CAM);
+  assert.equal(computeNight(CHILD, '2026-10-03').wake_count, 2);
+});
+
+test('#1159: sound just across and wholly after the window edge uses the same witness rule', (t) => {
+  laySamples(at(19, 30), at(7, 15, 1), [[at(22, 0), at(22, 6)], [at(7, 12, 1), at(7, 15, 1)]], STILL_OCCUPIED);
+  laySamples(at(7, 15, 1), at(7, 40, 1), [], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 15, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+  const baseline = computeNight(CHILD, DATE);
+  assert.equal(hhmm(baseline.wake_at), '07:15', 'precondition: the post-window extension is used');
+  for (const [from, to] of [[at(6, 56, 1), at(7, 5, 1)], [at(7, 1, 1), at(7, 9, 1)]]) {
+    db.prepare('UPDATE activity_samples SET sound_peak = 0 WHERE camera_id = ?').run(CAM);
+    db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+      .run(CAM, sqlTime(from), sqlTime(to));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.awake_minutes, baseline.awake_minutes);
+    assert.equal(night.asleep_minutes, baseline.asleep_minutes);
+    assert.equal(night.wake_count, baseline.wake_count);
+  }
+});
+
+test('#1159: a watched still night with sustained sound remains ok, not empty', () => {
+  laySamples(at(19, 30), at(7, 0, 1), [], STILL_EMPTY);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(1, 0, 1)), sqlTime(at(1, 8, 1)));
+  assert.equal(computeNight(CHILD, DATE).status, 'ok');
+});
+
+test('#1159: the final nightly pass stores a sound-heavy still night as ok', async (t) => {
+  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(CHILD);
+  laySamples(at(19, 30), at(7, 0, 1), [], STILL_EMPTY);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(1, 0, 1)), sqlTime(at(1, 8, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(12, 0, 1).getTime() });
+  runNightlySleepJob();
+  assert.equal(db.prepare('SELECT status FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(CHILD, DATE)?.status, 'ok');
+  await new Promise((resolve) => setTimeout(resolve, 100)); // let the job's deferred snapshot refresh finish before DB teardown
 });
 
 after(() => {
@@ -1564,10 +1688,8 @@ test('household noise alone cannot invent a bedtime without a put-down', () => {
   assert.equal(hhmm(night.onset_at), '20:05', 'onset must wait for the room to actually settle');
 });
 
-test('a child who cries without moving still counts as an awakening', () => {
-  // The discount is deliberately confined to onset. Mid-night the house is quiet, so noise in a bedroom
-  // is most likely the child's own — and a cry with no movement is precisely the wake-up a parent wants
-  // counted. If this ever fails, the rule has leaked out of the onset search into wake detection.
+test('a child who cries without moving still counts as an awakening when an alert clip heard it', () => {
+  // #1159: a sound-only cry needs a classified alert; raw noise alone no longer witnesses it.
   //
   // #904: the cry carries a REAL p75, and a low one (1.5 dB: a child calling out for under 15 s of each minute),
   // so every cry minute is "spike-only" to the faulty-microphone guard (lib/micGuard.js). Expected: still one
@@ -1575,6 +1697,8 @@ test('a child who cries without moving still counts as an awakening', () => {
   // With the old NULL p75 this test could not see the guard at all (a NULL p75 is never spike-only); now it fails
   // if the guard's window is made short enough to swallow a crying episode.
   layNight(at(18, 20), at(7, 0, 1), { noise: [[at(2, 0, 1), at(2, 10, 1)]], noiseP75: 1.5 });
+  cryAlert(at(2, 2, 1));
+  cryAlert(at(2, 7, 1));
   insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
 
   const night = computeNight(CHILD, DATE);
@@ -1850,9 +1974,8 @@ test('household noise just after bedtime is not the first awakening', () => {
   assert.equal(night.wake_count, 0, 'noise with nothing moving, minutes after falling asleep, is not a wake');
 });
 
-test('the grace is a grace, not a licence: the same noise later IS a wake', () => {
-  // Guard on the test above. Past POST_ONSET_SOUND_WITNESS_MIN the plain rule returns, because
-  // mid-night the house is quiet and a noise in a bedroom is most likely the child's own.
+test('the sound witness rule also applies later in the night', () => {
+  // #1159: the former 30-minute grace no longer limits the movement-or-cry rule.
   layNightOut(at(18, 20), at(7, 0, 1), {
     move: [[at(19, 38), at(19, 41)]],
     noise: [[at(21, 0), at(21, 12)]],
@@ -1860,7 +1983,7 @@ test('the grace is a grace, not a licence: the same noise later IS a wake', () =
   insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 38)));
 
   const night = computeNight(CHILD, DATE);
-  assert.equal(night.wake_count, 1, 'a cry an hour later is a wake-up, discount or no discount');
+  assert.equal(night.wake_count, 0, 'unclassified noise an hour later is not a wake');
 });
 
 test('the onset marker is the START of the settling episode, not the last re-settle', () => {
@@ -2655,6 +2778,7 @@ describe('midnight episode integration', () => {
           db.prepare('UPDATE activity_samples SET sound_peak = 10 WHERE camera_id = ? AND bucket_start = ?')
             .run(CAM, sqlTime(at(23, m)));
         }
+        cryAlert(at(23, Math.floor((from + to - 1) / 2)));
       }
       const before = computeNight(CHILD, DATE);
       assert.equal(before.wake_count, twoRuns ? 2 : 1);
@@ -2681,6 +2805,7 @@ describe('midnight episode integration', () => {
       db.prepare('UPDATE activity_samples SET sound_peak = 10 WHERE camera_id = ? AND bucket_start = ?')
         .run(CAM, sqlTime(at(23, m)));
     }
+    cryAlert(at(23, 8));
     const before = computeNight(CHILD, DATE);
     assert.equal(before.wake_count, 1, 'the activity run alone is already a qualifying wake');
     addPair(at(23, 0), at(23, 3)); // episode spans 23:00-23:03 inclusive; 23:04-23:05 stay quiet
@@ -2716,6 +2841,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
   const wipe = () => {
     db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
     db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM detection_events WHERE camera_id = ?').run(CAM);
   };
 
   // The morning, laid per minute. Returns where things landed so a test can state its expectation from the fixture.
@@ -2750,6 +2876,9 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       else { sound = 0; if (strayTail) motion = STILL_OCCUPIED; } // quiet and silent afterwards
       if (soundStopsAt && t >= soundStopsAt) sound = 0;
       insertTrace.run(CAM, sqlTime(t), motion, motion, sound, out);
+      // These older departure fixtures need their sound-based A wake to remain a wake under #1159.
+      // A cry label every five minutes witnesses the whole audible run without altering bed motion.
+      if (sound > 0 && Math.round((t - a0) / 60000) % 5 === 2) cryAlert(t);
     }
     const tOut = plus(clusterEnd, -1, 23); // the final exit, 37 s before the gap it corroborates opens
     insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(plus(restEnd, 0, 10)));
@@ -2845,7 +2974,10 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
     // a stir ending at 05:30, quiet and silent from 05:31, then the room wakes at 06:25 and stays active
     for (let m = at(5, 25, 1); m < at(5, 31, 1); m = plus(m, 1)) insertTrace.run(CAM, sqlTime(m), 0.15, 0.15, 0, 0);
     for (let m = at(5, 31, 1); m < at(6, 25, 1); m = plus(m, 1)) insertTrace.run(CAM, sqlTime(m), STILL_EMPTY, STILL_EMPTY, 0, 0);
-    for (let m = at(6, 25, 1); m < at(8, 0, 1); m = plus(m, 1)) insertTrace.run(CAM, sqlTime(m), STILL_EMPTY, STILL_EMPTY, 10, 0);
+    for (let m = at(6, 25, 1); m < at(8, 0, 1); m = plus(m, 1)) {
+      insertTrace.run(CAM, sqlTime(m), STILL_EMPTY, STILL_EMPTY, 10, 0);
+      if (Math.round((m - at(6, 25, 1)) / 60000) % 5 === 2) cryAlert(m);
+    }
     insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(5, 31, 1, 10)));
     t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
     const night = computeNight(CHILD, DATE);
@@ -2866,6 +2998,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       for (let m = at(6, 0, 1); m < at(9, 0, 1); m = plus(m, 1)) {
         const stir = m.getTime() === at(6, 50, 1).getTime();
         insertTrace.run(CAM, sqlTime(m), stir ? 0.05 : STILL_EMPTY, stir ? 0.05 : STILL_EMPTY, m < at(7, 0, 1) ? 10 : 0, 0);
+        if (m < at(7, 0, 1) && Math.round((m - at(6, 0, 1)) / 60000) % 5 === 2) cryAlert(m);
       }
       insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(6, 50, 1, 20)));
     };
@@ -2933,6 +3066,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       const k = Math.round((m - at(6, 0, 1)) / 60000);
       const bed = ((k >= restlessFrom && k < 30) || k === blipAt || (lateActivity && k >= 70 && k < 92)) ? 0.15 : STILL_EMPTY;
       insertTrace.run(CAM, sqlTime(m), bed, bed, k < 60 ? 10 : 0, outZone && k >= 20 && k < 30 ? 0.99 : 0);
+      if (k < 60 && k % 5 === 2) cryAlert(m);
     }
     insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(6, 29, 1, 50)));
     if (lateActivity) insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(7, 31, 1, 50)));
@@ -3098,6 +3232,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
         // end and A exists (without it the veto never runs: #509 C5).
         const sound = k >= soundFrom && om(k) < at(7, 30, 1) ? 10 : 0;
         insertTrace.run(CAM, sqlTime(om(k)), motion, motion, sound, out);
+        if (sound > 0 && (k - soundFrom) % 5 === 2) cryAlert(om(k));
       }
       if (eveningTail) {
         insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(20, 41, 0, 30)));

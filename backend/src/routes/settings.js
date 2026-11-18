@@ -64,6 +64,7 @@ const ADMIN_FIELDS = [
   'wake_clips_enabled',
   'wake_clip_seconds',
   'wake_clip_retention_days',
+  'classify_alert_audio',
 ];
 
 function pick(row, fields) {
@@ -160,7 +161,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     mqtt_tls, mqtt_tls_ca, mqtt_tls_verify,
     ptz_step, clip_pre_roll_s, clip_post_roll_s, clip_retention_days, clip_retention_max_gb,
     ondemand_enabled, ondemand_pre_roll_s, ondemand_max_duration_s,
-    wake_clips_enabled, wake_clip_seconds, wake_clip_retention_days,
+    wake_clips_enabled, wake_clip_seconds, wake_clip_retention_days, classify_alert_audio,
     camera_offline_alert_enabled, camera_offline_alert_minutes,
     snooze_alert_enabled, snooze_alert_minutes,
   } = req.body || {};
@@ -264,6 +265,11 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   // above, but note wake clips accrue every night whether or not anyone looks at them.
   let wakeEnabled = existing.wake_clips_enabled;
   if (wake_clips_enabled !== undefined) wakeEnabled = wake_clips_enabled ? 1 : 0;
+  // #1159: strict switch parsing prevents a string "false" from silently enabling analysis.
+  if (classify_alert_audio !== undefined && ![true, false, 1, 0].includes(classify_alert_audio)) {
+    return res.status(400).json({ error: 'Alert audio analysis must be on or off (0 or 1)', field: 'classify_alert_audio' });
+  }
+  const classifyAlertAudio = classify_alert_audio === undefined ? existing.classify_alert_audio : Number(Boolean(classify_alert_audio));
   // Turning wake clips on or off changes which cameras clipRingWanted() says need a ring (issue #387)
   // — same re-arm as on-demand's own on/off, below.
   const wakeClipsChanged = wakeEnabled !== existing.wake_clips_enabled;
@@ -377,7 +383,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
          camera_offline_alert_enabled = ?, camera_offline_alert_minutes = ?,
          snooze_alert_enabled = ?, snooze_alert_minutes = ?,
          ondemand_enabled = ?, ondemand_pre_roll_s = ?, ondemand_max_duration_s = ?,
-         wake_clips_enabled = ?, wake_clip_seconds = ?, wake_clip_retention_days = ?
+         wake_clips_enabled = ?, wake_clip_seconds = ?, wake_clip_retention_days = ?, classify_alert_audio = ?
      WHERE id = ?`
   ).run(
     app_name?.trim() || existing.app_name,
@@ -410,6 +416,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     wakeEnabled,
     wakeSeconds,
     wakeRetentionDays,
+    classifyAlertAudio,
     'app'
   );
   refreshMqttConnection();

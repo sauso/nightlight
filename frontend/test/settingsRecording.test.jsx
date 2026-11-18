@@ -143,6 +143,7 @@ describe('saving', () => {
     expect(path).toBe('/settings');
     // The two alert-clip limits are absent on purpose when untouched (#395, next test).
     expect(Object.keys(body).sort()).toEqual([
+      'classify_alert_audio',
       'clip_post_roll_s',
       'clip_pre_roll_s',
       'ondemand_enabled',
@@ -203,6 +204,29 @@ describe('saving', () => {
     await user.click(await screen.findByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     expect(putSpy.mock.calls[0][1].wake_clips_enabled).toBe(true);
+  });
+
+  test.each([[1, true], [0, false]])('audio analysis stored as %i shows checked=%s', async (stored, checked) => {
+    renderWith({ classify_alert_audio: stored });
+    expect((await screen.findByLabelText('Listen for crying, coughing and talking in alert clips')).checked).toBe(checked);
+  });
+
+  test('audio analysis defaults on and sends 0 when turned off', async () => {
+    const { user } = renderWith();
+    const toggle = await screen.findByLabelText('Listen for crying, coughing and talking in alert clips');
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+    expect(putSpy.mock.calls[0][1].classify_alert_audio).toBe(0);
+  });
+
+  test('audio analysis can be turned on and saved as 1', async () => {
+    const { user } = renderWith({ classify_alert_audio: 0 });
+    await user.click(await screen.findByLabelText('Listen for crying, coughing and talking in alert clips'));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+    expect(putSpy.mock.calls[0][1].classify_alert_audio).toBe(1);
   });
 
   test('a typed value reaches the payload', async () => {

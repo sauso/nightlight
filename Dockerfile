@@ -33,6 +33,11 @@ RUN npm run build
 # without risking an unannounced breaking change from a future major version.
 FROM bluenviron/mediamtx:1 AS mediamtx-binary
 
+# #1159: immutable model and class map; BuildKit verifies bytes before either enters the image.
+FROM scratch AS yamnet-model
+ADD --checksum=sha256:1510041dce24a2e9e84ec546807ac408ae496da6d1ed41bc3ccba649623f8e19 https://huggingface.co/andrelgomes/yamnet-onnx/resolve/8a03a1572569685c42fdbef54ff36435dbaaf689/yamnet.onnx /yamnet.onnx
+ADD --checksum=sha256:cdf24d193e196d9e95912a2667051ae203e92a2ba09449218ccb40ef787c6df2 https://raw.githubusercontent.com/tensorflow/models/dfffd623b6be8d1d9744b8e261fbac370d17c46d/research/audioset/yamnet/yamnet_class_map.csv /yamnet_class_map.csv
+
 # --- Stage 3: install the backend's production dependencies ---
 # Kept separate from the runtime so the compiler toolchain and npm/node-gyp caches this
 # needs are thrown away with the stage instead of shipping in the final image (~300MB).
@@ -45,6 +50,12 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev
+# Node's package export imports dist/ort.node.min.mjs, which dynamically loads only the
+# simd-threaded WASM loader and binary (measured with the Node entry in 1.22.0). Browser,
+# WebGPU/JSEP and source-map bundles add about 60 MB and are unused by this CPU worker.
+RUN find node_modules/onnxruntime-web/dist -maxdepth 1 -type f \
+  ! -name 'ort.node.min.mjs' ! -name 'ort-wasm-simd-threaded.mjs' \
+  ! -name 'ort-wasm-simd-threaded.wasm' -delete
 
 # --- Stage 4: reviewed Tailscale static binaries ---
 # #971: version and both vendor SHA-256 values were captured on 2026-11-04 and
@@ -115,6 +126,8 @@ COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
 RUN chmod +x /usr/local/bin/mediamtx
 COPY --from=tailscale-binaries --chown=0:0 --chmod=0755 /tailscale-bin/tailscale /tailscale-bin/tailscaled /usr/local/bin/
 COPY --chown=0:0 licenses/tailscale/ /usr/share/licenses/tailscale/
+COPY --chown=0:0 licenses/yamnet/ /usr/share/licenses/yamnet/
+RUN chmod 0644 /usr/share/licenses/yamnet/*
 # Notices are data: readable by everyone, executable by nobody (COPY --chmod would also strip the directory's x bit).
 RUN chmod 0644 /usr/share/licenses/tailscale/* && tailscaled --version && tailscale version --daemon=false && \
     test "$(stat -c '%u:%g:%a' /usr/local/bin/tailscale)" = 0:0:755 && \
@@ -124,6 +137,10 @@ RUN chmod 0644 /usr/share/licenses/tailscale/* && tailscaled --version && tailsc
 # node-gyp/npm caches. package.json comes along so anything that reads the app version at
 # runtime still can.
 COPY --from=backend-deps /app/node_modules ./node_modules
+# The model is data: root-owned, readable by the app user, executable by nobody. COPY --chmod would also strip
+# the directory's x bit (found by running the built image as the app user, #1159), so set modes in a RUN.
+COPY --from=yamnet-model --chown=0:0 /yamnet.onnx /yamnet_class_map.csv /app/models/
+RUN chmod 0755 /app/models && chmod 0644 /app/models/yamnet.onnx /app/models/yamnet_class_map.csv
 COPY backend/package.json ./
 
 # Drop the base image's bundled npm. npm is the package manager, not part of the running app

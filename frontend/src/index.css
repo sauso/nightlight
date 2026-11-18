@@ -2244,7 +2244,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
    same muted colour the old strip tile used, so it reads as an explanation and not as an alert. */
 .alert-item__thumb--failed { color: var(--offline); }
 .alert-item__body { flex: 1; min-width: 0; display: block; }
-.alert-item__name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+.alert-item__name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .alert-item__nametext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* "REC" badge shown to the right of the kind while a clip is being captured. */
 .rec-badge { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: #e0556b; background: rgba(224, 85, 107, 0.13); padding: 1px 6px 1px 5px; border-radius: 20px; }
@@ -2348,7 +2348,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .clip-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .clip-row__body { flex: 1; min-width: 0; cursor: pointer; }
 .clip-row__name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.clip-row__meta { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.clip-row__meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 .clip-actionbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--bg-elevated); border-top: 1px solid var(--border); box-shadow: 0 -8px 24px -18px rgba(0, 0, 0, 0.4); }
 .clip-actionbar > span { font-weight: 600; font-size: 14px; }
 /* In-player "delete this clip?" confirm row */

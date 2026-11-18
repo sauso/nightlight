@@ -40,3 +40,11 @@ test('old schema gains protected columns with default zero and a second migratio
   }
   second.close();
 });
+
+test('#1159: old events remain unclassified and the new setting defaults on', () => {
+  const cols = db.prepare('PRAGMA table_info(detection_events)').all().map((c) => c.name);
+  assert.ok(cols.includes('audio_label') && cols.includes('audio_score'));
+  assert.deepEqual(db.prepare('SELECT audio_label, audio_score FROM detection_events').get(),
+    { audio_label: null, audio_score: null });
+  assert.equal(db.prepare('PRAGMA table_info(settings)').all().find((c) => c.name === 'classify_alert_audio').dflt_value, '1');
+});

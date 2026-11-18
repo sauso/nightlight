@@ -81,6 +81,8 @@ const WRITTEN = SAMPLE_COLUMNS.filter((c) => !AUTO_COLUMNS.has(c));
 const insertRow = db.prepare(
   `INSERT INTO activity_samples (${WRITTEN.join(', ')}) VALUES (${WRITTEN.map((c) => `@${c}`).join(', ')})`
 );
+const insertCryWitness = db.prepare(`INSERT INTO detection_events
+  (camera_id, camera_name, type, created_at, audio_label) VALUES (?, 'Test camera', 'sound', ?, 'cry')`);
 function writeMinute(t, { move = false, sound = QUIET, p75Null = false, still = STILL_OCCUPIED, frames = 300 }) {
   const [peak, p75] = sound;
   const spiky = peak > 6 && p75 <= 4;
@@ -116,10 +118,16 @@ function layNight({ from = at(16, 30), to = at(10, 0, 1), move = [], sound = [],
       still: still(t),
       frames: inAny(t, unwatched) ? 0 : 300,
     });
+    // #1159: these older fixtures isolate the microphone-fault rule, so give their audible
+    // minutes a cry witness. A false cry preserves the former sound-active verdict; micGuard
+    // must still discount spike-only sound before that verdict. New unwitnessed-noise cases
+    // live in sleepAnalysis.test.js.
+    if (hit && hit[1][0] > 6) insertCryWitness.run(CAM, sqlTime(t));
   }
 }
 const clearNight = () => {
-  for (const t of ['activity_samples', 'bed_transitions', 'sleep_nights', 'sleep_reviews']) db.prepare(`DELETE FROM ${t}`).run();
+  for (const t of ['activity_samples', 'bed_transitions', 'sleep_nights', 'sleep_reviews', 'detection_events']) db.prepare(`DELETE FROM ${t}`).run();
+  db.prepare("DELETE FROM sqlite_sequence WHERE name = 'detection_events'").run();
 };
 const insertTransition = (type, when) =>
   db.prepare('INSERT INTO bed_transitions (camera_id, type, peak, created_at) VALUES (?, ?, 0.4, ?)').run(CAM, type, sqlTime(when));

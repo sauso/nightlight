@@ -5,6 +5,7 @@ import Modal from './Modal.jsx';
 import ModalActions from './ModalActions.jsx';
 import SwitchRow from './SwitchRow.jsx';
 import { ProtectedBadge } from './ClipProtection.jsx';
+import { audioLabelText } from '../lib/audioLabel.js';
 
 // Detection alerts (motion now, sound later) — see backend lib/detectionEvents.js ALERT.
 const TYPE_META = {
@@ -113,6 +114,7 @@ export default function RecentAlerts() {
           {alerts.map((ev) => {
             const meta = TYPE_META[ev.type] || { label: ev.type, className: '' };
             const when = parseUtc(ev.created_at);
+            const audioLabel = ev.type === 'sound' ? audioLabelText(ev.audio_label) : null;
             return (
               <li key={ev.id} className="event-log__row">
                 <span className={`event-log__dot ${meta.className}`} aria-hidden="true" />
@@ -120,6 +122,7 @@ export default function RecentAlerts() {
                   <div className="event-log__line">
                     <span className="event-log__camera">{ev.camera_name}</span>
                     <span className="event-log__type">{meta.label}</span>
+                    {audioLabel && <span className="clip-protected-badge">{audioLabel}</span>}
                     {!!ev.protected && <ProtectedBadge />}
                   </div>
                   {ev.detail && <div className="event-log__detail">{ev.detail}</div>}
