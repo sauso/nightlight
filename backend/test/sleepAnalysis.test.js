@@ -158,6 +158,16 @@ test('#1159: a cry at bedtime can delay onset without movement', () => {
   assert.equal(hhmm(withCry.onset_at), '19:35');
 });
 
+test('#1159: the alerts a night returns carry the stored audio label (the wake-ups list shows it as a badge)', (t) => {
+  laySamples(at(19, 30), at(7, 15, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+  t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+  cryAlert(at(22, 2), { label: 'voice' });
+  db.prepare(`INSERT INTO detection_events (camera_id, camera_name, type, created_at) VALUES (?, 'Test camera', 'sound', ?)`)
+    .run(CAM, sqlTime(at(22, 4)));
+  const alerts = computeNight(CHILD, DATE, { includeTimeline: true }).alerts;
+  assert.deepEqual(alerts.map((a) => a.audio_label), ['voice', null], 'the label is returned, and an unclassified alert says null');
+});
+
 test('#1159: a cry on a different day cannot witness tonight', () => {
   soundOnlyNight();
   cryAlert(at(1, 3, 0));

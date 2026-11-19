@@ -11,6 +11,7 @@ import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
 import WakeClipPlayerModal from '../components/WakeClipPlayerModal.jsx';
 import { ProtectedBadge } from '../components/ClipProtection.jsx';
+import { audioLabelText } from '../lib/audioLabel.js';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
@@ -863,6 +864,9 @@ export function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
 // thumbnail becomes a play button that opens the same clip player used in the alert feed.
 function AlertRow({ a, fmtTime, onPlay }) {
   const hasClip = a.clip_status === 'ready';
+  // Same rule as the alert lists (#1159): only a sound alert shows what the clip's audio was heard to be. The alert query
+  // returns the stored label on any row, so the type check lives here, as it does in AlertList and RecentAlerts.
+  const heard = a.type === 'sound' ? audioLabelText(a.audio_label) : null;
   const thumb = a.snapshot ? (
     <img className="sleep-wakes__thumb" src={api.url(`/cameras/alerts/${a.id}/snapshot`)} alt="" loading="lazy" />
   ) : (
@@ -880,7 +884,7 @@ function AlertRow({ a, fmtTime, onPlay }) {
         <span className="sleep-wakes__thumbwrap">{thumb}</span>
       )}
       <div className="sleep-wakes__alert-body">
-        <span className="sleep-wakes__alert-label">{alertLabel(a.type)}{a.clip_status === 'pending' ? ' · recording…' : ''}{hasClip && !!a.protected && <ProtectedBadge />}</span>
+        <span className="sleep-wakes__alert-label">{alertLabel(a.type)}{a.clip_status === 'pending' ? ' · recording…' : ''}{hasClip && !!a.protected && <ProtectedBadge />}{heard && <span className="clip-protected-badge">{heard}</span>}</span>
         <span className="sleep-wakes__alert-meta">
           {fmtTime(a.created_at)}{a.camera_name ? ` · ${a.camera_name}` : ''}{a.detail ? ` · ${a.detail}` : ''}
         </span>
@@ -1195,6 +1199,11 @@ function LineTrack({ points, startMs, endMs, color, icon, label, caption, format
     .filter((run) => run.length > 1)
     .map((run) => `${runPath(run)} L${run[run.length - 1].x.toFixed(2)} ${H} L${run[0].x.toFixed(2)} ${H} Z`)
     .join(' ');
+  // A hole in the data is bridged by a DASHED straight line from the last reading before it to the first after it, so the
+  // track reads as one continuous trace instead of scattered pieces (owner, 2026-11-19). The dashes are the statement that
+  // nothing was measured there: the solid line above stays real readings only, and the vitals note says what dashes mean.
+  // Never drawn before the first or after the last reading (nothing to join), and never filled like the area.
+  const bridges = runs.slice(1).map((run, i) => `M${at(runs[i][runs[i].length - 1])} L${at(run[0])}`).join(' ');
 
   return (
     <div className={`sleep-climate${className ? ` ${className}` : ''}`}>
@@ -1207,6 +1216,12 @@ function LineTrack({ points, startMs, endMs, color, icon, label, caption, format
           <path d={area} fill={color} opacity="0.12" />
           <path d={d} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke"
             strokeLinejoin="round" strokeLinecap="round" />
+          {bridges && (
+            // Third <path>, after the solid stroke, so the stroke stays the second path of the svg (the tests and the
+            // area/stroke order rely on it). Dashes are in screen pixels because of the non-scaling stroke.
+            <path className="sleep-climate__bridge" d={bridges} fill="none" stroke={color} strokeWidth="1.5" strokeDasharray="3 3"
+              opacity="0.7" vectorEffect="non-scaling-stroke" strokeLinecap="butt" />
+          )}
         </svg>
         <span className="sleep-climate__hi">{format(labelsFromData ? dataMax : max)}</span>
         <span className="sleep-climate__lo">{format(labelsFromData ? dataMin : min)}</span>
@@ -1241,7 +1256,8 @@ function ClimateTrack({ night, startMs, endMs, tempUnit }) {
 
 // The radar sensor's heart rate and breathing across the same axis, as two thin tracks under the temperature one (`night.vitals`,
 // from the server; the 5-minute series only comes with the detail read). Each needs two points, else nothing is drawn. A hole in
-// the data is a hole in the line (VITALS_GAP_MS), never a line drawn through it. The caption is the server's summary, which is over
+// the data is a hole in the SOLID line (VITALS_GAP_MS); since 2026-11-19 a dashed bridge joins the two sides and a legend says it is
+// an estimate, so the solid line never claims a reading that was not taken. The caption is the server's summary, which is over
 // the time asleep (onset to wake), while the tracks show the whole timeline: a settling child or a parent at the bed can be on the
 // line but is not in the average. ⚠️ A SENSOR ESTIMATE, not a medical measurement: the sleep page says so under the tracks, and
 // nothing here is coloured as a warning.
@@ -1254,6 +1270,9 @@ function VitalsTracks({ night, startMs, endMs }) {
   const rr = pointsOf('rr');
   const showHr = hr.length >= 2;
   const showRr = rr.length >= 2;
+  // The same test LineTrack uses to start a new run, so the legend appears exactly when a dashed bridge is drawn. A track that
+  // is not shown (under two points) has no bridge, so it must not trigger the legend either.
+  const hasHole = (pts) => pts.length >= 2 && pts.some((p, i) => i > 0 && p.ms - pts[i - 1].ms > VITALS_GAP_MS);
   if (!showHr && !showRr) return null;
   // "avg 82 bpm · 71–103" from the summary when the server sent one for that role. With NO summary (valid readings in the
   // display span but none between onset and wake, so the track draws and its caption used to be blank) the range of the
@@ -1276,6 +1295,13 @@ function VitalsTracks({ night, startMs, endMs }) {
           caption={captionOf(vitals.rr, '/min', rr)} format={(v) => String(Math.round(v))} />
       )}
       <div className="sleep-vitals__note">Sensor estimates from the radar, not for medical use.</div>
+      {/* Only when a dashed bridge is actually drawn on one of the tracks. */}
+      {(hasHole(hr) || hasHole(rr)) && (
+        <div className="sleep-vitals__legend">
+          <svg width="22" height="6" viewBox="0 0 22 6" aria-hidden="true"><path d="M0 3 L22 3" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 3" fill="none" /></svg>
+          <span>Estimated: no data was available</span>
+        </div>
+      )}
     </>
   );
 }

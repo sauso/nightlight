@@ -1610,6 +1610,34 @@ describe('what a night lists', () => {
     expect(within(row).getByText(/Nursery/)).toBeTruthy();
   });
 
+  test('#1159: a sound alert shows what its clip was heard to be; nothing else does', async () => {
+    // The alert lists already showed this badge; the wake-ups list in a night's detail did not, because its alerts come
+    // from a different query. The fixture is hostile: a MOTION alert carrying a stored label (the column exists on every
+    // row), a sound alert with an unrecognised label, and one with none must show no badge at all.
+    mockSleep({
+      night: {
+        ...NIGHT,
+        wake_count: 1,
+        wakes: [{ start_at: '2026-08-30 14:00:00', end_at: '2026-08-30 14:30:00', minutes: 30 }],
+        alerts: [
+          { id: 'a1', type: 'sound', camera_name: 'Nursery', detail: '+11 dB', created_at: '2026-08-30 14:05:00', audio_label: 'voice' },
+          { id: 'a2', type: 'sound', camera_name: 'Nursery', detail: '+12 dB', created_at: '2026-08-30 14:10:00', audio_label: 'cry' },
+          { id: 'a3', type: 'motion', camera_name: 'Nursery', detail: '3.1%', created_at: '2026-08-30 14:12:00', audio_label: 'cry' },
+          { id: 'a4', type: 'sound', camera_name: 'Nursery', detail: '+13 dB', created_at: '2026-08-30 14:15:00', audio_label: 'other' },
+          { id: 'a5', type: 'sound', camera_name: 'Nursery', detail: '+14 dB', created_at: '2026-08-30 14:20:00', audio_label: null },
+        ],
+      },
+    });
+    const { user } = mount('Australia/Melbourne');
+    await user.click((await screen.findByText(/5 alerts$/)).closest('button'));
+    const rowOf = async (detail) => (await screen.findByText(detail)).closest('.sleep-wakes__alert');
+    expect(within(await rowOf(/\+11 dB/)).getByText('Talking')).toBeTruthy();
+    expect(within(await rowOf(/\+12 dB/)).getByText('Crying')).toBeTruthy();
+    expect(within(await rowOf(/3\.1%/)).queryByText('Crying'), 'a motion alert never shows an audio badge').toBeNull();
+    expect(within(await rowOf(/\+13 dB/)).queryByText(/Crying|Coughing|Talking/), 'other shows nothing').toBeNull();
+    expect(within(await rowOf(/\+14 dB/)).queryByText(/Crying|Coughing|Talking/), 'unlabelled shows nothing').toBeNull();
+  });
+
   test('★ an alert AT THE MOMENT OF WAKING attaches to the morning wake (roadmap §1.5 Gap A)', async () => {
     // Closes the client/server seam: the backend now emits one extra row spanning [wake_at, window_end)
     // for the morning wake itself (sleepAnalysis.js), specifically so an alert firing at the exact

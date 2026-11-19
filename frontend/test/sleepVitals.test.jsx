@@ -254,6 +254,39 @@ describe('the heart-rate and breathing tracks', () => {
     expect(subPaths(strokeD(hole, '.sleep-climate--hr'))).toBe(2);
   });
 
+  test('a hole is joined by a dashed bridge from the last reading before it to the first after it, with a legend', async () => {
+    const broken = await open(withVitals());
+    // Each sub-path's points, as "x y" strings, so the bridge's two ends can be compared with the solid line's.
+    const pointsOfRuns = (d) => d.split('M').filter(Boolean).map((s) => s.match(/-?\d+(?:\.\d+)? -?\d+(?:\.\d+)?/g));
+    for (const cls of ['.sleep-climate--hr', '.sleep-climate--rr']) {
+      const [first, second] = pointsOfRuns(strokeD(broken, cls));
+      const bridges = broken.querySelectorAll(`${cls} .sleep-climate__bridge`);
+      expect(bridges, `${cls}: one bridge for one hole`).toHaveLength(1);
+      expect(pointsOfRuns(bridges[0].getAttribute('d'))).toEqual([[first[first.length - 1], second[0]]]);
+      expect(bridges[0].getAttribute('stroke-dasharray'), 'dashed, so it cannot be read as a measurement').toBeTruthy();
+      expect(bridges[0].getAttribute('fill')).toBe('none');
+    }
+    expect(screen.getAllByText('Estimated: no data was available'), 'one legend for both tracks').toHaveLength(1);
+    // The solid stroke is still the second path (the bridge comes after it), so it is real readings only.
+    expect(subPaths(strokeD(broken, '.sleep-climate--hr'))).toBe(2);
+  });
+
+  test('no hole: no bridge and no legend; a track with a single hole does not borrow the other track\'s', async () => {
+    const whole = await open(withVitals([pt('12:00', 80, 20), pt('12:05', 81, 20), pt('12:10', 82, 21)]));
+    expect(whole.querySelectorAll('.sleep-climate__bridge')).toHaveLength(0);
+    expect(screen.queryByText(/Estimated: no data was available/)).toBeNull();
+    vi.restoreAllMocks();
+    cleanup();
+    // Heart rate has a 20-minute hole (12:05 to 12:25); breathing has a reading every five minutes throughout.
+    const mixed = await open(withVitals([
+      pt('12:00', 80, 20), pt('12:05', 81, 20), pt('12:10', null, 21), pt('12:15', null, 21), pt('12:20', null, 22),
+      pt('12:25', 82, 22), pt('12:30', 83, 22),
+    ]));
+    expect(mixed.querySelectorAll('.sleep-climate--hr .sleep-climate__bridge')).toHaveLength(1);
+    expect(mixed.querySelectorAll('.sleep-climate--rr .sleep-climate__bridge'), 'breathing has no hole').toHaveLength(0);
+    expect(screen.getAllByText('Estimated: no data was available')).toHaveLength(1);
+  });
+
   test('a flat series is not pinned to an edge, and its labels are the data\'s own whole number', async () => {
     const container = await open(withVitals([pt('12:00', 82, 20), pt('12:05', 82, 20), pt('12:10', 82, 20)]));
     const d = strokeD(container, '.sleep-climate--hr');
@@ -311,5 +344,6 @@ describe('the temperature track, now drawn by the shared LineTrack', () => {
     const { container } = mount();
     await screen.findByText('Wake-ups');
     expect(subPaths(container.querySelectorAll('.sleep-climate__chart path')[1].getAttribute('d'))).toBe(1);
+    expect(container.querySelectorAll('.sleep-climate__bridge'), 'and it draws no dashed bridge').toHaveLength(0);
   });
 });
