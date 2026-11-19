@@ -11,10 +11,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
-- Offline alert-clip analysis adds Crying, Coughing or Talking badges to sound alerts and clips, with a switch in Recording settings (default on, 0 or 1). Older alerts have no badge. The image grows by about 35 MB (a 16 MB model plus about 15 MB of runtime) and the server uses about 250-315 MB more memory while a clip is analysed, released a minute later; the new runtime is not measured on arm64; coughing and talking labels are best-effort (#1159).
+- Offline alert-clip analysis adds Crying, Coughing or Talking badges to sound alerts (including those listed under a night's wake-ups) and clips, with a switch in Recording settings (default on, 0 or 1). Older alerts have no badge. The image grows by about 35 MB (a 16 MB model plus about 15 MB of runtime) and the server uses about 250-315 MB more memory while a clip is analysed, released a minute later; the new runtime is not measured on arm64; coughing and talking labels are best-effort (#1159).
 
 ### Changed
 
+- On a night's sleep page, where the heart-rate or breathing sensor gave no reading for more than 10 minutes, the track now joins the two sides with a dashed line and a legend, "Estimated: no data was available", instead of leaving a blank. The solid line still shows real readings only; nothing is drawn before the first or after the last reading.
 - Brief sound with no nearby movement no longer counts as awake once a child is asleep unless an alert clip was labelled as crying. Sound lasting 20 or more consecutive minutes still counts as awake, even without movement; the bedtime search for sleep onset continues to ignore it. Stored nights are not recomputed, so expect a step in the sleep-score trend (#1159).
 
 - Session lists now include each session's `user_id`, and the Users screen matches sessions to accounts by that id (#1093).

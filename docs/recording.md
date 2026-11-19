@@ -40,7 +40,7 @@ because a straight copy can only cut on a keyframe and the clip has to be exactl
 |---|---|---|---|
 | Pre-roll (seconds) | 5 | 0–30 | How much *before* the trigger is included |
 | Post-roll (seconds) | 15 | 5–120 | How much *after* the trigger is included |
-| Listen for crying, coughing and talking in alert clips | On (1) | 0 or 1 | Analyses saved alert clips on this device; nothing leaves it. Sound alerts can show a Crying, Coughing or Talking badge; other results show no badge. Older alerts, from before this analysis was added, have no badge. Labels are best-effort, particularly coughing and talking. Only crying can affect the nightly sleep figures. Turning it off also makes sleep analysis ignore labels already saved. |
+| Listen for crying, coughing and talking in alert clips | On (1) | 0 or 1 | Analyses saved alert clips on this device; nothing leaves it. Sound alerts can show a Crying, Coughing or Talking badge, in the alert lists, the Clips page and the wake-ups on a night's sleep page; other results show no badge. Older alerts, from before this analysis was added, have no badge. Labels are best-effort, particularly coughing and talking. Only crying can affect the nightly sleep figures. Turning it off also makes sleep analysis ignore labels already saved. |
 | Keep clips for (days) | 14 | 0–365 | Sets the day limit for unprotected alert videos; 0 turns that limit off. Whatever this is set to, Recent alerts keeps at most 30 days and 2,000 unprotected entries: older unprotected alerts, with their clips and pictures, are removed as new alerts are recorded. Protected alerts are kept. |
 | Storage cap (GB) | 5 | 0–2000 | 0 = no size limit; oldest deleted first |
 

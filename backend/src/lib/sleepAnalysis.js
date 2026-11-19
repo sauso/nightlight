@@ -3439,7 +3439,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
       ? db
           .prepare(
             `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot,
-                    clip_status, clip_duration_s, protected
+                    clip_status, clip_duration_s, protected, audio_label
                FROM detection_events
                WHERE camera_id IN (${aph}) AND created_at >= ? AND created_at < ?
                ORDER BY created_at ASC`

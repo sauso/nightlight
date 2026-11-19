@@ -1997,6 +1997,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .sleep-climate--rr .sleep-climate__label { color: var(--sleep-rr); }
 .sleep-climate--next { margin-top: 10px; padding-top: 0; border-top: 0; }
 .sleep-vitals__note { margin-top: 8px; font-size: 11.5px; line-height: 1.4; color: var(--text-secondary); }
+.sleep-vitals__legend { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11.5px; line-height: 1.4; color: var(--text-secondary); }
 
 /* Temperature ↔ sleep insight card (Phase 5) */
 .sleep-insight__title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px; }
