@@ -1979,6 +1979,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .sleep-wakes__alert-ico { color: var(--sleep-wake-text); flex: none; }
 .sleep-wakes__alert-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sleep-wakes__alert-label { font-weight: 600; color: var(--text-primary); }
+/* The badges (Protected, and the audio Crying/Coughing/Talking one) follow the label as inline text, so without a margin they
+   touch the word before them (seen on a phone, 2026-11-19). The alert lists put theirs in a flex row with its own gap. */
+.sleep-wakes__alert-label .clip-protected-badge { margin-left: 6px; }
 .sleep-wakes__alert-meta { font-variant-numeric: tabular-nums; }
 
 /* Room-temperature companion track under the sleep bar (Phase 5) */
