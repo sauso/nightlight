@@ -15,7 +15,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
-- On a night's sleep page, where the heart-rate or breathing sensor gave no reading for 10 minutes or more, the track now joins the two sides with a dashed line and a legend, "Estimated: no data was available", instead of leaving a blank. The solid line still shows real readings only; nothing is drawn before the first or after the last reading.
+- On a night's sleep page, where the heart-rate or breathing sensor gave no reading for more than 10 minutes, the track now joins the two sides with a dashed line and a legend, "Estimated: no data was available", instead of leaving a blank. The solid line still shows real readings only; nothing is drawn before the first or after the last reading.
 - Brief sound with no nearby movement no longer counts as awake once a child is asleep unless an alert clip was labelled as crying. Sound lasting 20 or more consecutive minutes still counts as awake, even without movement; the bedtime search for sleep onset continues to ignore it. Stored nights are not recomputed, so expect a step in the sleep-score trend (#1159).
 
 - Session lists now include each session's `user_id`, and the Users screen matches sessions to accounts by that id (#1093).
