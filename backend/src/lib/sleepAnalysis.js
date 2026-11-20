@@ -435,6 +435,21 @@ const ONSET_LOOKBEHIND_MS = 3 * 60 * 60 * 1000;
 // An into_bed this long before a quiet run still counts as the put-down that started it (the child is
 // placed, fusses a little, then settles).
 const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
+// A far pre-window put-down over an empty-looking bed gave false onsets on 2026-10-10 (#669),
+// 2026-11-07 and 2026-11-20 (52, 83/84 and 117 minutes early). On the 2026-11-20 staging
+// snapshot, 62 owner-corrected nights had no confirmed real onset over 50 minutes early; the
+// 2026-09-06 real case sits exactly at 50 (displayed gap 46). The 2026-11-20 false span had
+// 2 occupied minutes of 117, and 2026-11-07 had 0 of 83. One per 30 watched minutes scales
+// the existing OCCUPANCY_MIN_MINUTES comment's quietest-real rate (5-9 per 150) at its low end.
+// This rate was NOT measured on confirmed real early nights (2026-09-04, 09-06): their samples
+// are beyond retention. About 18-22% of 57 completed staging nights had fewer than 3 occupied
+// minutes in their first 46 minutes, and one owner-reviewed night had 0 of 117. This is a number
+// tuned on two cameras in one house. A very still real sleeper beyond this margin can be rejected
+// and read as asleep only from the window start (an error up to the whole early span); a bed zone
+// seeing only part of a child or a window set too late is most exposed. Ordinary stirs still pass,
+// and the correction flow can fix a late onset.
+const PREWINDOW_ONSET_FREE_MIN = 50;
+const PREWINDOW_EVIDENCE_PER_MIN = 30;
 // SOUND NEEDS A WITNESS. A bedroom mic hears the whole house, and bedtime is when the
 // house is at its loudest — the other child being settled, adults talking, a TV. Sound travels through
 // walls; movement does not. So for the ONSET search a sound-only minute counts as "awake" only when the
@@ -1932,6 +1947,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // still that fewer than 3 occupied minutes fall before it loses the put-down: to the plain search, or to that
   // second into_bed's own settle (README, KNOWN-ISSUES; pinned by the #669 T8 and T8b tests).
   const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;
+  const rejectedPrewindowPutDowns = new Set();
   for (const { idx: putDown } of earlyPutDowns) {
     const q = firstQuietRunFrom(putDown, true);
     if (q == null) continue; // never settled after this put-down
@@ -1992,6 +2008,22 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // staging 2026-09-30 child A, 14 -> 0).
     const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));
     if (!bedOccupiedAfter(q, nextPutDown?.idx)) continue;
+    if (preMin - q > PREWINDOW_ONSET_FREE_MIN) {
+      // The later real put-down cannot vouch for this one. Count only observed minutes before
+      // that cut; missing video neither adds evidence nor raises the required count.
+      const end = Math.min(preMin, nextPutDown?.idx ?? preMin);
+      let watched = 0;
+      let occupied = 0;
+      for (let i = q; i < end; i++) {
+        if (state[i] === null) continue;
+        watched++;
+        if (bedPeakAt[i] >= OCCUPANCY_MIN_PEAK) occupied++;
+      }
+      if (occupied < Math.ceil(watched / PREWINDOW_EVIDENCE_PER_MIN)) {
+        rejectedPrewindowPutDowns.add(putDown);
+        continue;
+      }
+    }
     onset = q;
     break; // earliest qualifying put-down wins
   }
@@ -2022,6 +2054,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     if (t.type !== TRANSITION.INTO_BED) continue;
     const idx = txIdx(t.created_at);
     if (idx < 0 || idx >= totalMin) continue;
+    if (rejectedPrewindowPutDowns.has(idx)) continue; // do not revive a false early anchor as window-start sleep
     if (idx > algoOnset + maxSettleMin) continue; // too late to be the put-down that started this sleep
     const q = firstQuietRunFrom(idx, true);
     if (q != null) { transitionOnset = Math.max(q, algoOnset); break; } // earliest qualifying into_bed wins

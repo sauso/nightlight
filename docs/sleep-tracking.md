@@ -317,27 +317,45 @@ to be accepted on the real bedtime's movement, and could even end the night in t
 parent then left the room). A *got into bed* with recorded quiet in the minute either side of it (at
 most a lone minute of movement, such as a parent reaching in) is not treated as a new put-down for
 this. "Quiet" there means the same as everywhere else in the timeline: no movement in the bed, no
-movement elsewhere in the picture, and no noise. There is no setting for any of it, and the numbers are
-unchanged: at least 3 minutes with movement in the bed, however slight, in the 2½ hours after the
-child settles.
+movement elsewhere in the picture, and no noise. There is no setting for any of it. That older
+check still asks for at least 3 minutes with movement in the bed, however slight, in the 2½ hours
+after the child settles.
+For a put-down whose settle is **more than 50 minutes before the window**, Nightlight also needs
+about one watched minute with a small bed movement per 30 watched minutes until the window or the
+next real put-down, whichever comes first. A minute without video does not raise that requirement,
+and movement elsewhere in the picture does not cancel a bed movement. Within 50 minutes, the
+existing checks still apply. This extra check stopped false early bedtimes on an empty-looking bed,
+including one live night that otherwise said a child was asleep before they were put down.
+
+This is a cautious estimate from two cameras in one house, not a measurement of the confirmed real
+early nights: their minute samples had already expired. The 50-minute margin rests on one confirmed
+real early night. About 18-22% of 57 completed nights had fewer than three small bed movements in
+their first 46 minutes, and one reviewed night had none in 117 minutes. A child who truly falls
+asleep more than 50 minutes early and lies very still may therefore be shown as falling asleep at
+the window start, late by as much as the whole early span. This is most likely if the bed zone sees
+only part of the child, or the window is set so late that every night counts as early. You can
+[correct the asleep time in the morning review](#correcting-a-night).
+
 **Known limits** (details, and the nights they come from, in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)):
+
 - A very still child whose bedtime is followed by a second *got into bed* that is not quiet either
   side (a parent at the bed for a couple of minutes, the same put-down logged twice, or a one-minute
   check with a noise from elsewhere in the house beside it) before the bed has shown 3 such minutes
   loses that bedtime: the in-bed and asleep times move later, to that second event or after it.
   There is no grace period: this holds a few minutes after the child settles as much as an hour.
 - The other way round: the **real** put-down, if it happens to be logged with quiet either side (a
-  quiet house, a put-down that pauses), is not treated as a new put-down either, so a false earlier
-  one is still believed, exactly as before this change.
+  quiet house, a put-down that pauses), is not treated as a new put-down either. A false earlier
+  one can still be believed if it is within the 50-minute margin or has enough earlier bed movement.
 - Where the false put-down is discarded but the real one settled after the window had already
   opened on a quiet evening, the **In bed** time can now show nothing on a night where it used to
   show the false put-down.
 - The parent's approach in the minute or two before the real put-down still counts for a false
-  earlier one, so a false put-down with exactly that much movement before the real one is still
-  believed.
-- The check needs the 2½ hours after a put-down to have been recorded. A put-down closer than that to
-  the end of what has been recorded is believed without it: while a night is still in progress, a false
-  put-down can show as tonight's bedtime for up to about 2½ hours after it, and the figures worked out
+  earlier one under the older occupied-bed check. Within the 50-minute margin, a false put-down
+  with exactly that much movement can still be believed.
+- The older check needs the 2½ hours after a put-down to have been recorded. A put-down closer than that to
+  the end of what has been recorded is believed without that check, but a far-early one still needs
+  pre-window evidence. Within the 50-minute margin, a false put-down can show as tonight's bedtime
+  for up to about 2½ hours after it while a night is in progress, and the figures worked out
   after that use the full rule. The same is true of a night that has ended, for a put-down within 2½
   hours of the end of its window: a false one over an empty bed there is kept as the bedtime, and a real
   one after it is not looked at.

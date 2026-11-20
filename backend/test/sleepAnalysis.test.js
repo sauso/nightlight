@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
 process.env.DATA_DIR = TMP;
@@ -82,7 +83,230 @@ before(() => {
               VALUES (?, 'Test Cam', 'rtsp://example/stream', ?, 'testcam')`).run(CAM, CHILD);
 });
 
+describe('far pre-window put-downs need watched evidence', () => {
+  const windowStart = at(19, 0);
+  const minuteBeforeWindow = (gap) => new Date(windowStart.getTime() - gap * 60000);
+  const putDown = (time) => insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(time));
+  const peak = (time, value = STILL_OCCUPIED, out = 0.0004) =>
+    insertFull.run(CAM, sqlTime(time), value, value, 0.5, out);
+  const windowAt19 = () => db.prepare("UPDATE children SET sleep_window_start = '19:00' WHERE id = ?").run(CHILD);
+
+  // Sound keeps the plain onset search later while the put-down search discounts distant house noise.
+  // The three later bed readings satisfy the older 150-minute guard without vouching for pre-window sleep.
+  function farPutDown(gap, stirs = [], { stirPeak = STILL_OCCUPIED, stirOut = 0.0004, noise = true } = {}) {
+    windowAt19();
+    layNight(at(16, 0), at(7, 0, 1), {
+      noise: noise ? [[at(16, 55), at(19, 20)]] : [], still: 0.0001,
+      move: [[at(22, 0), at(22, 5)]],
+    });
+    putDown(minuteBeforeWindow(gap));
+    for (const m of stirs) peak(m, stirPeak, stirOut);
+    for (const m of [at(19, 10), at(19, 11), at(19, 12)]) peak(m);
+  }
+
+  function incident({ completed = false } = {}) {
+    windowAt19();
+    layNight(at(16, 55), completed ? at(7, 0, 1) : at(19, 22), {
+      noise: [[at(16, 55), completed ? at(20, 3) : at(19, 22)]],
+      move: completed ? [[at(19, 40), at(20, 3)]] : [],
+      out: [[at(19, 9), at(19, 14)]], // room activity, while the bed zone still reads empty
+      still: 0.0001,
+      noiseP75: 8,
+    });
+    db.prepare('UPDATE activity_samples SET sound_level = 1.7 WHERE camera_id = ?').run(CAM);
+    peak(at(16, 57), 1.0);
+    peak(at(17, 0), 0.98);
+    peak(at(18, 50), 0.0067);
+    peak(at(18, 58), 0.97);
+    insertTransition.run(CAM, 'out_of_bed', 1, sqlTime(at(16, 57, 0, 49)));
+    insertTransition.run(CAM, 'into_bed', 0.98, sqlTime(at(17, 0, 0, 18)));
+    insertTransition.run(CAM, 'out_of_bed', 0.97, sqlTime(at(18, 58, 0, 49)));
+    if (completed) {
+      peak(at(19, 9)); // older guard's third witness lies INSIDE the window
+      putDown(at(19, 40));
+    }
+  }
+
+  test('incident live: removing the pre-window evidence check restores a 17:03 onset', (t) => {
+    incident();
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.in_progress, true);
+    assert.equal(night.onset_at, null);
+    assert.equal(night.status, 'no_sleep');
+  });
+
+  test('incident completed: removing the evidence check restores the false early onset', () => {
+    incident({ completed: true });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '20:03');
+    assert.equal(hhmm(night.in_bed_at), '19:40');
+  });
+
+  test('a later put-down lead-in cannot rescue the 83-minute false onset', () => {
+    windowAt19();
+    layNight(at(16, 55), at(7, 0, 1), {
+      noise: [[at(16, 55), at(20, 3)]],
+      move: [[at(17, 34), at(17, 35)], [at(19, 40), at(20, 3)]],
+      still: 0.0001,
+    });
+    for (const m of [at(19, 35), at(19, 36), at(19, 37)]) peak(m);
+    putDown(at(17, 34));
+    putDown(at(19, 40));
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:03');
+  });
+
+  test('50 is free but 51 requires evidence: changing the margin moves the boundary', () => {
+    farPutDown(50);
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:10');
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+    farPutDown(51);
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:20');
+  });
+
+  test('ceil(watched / 30): 60/61, 90/91 and 117 each require the next counted minute', () => {
+    for (const [gap, need] of [[60, 2], [61, 3], [90, 3], [91, 4], [117, 4]]) {
+      for (const count of [need - 1, need]) {
+        db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+        db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+        const q = minuteBeforeWindow(gap);
+        const stirs = Array.from({ length: count }, (_, i) => new Date(q.getTime() + (i + 1) * 10 * 60000));
+        farPutDown(gap, stirs);
+        assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), count === need ? hhmm(sqlTime(q)) : '19:20',
+          `gap ${gap}, occupied ${count}, need ${need}`);
+      }
+    }
+  });
+
+  test('the occupancy threshold includes exactly 0.0005, not a value just below it', () => {
+    for (const value of [0.00049, 0.0005]) {
+      db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+      db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+      farPutDown(60, [at(18, 10), at(18, 30)], { stirPeak: value });
+      assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), value === 0.0005 ? '18:00' : '19:20');
+    }
+  });
+
+  test('guard: ordinary and sparse real stirs, even with outside-bed motion, keep the early onset', () => {
+    const stirs = [at(18, 0), at(18, 20), at(18, 40)];
+    farPutDown(80, stirs, { stirOut: 0.04, noise: false });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '17:40');
+  });
+
+  test('a later real put-down never vouches across the cut, even during the guard-3 fail-open', (t) => {
+    windowAt19();
+    layNight(at(16, 55), at(19, 22), {
+      noise: [[at(16, 55), at(18, 20)], [at(18, 40), at(19, 22)]], still: 0.0001,
+      move: [[at(17, 0), at(17, 1)], [at(18, 30), at(18, 31)], [at(19, 10), at(19, 15)]],
+    });
+    putDown(at(17, 0));
+    putDown(at(18, 30));
+    peak(at(18, 29), 0.0001, 0.04); // active left neighbour makes the real put-down the evidence cut
+    for (const m of [at(18, 35), at(18, 40), at(18, 45), at(18, 50), at(18, 55), at(19, 5)]) peak(m);
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '18:31', 'the later real put-down may anchor, but the 17:00 one cannot');
+  });
+
+  test('the second onset pass skips a rejected put-down and takes the real 20:03 settle', () => {
+    windowAt19();
+    layNight(at(16, 55), at(7, 0, 1), {
+      move: [[at(17, 0), at(17, 1)], [at(19, 40), at(20, 3)]],
+      still: 0.0001,
+    });
+    for (const m of [at(18, 0), at(18, 20), at(18, 40)]) peak(m);
+    putDown(at(17, 0));
+    putDown(at(19, 40));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '20:03');
+    assert.equal(hhmm(night.in_bed_at), '19:40');
+  });
+
+  test('partly watched pre-window span uses watched minutes in ceil, not elapsed minutes', () => {
+    for (const count of [2, 3]) {
+      db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+      db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+      windowAt19();
+      layNight(at(17, 0), at(18, 12), { still: 0.0001 }); // 72 of 120 pre-window minutes
+      layNight(at(19, 0), at(7, 0, 1), { move: [[at(22, 0), at(22, 5)]], still: 0.0001 });
+      for (const m of [at(17, 20), at(17, 40), at(18, 0)].slice(0, count)) peak(m);
+      putDown(at(17, 0));
+      assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), count === 3 ? '17:00' : '19:00');
+    }
+  });
+
+  test('known limit: a very still real early sleeper can fall to the window start', () => {
+    windowAt19();
+    layNight(at(17, 0), at(7, 0, 1), { still: 0.0001, move: [[at(22, 0), at(22, 5)]] });
+    for (const m of [at(17, 20), at(17, 40), at(18, 0)]) peak(m);
+    putDown(at(17, 0));
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:00');
+  });
+
+  test('live clocks: a rejected far put-down never moves onset back before the window', (t) => {
+    windowAt19();
+    layNight(at(17, 0), at(20, 0), { still: 0.0001,
+      move: [[at(17, 0), at(17, 1)], [at(19, 15), at(19, 18)]] });
+    for (const m of [at(18, 0), at(18, 20), at(18, 40)]) peak(m);
+    putDown(at(17, 0));
+    // The unanchored baseline can still choose an in-window quiet run: existing behaviour.
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 5).getTime() });
+    for (const time of [at(19, 5), at(19, 15), at(19, 30), at(20, 0)]) {
+      t.mock.timers.setTime(time.getTime());
+      const night = computeNight(CHILD, DATE);
+      assert.ok(!night.onset_at || night.onset_at >= night.window_start, sqlTime(time));
+    }
+  });
+
+  test('guard: a put-down inside the 50-minute margin keeps the old in-progress fail-open', (t) => {
+    farPutDown(40);
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:20');
+  });
+
+  test('guard: the pre-window count uses minute indexes across a daylight-saving change', () => {
+    const localBeforeJump = (h, m) => new Date(Date.UTC(2026, 9, 3, h - 10, m));
+    const localAfterJump = (h, m) => new Date(Date.UTC(2026, 9, 4, h - 11, m));
+    windowAt19();
+    layNight(localBeforeJump(16, 30), localAfterJump(7, 0), {
+      move: [[localBeforeJump(22, 0), localBeforeJump(22, 5)]], still: 0.0001,
+    });
+    putDown(localBeforeJump(18, 0)); // 60 real minutes before the window, despite the shorter night
+    peak(localBeforeJump(18, 20));
+    peak(localBeforeJump(18, 40));
+    peak(localBeforeJump(19, 10)); // third witness for the older 150-minute guard
+    const night = computeNight(CHILD, '2026-10-03');
+    assert.equal(hhmm(night.window_start), '19:00');
+    assert.equal(hhmm(night.onset_at), '18:00');
+  });
+
+  test('guard: three in-window fixture nights keep the original full-result bytes', () => {
+    // These hashes came from the original sleepAnalysis.js; they pin every returned field and its ordering.
+    for (const [hour, minute, expectedHash] of [
+      [19, 10, '393c3e150a301ff850fa978e39fc112405241cd0fa2c27417b482b1790b8a38e'],
+      [19, 20, '1f2207c95b501e6ef8372d8ed0bd7ad63dbd07c4ccfc106bb62b901ee21970f3'],
+      [19, 35, 'abb35f506ac92a3d7a72a17f2e523472c5180beebe348a4d1586b45fbe7cb63b'],
+    ]) {
+      db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+      db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+      windowAt19();
+      const start = at(hour, minute);
+      const end = new Date(start.getTime() + 5 * 60000);
+      layNight(at(18, 45), at(7, 0, 1), {
+        move: [[start, end], [at(2, 0, 1), at(2, 8, 1)]], still: STILL_OCCUPIED,
+      });
+      putDown(start);
+      const night = computeNight(CHILD, DATE);
+      assert.equal(hhmm(night.onset_at), hhmm(sqlTime(end)));
+      const hash = createHash('sha256').update(JSON.stringify(night)).digest('hex');
+      assert.equal(hash, expectedHash);
+    }
+  });
+});
+
 beforeEach(() => {
+  db.prepare("UPDATE children SET sleep_window_start = '19:30' WHERE id = ?").run(CHILD);
   db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
   db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
   db.prepare('DELETE FROM detection_events').run();
@@ -2277,11 +2501,13 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
     assert.equal(hhmm(night.in_bed_at), '19:47');
   });
 
-  test('#669 T2: ...3 are: the earlier put-down is accepted (OCCUPANCY_MIN_MINUTES is unchanged)', () => {
+  test('#669 T2: ...3 satisfy the old guard, but not the far pre-window evidence rule', () => {
+    // The three readings are all AFTER the 19:30 window. They still prove guard 3's count,
+    // but cannot establish sleep from 18:06 under the new pre-window rule.
     layFalseThenRealPutDown({ occupied: [at(19, 44), at(19, 45), at(19, 46)], realMoveFrom: at(19, 48) });
     const night = computeNight(CHILD, DATE);
-    assert.equal(hhmm(night.onset_at), '18:06');
-    assert.equal(hhmm(night.in_bed_at), '18:06');
+    assert.equal(hhmm(night.onset_at), '19:57');
+    assert.equal(hhmm(night.in_bed_at), '19:47');
   });
 
   test('#669 T3: the next put-down\'s OWN minute is not counted (the end is exclusive)', () => {
@@ -2293,12 +2519,12 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
     assert.equal(hhmm(night.in_bed_at), '19:47');
   });
 
-  test('#669 T3: ...the same occupied minute one minute BEFORE the next into_bed is counted', () => {
+  test('#669 T3: ...the minute before the next into_bed counts for guard 3, but lies inside the window', () => {
     // The other side of the boundary: the real into_bed is logged at 19:48, a minute after its movement began,
-    // so 19:47 now lies before the cut and makes 3.
+    // so 19:47 now lies before the cut and makes 3 for guard 3. All three lie after the window opened.
     layFalseThenRealPutDown({ occupied: [at(19, 45), at(19, 46)], realAt: at(19, 48) });
     const night = computeNight(CHILD, DATE);
-    assert.equal(hhmm(night.onset_at), '18:06');
+    assert.equal(hhmm(night.onset_at), '19:57');
   });
 
   test('#669 T4: into_beds between a put-down and its settle (and one AT the settle minute) do not cut it', () => {
@@ -2391,31 +2617,30 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
     assert.equal(hhmm(night.onset_at), '19:04');
   });
 
-  test('#669 T6a: KNOWN LIMIT, pinned: a settle within 150 minutes of the END of the timeline escapes the bound', (t) => {
+  test('#669 T6a: the 150-minute guard still fails open, while far pre-window evidence is checked', (t) => {
     // Fail-open 1 of bedOccupiedAfter, "not enough timeline left to judge", kept and kept FIRST: it returns
-    // before the bound is looked at. On a night still in progress the timeline ends now, so at 20:30 the
-    // 18:06 settle (+150 = 20:36) is judged by this return alone and the false put-down shows as the bedtime in
-    // tonight's live figures. From 20:36 on the bound applies and it goes; at 21:00 the real one wins.
+    // before the bound is looked at. At 20:30 the 18:06 settle (+150 = 20:36) still passes that guard,
+    // but its empty pre-window span fails the new rule. From 20:36 on guard 3 rejects it as well.
     layFalseThenRealPutDown();
     t.mock.timers.enable({ apis: ['Date'], now: at(20, 30).getTime() });
     const early = computeNight(CHILD, DATE);
     assert.equal(early.in_progress, true, 'precondition: an open night, whose timeline ends at 20:30');
-    assert.equal(hhmm(early.onset_at), '18:06', 'fail-open 1 kept: the false put-down escapes the bound');
+    assert.equal(hhmm(early.onset_at), '19:57', 'the separate pre-window rule rejects the false put-down');
     t.mock.timers.setTime(at(21, 0).getTime());
     const later = computeNight(CHILD, DATE);
     assert.equal(later.in_progress, true);
     assert.equal(hhmm(later.onset_at), '19:57', 'enough timeline now: the bound applies and the false put-down goes');
   });
 
-  test('#669 T6b: a camera outage between the settle and the next put-down still fails OPEN (accepted)', () => {
+  test('#669 T6b: a camera outage still fails open in guard 3, but not the far pre-window rule', () => {
     // Fail-open 2, "a gap: can't prove the bed was empty through it", kept: a null minute INSIDE the bounded
-    // count still accepts the put-down, so a false put-down followed by an outage before the next one is still
-    // believed. The residual risk bedOccupiedAfter's #508 note already names; #669 does not change it.
+    // count still accepts the put-down under guard 3. Watched pre-window minutes remain empty here,
+    // so the new rule rejects it. The older fail-open still matters inside the 50-minute margin.
     layFalseThenRealPutDown();
     db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
       .run(CAM, sqlTime(at(18, 30)), sqlTime(at(18, 40)));
     const night = computeNight(CHILD, DATE);
-    assert.equal(hhmm(night.onset_at), '18:06', 'fail-open 2 kept: an unobserved minute is not proof of an empty bed');
+    assert.equal(hhmm(night.onset_at), '19:57', 'watched pre-window minutes still lack evidence');
   });
 
   // The 2026-10-10 child B shape. A false settling episode (into_beds 19:11, 19:16, 19:21: someone at the bed,
@@ -2555,15 +2780,16 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
     insertTransition.run(CAM, 'into_bed', 0.3, sqlTime(at(19, 47, 0, 20)));
   }
 
-  test('#669 T10: KNOWN LIMIT, pinned: a real put-down logged with recorded quiet either side is exempt, so a false earlier one is believed as before', () => {
+  test('#669 T10: a quiet-sided real put-down remains exempt, but the false far-early one lacks evidence', () => {
     // The price of the isolated-blip exemption: it reads the minutes either side of the into_bed, not the put-down
     // around it. Here those two minutes (19:46 and 19:48) are both quiet, so the real put-down does not cut, the
-    // 150 minutes reach its movement again, and the false 18:06 put-down is accepted exactly as before #669.
+    // 150 minutes reach its movement again, and guard 3 accepts the false 18:06 put-down. The new rule
+    // has too little evidence before the window and rejects it; the real put-down then supplies onset.
     layQuietHouseFalseThenReal({ parentOutside: false });
     const night = computeNight(CHILD, DATE);
     assert.equal(night.status, 'ok');
-    assert.equal(hhmm(night.in_bed_at), '18:06');
-    assert.equal(hhmm(night.onset_at), '18:07');
+    assert.equal(hhmm(night.in_bed_at), '19:47');
+    assert.equal(hhmm(night.onset_at), '19:53');
   });
 
   test('#669 T10: ...KNOWN LIMIT, pinned: the same night with the parent seen OUTSIDE the bed the minute before cuts, and the in-bed marker goes BLANK', () => {

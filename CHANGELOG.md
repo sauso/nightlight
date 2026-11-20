@@ -122,6 +122,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A false put-down far before the sleep window no longer claims a child was asleep over an empty-looking bed (#669).** When the child seems to settle more than 50 minutes before the window, the watched bed must show small movements before the window or the next real put-down. This corrects a live night that wrongly showed sleep from 17:03. A very still child who really sleeps that early can instead be shown as falling asleep at the window start; the morning review can correct it. The rule was tuned on two cameras in one house, and confirmed real early nights could not be replayed because their minute samples had expired.
 - Sleep detail: after you correct a night, the night card no longer shows two divider lines (with an empty gap between them) above the "Thanks, that's recorded" row; it shows one.
 - **A password that is not valid text is refused at once instead of failing slowly (found in the review of #1094).** A password holding a lone half of a two-part character (an unpaired UTF-16 surrogate, which no keyboard or password manager produces) used to end, after a delay, in a server error. Choosing one (first set-up, adding a user, changing a password, an invite link) now answers "That password contains characters that cannot be used", and signing in with one is treated as a wrong password. Emoji and other ordinary characters work as before.
 
