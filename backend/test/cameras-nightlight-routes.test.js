@@ -13,12 +13,13 @@ const realOnvif = await import('../src/lib/onvif.js');
 let probeAnswer = { ok: true, rtspHost: '192.168.3.50' };
 mock.module('../src/lib/onvif.js', { exports: { ...realOnvif, probeOnvifCamera: async () => ({ ...probeAnswer }) } });
 const { default: router } = await import('../src/routes/cameras.js');
-const { resetCameraSensorsForTest, stopCameraSensors } = await import('../src/lib/cameraSensors.js');
+const { resetCameraSensorsForTest, stopCameraSensors, tickOnce } = await import('../src/lib/cameraSensors.js');
 
 const PASSWORD = 'sup3r-secret-pw';
 const IP = '192.168.3.50';
 const CAM = 'nl-route-cam';
 let server, admin, caregiver, respondTo;
+let seen = [];
 const realFetch = globalThis.fetch;
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const health = (over = {}) => ({ ok: true, api: 'v1', device_id: 'nlcam-c011cb72ca2a', name: 'Nightlight Camera', model: 'nightlight-camera',
@@ -26,13 +27,14 @@ const health = (over = {}) => ({ ok: true, api: 'v1', device_id: 'nlcam-c011cb72
 const asNightlight = (url) => {
   if (String(url).endsWith('/api/v1/health')) return json(health());
   if (String(url).endsWith('/api/v1/capabilities')) return json({ simulated: true, sensors: { radar: true, environment: true, pressure: { kind: 'none' } } });
+  if (String(url).endsWith('/api/v1/sensors')) return json({ error: 'unauthorized' }, 401);
   return json({ error: 'nope' }, 404);
 };
 const cam = () => db.prepare('SELECT * FROM cameras WHERE id = ?').get(CAM);
 const url = (p) => `${server.url}/api/cameras${p}`;
 
 before(async () => {
-  mock.method(globalThis, 'fetch', (target, opts) => (String(target).startsWith(server.url) ? realFetch(target, opts) : Promise.resolve(respondTo(target, opts))));
+  mock.method(globalThis, 'fetch', (target, opts) => (String(target).startsWith(server.url) ? realFetch(target, opts) : (seen.push(String(target)), Promise.resolve(respondTo(target, opts)))));
   server = await mountRouter('/api/cameras', router);
   const a = makeUser(db, { id: 'nl-admin', username: 'nl-admin', role: 'admin' });
   const c = makeUser(db, { id: 'nl-care', username: 'nl-care', role: 'caregiver' });
@@ -42,6 +44,7 @@ before(async () => {
 after(async () => { stopCameraSensors(); mock.restoreAll(); await server.close(); cleanupTempDataDirs(); });
 beforeEach(() => {
   resetCameraSensorsForTest();
+  seen = [];
   db.prepare('DELETE FROM cameras').run();
   makeCamera(db, { id: CAM, name: 'Bedroom', extra: { rtsp_url: `rtsp://nightlight:${PASSWORD}@${IP}:554/main` } });
   respondTo = asNightlight;
@@ -79,7 +82,7 @@ test('GET asks the camera and reports what it is, never the login', async () => 
 
 test('PUT validates its body strictly', async () => {
   const bad = [{ enabled: 'yes' }, { enabled: 1 }, { retry: 'true' }, { groups: 'all' }, { groups: [] }, { groups: null },
-    { groups: { radar: 'off' } }, { groups: { climate: 1 } }, { groups: { heartbeat: true } }, { groups: { __proto__x: true } }];
+    { groups: { radar: 'off' } }, { groups: { climate: 1 } }, { groups: { heartbeat: true } }, { groups: { __proto__x: true } }, { groups: { constructor: true } }, { groups: { toString: true } }];
   for (const body of bad) {
     const r = await call(url(`/${CAM}/nightlight`), { method: 'PUT', token: admin, body });
     assert.equal(r.status, 400, JSON.stringify(body));
@@ -163,4 +166,28 @@ test('the chart history marks simulated points and leaves real ones unmarked', a
   insert.run(CAM, 99, 99, 1, '-1 hours');
   const r = await call(url(`/${CAM}/sensor-history?hours=6`), { token: caregiver });
   assert.deepEqual(r.body.readings.map((p) => [p.temperature, p.simulated]), [[20, false], [99, true]]);
+});
+
+// Code review (Codex, 2026-11-20): this page sends the camera's login to /capabilities, and a camera blocks an address
+// for 5 minutes after 10 wrong logins in a minute, so ten refreshes with a stale stored password could lock Nightlight out
+// of its own camera. The page now sends it at most once a minute per login, and never while the poller knows it is wrong.
+test('the settings page sends the login at most once a minute, and never one the poller knows is wrong', async () => {
+  const capsCalls = () => seen.filter((u) => u.endsWith('/api/v1/capabilities')).length;
+  const setPassword = (pw) => db.prepare('UPDATE cameras SET rtsp_url = ? WHERE id = ?').run(`rtsp://nightlight:${pw}@${IP}:554/main`, CAM);
+  setPassword('fresh-pw-1');
+  for (let i = 0; i < 4; i++) assert.equal((await call(url(`/${CAM}/nightlight`), { token: admin })).status, 200);
+  assert.equal(capsCalls(), 1, 'four page views, one authenticated request');
+  setPassword('fresh-pw-2');
+  await call(url(`/${CAM}/nightlight`), { token: admin });
+  assert.equal(capsCalls(), 2, 'a changed login is a new request');
+
+  setPassword('fresh-pw-3');
+  assert.equal((await call(url(`/${CAM}/nightlight`), { method: 'PUT', token: admin, body: { enabled: true } })).status, 200);
+  await tickOnce(); // the camera answers /sensors with a 401: the poller learns the login is wrong
+  const failed = await call(url(`/${CAM}/nightlight`), { token: admin });
+  assert.equal(failed.body.status, 'login_failed');
+  seen = [];
+  for (let i = 0; i < 3; i++) await call(url(`/${CAM}/nightlight`), { token: admin });
+  assert.equal(capsCalls(), 0, 'no request carries a login the poller already knows is wrong');
+  assert.equal((await call(url(`/${CAM}/nightlight`), { token: admin })).body.capabilities, null);
 });

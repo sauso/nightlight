@@ -47,6 +47,7 @@ A Nightlight Camera has its own room sensors (temperature and humidity, a radar 
 - **Simulated sensors.** A camera running invented bench data says so; Nightlight labels those readings **Simulated** and keeps them out of every night's figures (the chart still shows them). A camera that does not clearly say its readings are real is treated as simulated.
 - **Estimates.** Heart rate and breathing rate are sensor estimates, not for medical use, and Nightlight is not a safety device.
 - **If the camera's login stops working,** Nightlight stops asking (it would otherwise lock itself out: the camera blocks an address for 5 minutes after 10 wrong logins in a minute) and the settings page says **Sensor login failed**. Fix the password in the camera's settings and it resumes by itself, or press **Retry**.
+- **Same camera only.** Every few minutes Nightlight checks that the address still answers as the same Nightlight Camera it recorded. If another device takes that address, nothing is stored until the right camera is back.
 - **Limits.** The camera must be added by a plain IP address on your private network (a name such as `camera.local` is not looked up). If the camera is switched off or unreachable, no readings are stored for that time.
 
 ### Picture check

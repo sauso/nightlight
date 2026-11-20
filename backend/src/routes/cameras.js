@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { readFileSync } from 'fs';
+import { createHash } from 'node:crypto';
 import { join as joinPath } from 'path';
 import { serveMediaFile } from '../lib/mediaFiles.js';
 import { v4 as uuid } from 'uuid';
@@ -750,6 +751,23 @@ router.get('/:id/sensor-history', requireAuth, (req, res) => {
 // A Nightlight Camera's own sensors (lib/nightlightCamera.js). Admin only.
 // GET asks the camera now (health and capabilities, 3 s each, silently "not detected" on any failure) and joins what the
 // poller holds in memory. Never returns the login.
+// /capabilities needs the camera's login, and a camera blocks an address for 5 minutes after 10 wrong logins in a minute
+// (code review, 2026-11-20: ten page refreshes with a stale password reached that). So this page sends it at most once a
+// minute per camera and login (the answer, or the lack of one, is remembered), and never while the poller already knows
+// the login is wrong.
+const capabilitiesCache = new Map();
+const CAPABILITIES_TTL_MS = 60 * 1000;
+async function capabilitiesFor(cam, host, port, live) {
+  const login = cameraLogin(cam);
+  if (!login || live?.status === 'login_failed') return null;
+  const key = createHash('sha256').update(`${host}|${port}|${login.username}|${login.password}`).digest('hex');
+  const hit = capabilitiesCache.get(cam.id);
+  if (hit && hit.key === key && Date.now() - hit.at < CAPABILITIES_TTL_MS) return hit.value;
+  const value = await readCapabilities(host, login, { port });
+  capabilitiesCache.set(cam.id, { key, at: Date.now(), value });
+  return value;
+}
+
 async function nightlightState(cam) {
   const host = cameraHost(cam);
   const port = cam.sensor_api_port || NLCAM_PORT;
@@ -759,8 +777,7 @@ async function nightlightState(cam) {
   if (!isNightlightHost(host)) return { ...base, detected: false, reason: 'address', status: live?.status || 'off', readings: live?.metrics || {} };
   const health = await readHealth(host, { port });
   if (!health) return { ...base, detected: false, reason: 'no_answer', status: live?.status || 'off', readings: live?.metrics || {} };
-  const login = cameraLogin(cam);
-  const capabilities = login ? await readCapabilities(host, login, { port }) : null;
+  const capabilities = await capabilitiesFor(cam, host, port, live);
   return {
     ...base, detected: true, device_id: health.device_id, firmware: health.firmware, simulated: health.simulated,
     capabilities, status: live?.status || 'off', readings: live?.metrics || {},

@@ -28,7 +28,7 @@ import db from '../db.js';
 import { logger } from './logger.js';
 import { safeInterval } from './processGuards.js';
 import {
-  NLCAM_SOURCE, NLCAM_PORT, METRIC_GROUP, GROUPS, parseGroups, parseSensors, fetchLanJson, cameraHost, cameraLogin, isNightlightHost,
+  NLCAM_SOURCE, NLCAM_PORT, METRIC_GROUP, GROUPS, parseGroups, parseSensors, fetchLanJson, readHealth, cameraHost, cameraLogin, isNightlightHost,
 } from './nightlightCamera.js';
 
 const TICK_MS = 1000;
@@ -52,11 +52,11 @@ let clock = () => Date.now();
 export function setClockForTest(fn) { clock = fn || (() => Date.now()); }
 
 const loadCamera = () => db.prepare(
-  `SELECT id, rtsp_url, onvif_username, onvif_password, disabled, sensor_source, sensor_api_port, sensor_groups
+  `SELECT id, rtsp_url, onvif_username, onvif_password, disabled, sensor_source, sensor_api_port, sensor_groups, nlcam_device_id
      FROM cameras WHERE id = ?`
 );
 const listCameras = () => db.prepare(
-  `SELECT id, rtsp_url, onvif_username, onvif_password, disabled, sensor_source, sensor_api_port, sensor_groups
+  `SELECT id, rtsp_url, onvif_username, onvif_password, disabled, sensor_source, sensor_api_port, sensor_groups, nlcam_device_id
      FROM cameras WHERE sensor_source = ?`
 );
 
@@ -70,7 +70,8 @@ function fingerprint(cam) {
 }
 
 function newState(key) {
-  return { key, generation: 0, nextAt: 0, failures: 0, status: 'connecting', inFlight: null, latest: null, minute: null, lastClimateAt: 0, warned: false };
+  // healthSimulated starts true: until /health has answered, a sample is treated as simulated.
+  return { key, generation: 0, nextAt: 0, failures: 0, status: 'connecting', inFlight: null, latest: null, minute: null, lastClimateAt: 0, warned: false, healthAt: 0, healthSimulated: true };
 }
 
 function abortInFlight(st) {
@@ -87,6 +88,8 @@ function reset(st, key) {
   st.status = 'connecting';
   st.latest = null;
   st.minute = null;
+  st.healthAt = 0;
+  st.healthSimulated = true;
 }
 
 const insertClimate = () => db.prepare('INSERT INTO sensor_readings (camera_id, temperature, humidity, simulated) VALUES (?, ?, ?, ?)');
@@ -98,18 +101,22 @@ const insertMinute = () => db.prepare(
 // Writes the finished minute. INSERT OR IGNORE: a minute is written once; if the process restarts mid-minute the
 // second, partial write of that minute is ignored rather than allowed to overwrite the first (a rare partial minute,
 // stated rather than merged).
-function flushMinute(cameraId, minute) {
+function flushMinute(cameraId, minute, groups) {
   if (!minute) return;
   const insert = insertMinute();
   db.transaction(() => {
     for (const [metric, a] of minute.acc) {
+      // A group the owner switched off after this minute began is not stored (code review, 2026-11-20).
+      if (!groups[METRIC_GROUP[metric]]) continue;
       insert.run(cameraId, minute.bucket, metric, a.n, a.sum / a.n, a.min, a.max, a.last, minute.simulated ? 1 : 0);
     }
   })();
 }
 
 // Called with a poll's result AFTER the camera row was re-read and matched.
-function record(cam, st, parsed, groups, now) {
+function record(cam, st, sensorsParsed, groups, now) {
+  // Simulated if EITHER the /sensors answer or the last /health says so (an explicit real from both is the only real).
+  const parsed = { ...sensorsParsed, simulated: sensorsParsed.simulated || st.healthSimulated };
   const metrics = {};
   for (const [metric, value] of Object.entries(parsed.metrics)) if (value != null && groups[METRIC_GROUP[metric]]) metrics[metric] = value;
   st.latest = { at: now, simulated: parsed.simulated, metrics };
@@ -124,7 +131,7 @@ function record(cam, st, parsed, groups, now) {
   }
   // Everything else: per-minute accumulators.
   const bucket = Math.floor(now / MINUTE_MS);
-  if (st.minute && st.minute.bucket !== bucket) { flushMinute(cam.id, st.minute); st.minute = null; }
+  if (st.minute && st.minute.bucket !== bucket) { flushMinute(cam.id, st.minute, groups); st.minute = null; }
   for (const [metric, value] of Object.entries(metrics)) {
     if (METRIC_GROUP[metric] === 'climate') continue;
     if (!st.minute) st.minute = { bucket, acc: new Map(), simulated: false };
@@ -135,13 +142,31 @@ function record(cam, st, parsed, groups, now) {
   }
 }
 
-async function poll(cam, st, now) {
+// How often /health is asked again (it is also asked on the first poll after any reset). It is what ties the address to
+// the device Nightlight recorded, and where a bench camera's `simulated: true` is learned.
+const HEALTH_EVERY_MS = 5 * 60 * 1000;
+
+async function poll(cam, st) {
   const generation = st.generation;
   const ctrl = new AbortController();
   st.inFlight = ctrl;
-  const result = await fetchLanJson(cameraHost(cam), '/api/v1/sensors', {
-    port: portOf(cam), login: cameraLogin(cam), timeoutMs: FETCH_TIMEOUT_MS, signal: ctrl.signal,
-  });
+  const host = cameraHost(cam);
+  const port = portOf(cam);
+  // IDENTITY AND PROVENANCE (code review, 2026-11-20). An address can come to belong to another device, and /sensors alone
+  // cannot say so; and a camera whose /health says simulated must keep every sample simulated even if its /sensors answer
+  // says otherwise. So /health is asked first on the first poll and every 5 minutes: it must still be a Nightlight Camera
+  // with the id recorded when the owner switched sensors on, or nothing is stored (status `wrong_device`, retried on the
+  // back-off like any failure), and its `simulated` is remembered.
+  const needHealth = !st.healthAt || clock() - st.healthAt >= HEALTH_EVERY_MS;
+  const health = needHealth ? await readHealth(host, { port, signal: ctrl.signal }) : null;
+  let result;
+  if (needHealth && !health) result = { ok: false, reason: 'no_health' };
+  else if (needHealth && cam.nlcam_device_id && health.device_id !== cam.nlcam_device_id) result = { ok: false, reason: 'wrong_device' };
+  else {
+    result = await fetchLanJson(host, '/api/v1/sensors', {
+      port, login: cameraLogin(cam), timeoutMs: FETCH_TIMEOUT_MS, signal: ctrl.signal,
+    });
+  }
   if (st.inFlight === ctrl) st.inFlight = null;
   // Stopped, switched off, deleted or edited meanwhile: write nothing.
   if (stopped || st.generation !== generation) return;
@@ -152,6 +177,7 @@ async function poll(cam, st, now) {
     st.failures = 0;
     st.status = 'ok';
     st.nextAt = at + POLL_MS;
+    if (health) { st.healthAt = at; st.healthSimulated = health.simulated; }
     record(fresh, st, parseSensors(result.json), parseGroups(fresh.sensor_groups), at);
     return;
   }
@@ -162,7 +188,7 @@ async function poll(cam, st, now) {
     return;
   }
   st.failures++;
-  st.status = 'offline';
+  st.status = result.reason === 'wrong_device' ? 'wrong_device' : 'offline';
   st.nextAt = at + BACKOFF_MS[Math.min(st.failures - 1, BACKOFF_MS.length - 1)];
 }
 
@@ -226,12 +252,26 @@ export function liveSensors(cameraId, now = clock()) {
 }
 
 // Bounded by the same retention setting as the ESPHome readings (default 30 days).
-export function pruneNlcamReadings() {
+// In batches of 1000 rows with a yield between them (the esphome prune's shape), so a first prune of a long history
+// cannot hold the event loop; a shutdown stops it between batches.
+const PRUNE_BATCH = 1000;
+export async function pruneNlcamReadings() {
   try {
     const days = db.prepare("SELECT esphome_retention_days AS days FROM settings WHERE id = 'app'").get()?.days || 30;
     const cutoff = Math.floor(Date.now() / MINUTE_MS) - days * 24 * 60;
-    const { changes } = db.prepare('DELETE FROM nlcam_readings WHERE bucket < ?').run(cutoff);
-    if (changes > 0) logger.info(`[nlcam] Pruned ${changes} reading(s) older than ${days} days.`);
+    const batch = db.prepare(
+      `DELETE FROM nlcam_readings WHERE (camera_id, bucket, metric) IN
+         (SELECT camera_id, bucket, metric FROM nlcam_readings WHERE bucket < ? LIMIT ${PRUNE_BATCH})`
+    );
+    let total = 0;
+    for (;;) {
+      const { changes } = batch.run(cutoff);
+      total += changes;
+      if (changes < PRUNE_BATCH || stopped) break;
+      await new Promise((resolve) => setImmediate(resolve));
+      if (stopped) break;
+    }
+    if (total > 0) logger.info(`[nlcam] Pruned ${total} reading(s) older than ${days} days.`);
   } catch (err) {
     logger.warn(`[nlcam] prune failed: ${err.code || err.name || 'error'}`);
   }

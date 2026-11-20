@@ -20,7 +20,9 @@ const CAM = 'nl-cam-1';
 const RTSP = (pw = 'pw1', host = IP) => `rtsp://nightlight:${pw}@${host}:554/main`;
 let now;
 let fetchCalls;
-let respond;
+let onSensors;
+let healthCalls;
+let healthOver;
 
 const ok = (value) => ({ value, state: 'ok' });
 const sensorsAnswer = (over = {}) => ({
@@ -32,15 +34,25 @@ const sensorsAnswer = (over = {}) => ({
   ...over,
 });
 const answer = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const DEVICE = 'nlcam-test-1';
+const healthBody = (over = {}) => ({ ok: true, api: 'v1', device_id: DEVICE, name: 'Nightlight Camera', model: 'nightlight-camera',
+  board: 'b', firmware: '0.1.0', simulated: false, ...over });
+// Lets a started poll get as far as its /sensors request (it asks /health first).
+const flush = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve)); };
 
 function addCamera(id = CAM, extra = {}) {
-  makeCamera(db, { id, name: id, extra: { rtsp_url: RTSP(), sensor_source: NLCAM_SOURCE, ...extra } });
+  makeCamera(db, { id, name: id, extra: { rtsp_url: RTSP(), sensor_source: NLCAM_SOURCE, nlcam_device_id: DEVICE, ...extra } });
 }
 const rows = (table, where = '') => db.prepare(`SELECT * FROM ${table} ${where}`).all();
 const step = async (ms) => { now += ms; await tickOnce(); };
 
 before(() => {
-  mock.method(globalThis, 'fetch', async (url, opts) => { fetchCalls.push({ url: String(url), opts }); return respond(url, opts); });
+  // /health is answered by the fixture (healthOver changes it); fetchCalls counts only the /sensors requests.
+  mock.method(globalThis, 'fetch', async (url, opts) => {
+    if (String(url).endsWith('/api/v1/health')) { healthCalls.push(String(url)); return typeof healthOver === 'function' ? healthOver() : answer(healthBody(healthOver)); }
+    fetchCalls.push({ url: String(url), opts });
+    return onSensors(url, opts);
+  });
 });
 after(() => { stopCameraSensors(); mock.restoreAll(); setClockForTest(null); cleanupTempDataDirs(); });
 beforeEach(() => {
@@ -51,7 +63,9 @@ beforeEach(() => {
   now = T0;
   setClockForTest(() => now);
   fetchCalls = [];
-  respond = () => answer(sensorsAnswer());
+  healthCalls = [];
+  healthOver = {};
+  onSensors = () => answer(sensorsAnswer());
 });
 
 test('a poll stores ok climate in sensor_readings and, a minute later, the minute of radar, light and pad readings', async () => {
@@ -90,7 +104,7 @@ test('a reading that is not ok stores nothing and is not shown, whatever value i
   walk(planted);
   assert.equal(leaves.length, 8, "the fixture has eight readings");
   for (const leaf of leaves) { leaf.state = 'uncertain'; leaf.value = typeof leaf.value === 'boolean' ? true : 21; }
-  respond = () => answer(planted);
+  onSensors = () => answer(planted);
   await tickOnce();
   await step(65_000);
   assert.equal(rows('sensor_readings').length, 0);
@@ -100,7 +114,7 @@ test('a reading that is not ok stores nothing and is not shown, whatever value i
 
 test('simulated is stored per sample: a camera that does not say real is simulated', async () => {
   addCamera();
-  respond = () => answer(sensorsAnswer({ simulated: true }));
+  onSensors = () => answer(sensorsAnswer({ simulated: true }));
   await tickOnce();
   await step(65_000);
   assert.ok(rows('sensor_readings').every((r) => r.simulated === 1));
@@ -110,14 +124,14 @@ test('simulated is stored per sample: a camera that does not say real is simulat
   db.prepare('DELETE FROM nlcam_readings').run();
   resetCameraSensorsForTest();
   const noFlag = sensorsAnswer(); delete noFlag.simulated;
-  respond = () => answer(noFlag);
+  onSensors = () => answer(noFlag);
   now += 10 * 60_000;
   await tickOnce();
   await step(65_000);
   assert.ok(rows('sensor_readings').length > 0 && rows('sensor_readings').every((r) => r.simulated === 1), 'a missing flag fails toward simulated');
   db.prepare('DELETE FROM sensor_readings').run();
   resetCameraSensorsForTest();
-  respond = () => answer(sensorsAnswer({ simulated: false }));
+  onSensors = () => answer(sensorsAnswer({ simulated: false }));
   now += 10 * 60_000;
   await tickOnce();
   assert.equal(rows('sensor_readings')[0].simulated, 0, 'only an explicit false is real');
@@ -158,14 +172,14 @@ test('a camera that is not a Nightlight Camera source is never polled', async ()
 test('one request in flight per camera, and a failure backs off 5, 10, 20, 40, 60, 60 seconds', async () => {
   addCamera();
   let release;
-  respond = () => new Promise((resolve) => { release = () => resolve(answer(sensorsAnswer())); });
+  onSensors = () => new Promise((resolve) => { release = () => resolve(answer(sensorsAnswer())); });
   const first = tickOnce();
   const second = tickOnce();
-  await Promise.resolve();
+  await flush();
   assert.equal(fetchCalls.length, 1, 'the second tick does not start a second request');
   now += 30_000;
   const third = tickOnce();
-  await Promise.resolve();
+  await flush();
   assert.equal(fetchCalls.length, 1, 'still one in flight after 30 s');
   release();
   await Promise.all([first, second, third]);
@@ -173,7 +187,7 @@ test('one request in flight per camera, and a failure backs off 5, 10, 20, 40, 6
 
   resetCameraSensorsForTest();
   db.prepare('DELETE FROM sensor_readings').run();
-  respond = () => { throw new TypeError('fetch failed'); };
+  onSensors = () => { throw new TypeError('fetch failed'); };
   fetchCalls = [];
   const expectedGaps = [5, 10, 20, 40, 60, 60];
   now = T0;
@@ -192,7 +206,7 @@ test('one request in flight per camera, and a failure backs off 5, 10, 20, 40, 6
   assert.equal(liveSensors(CAM).status, 'offline');
   assert.equal(rows('sensor_readings').length, 0, 'a failing camera writes nothing');
   // A success clears the back-off.
-  respond = () => answer(sensorsAnswer());
+  onSensors = () => answer(sensorsAnswer());
   now = at + 60_000;
   await tickOnce();
   assert.equal(liveSensors(CAM).status, 'ok');
@@ -205,7 +219,7 @@ test('one request in flight per camera, and a failure backs off 5, 10, 20, 40, 6
 
 test('a 401 stops polling that camera: never retried, until the login changes or Retry is pressed', async () => {
   addCamera();
-  respond = () => answer({ error: 'unauthorized' }, 401);
+  onSensors = () => answer({ error: 'unauthorized' }, 401);
   await tickOnce();
   assert.equal(liveSensors(CAM).status, 'login_failed');
   assert.equal(fetchCalls.length, 1);
@@ -224,7 +238,7 @@ test('a 401 stops polling that camera: never retried, until the login changes or
   await step(1000);
   assert.equal(fetchCalls.length, 3);
   // A camera that was fixed on the camera itself answers 200 after Retry.
-  respond = () => answer(sensorsAnswer());
+  onSensors = () => answer(sensorsAnswer());
   retryCameraSensors(CAM);
   await step(1000);
   assert.equal(liveSensors(CAM).status, 'ok');
@@ -247,9 +261,9 @@ test('a camera that changes while a request is in flight is not written for', as
     db.prepare('DELETE FROM nlcam_readings').run();
     addCamera();
     let release;
-    respond = () => new Promise((resolve) => { release = () => resolve(answer(sensorsAnswer())); });
+    onSensors = () => new Promise((resolve) => { release = () => resolve(answer(sensorsAnswer())); });
     const pending = tickOnce();
-    await Promise.resolve();
+    await flush();
     assert.equal(fetchCalls.length > 0, true, `${what}: the request was in flight`);
     mutate();
     release?.();
@@ -295,6 +309,79 @@ test('deleting a camera deletes its minute rows, and the daily prune keeps only 
   insert.run('keep', nowMin - 7 * 24 * 60 - 5, 'presence'); // five minutes outside seven days (a margin, so a minute boundary mid-test cannot flip it)
   insert.run('keep', nowMin - 7 * 24 * 60 + 5, 'presence');     // five minutes inside seven days: kept
   insert.run('keep', nowMin - 60, 'presence');
-  pruneNlcamReadings();
+  await pruneNlcamReadings();
   assert.deepEqual(rows('nlcam_readings', 'ORDER BY bucket').map((r) => r.bucket - nowMin), [-7 * 24 * 60 + 5, -60]);
+});
+
+// Code review of the first version (Codex, 2026-11-20): the poller trusted /sensors alone for who the device is and
+// whether it is simulated. /health is now asked first (and every 5 minutes), so an address that changed hands, or a
+// camera whose /health says simulated while its /sensors says real, cannot put readings into a night.
+test('a camera whose /health says simulated keeps every sample simulated even when /sensors says real', async () => {
+  addCamera();
+  healthOver = { simulated: true };
+  onSensors = () => answer(sensorsAnswer({ simulated: false }));
+  await tickOnce();
+  await step(65_000);
+  assert.ok(rows('sensor_readings').length > 0 && rows('sensor_readings').every((r) => r.simulated === 1));
+  assert.ok(rows('nlcam_readings').length > 0 && rows('nlcam_readings').every((r) => r.simulated === 1));
+  assert.equal(liveSensors(CAM).simulated, true);
+});
+
+test('an address that now answers as a different device stores nothing and is retried on the back-off', async () => {
+  addCamera();
+  healthOver = { device_id: 'nlcam-someone-else' };
+  await tickOnce();
+  assert.equal(liveSensors(CAM).status, 'wrong_device');
+  assert.equal(fetchCalls.length, 0, 'its /sensors is never asked (and its login never sent)');
+  await step(70_000);
+  assert.equal(rows('sensor_readings').length, 0);
+  assert.equal(rows('nlcam_readings').length, 0);
+  healthOver = {};
+  await step(60_000);
+  assert.equal(liveSensors(CAM).status, 'ok', 'the right camera is back: it resumes');
+  assert.ok(rows('sensor_readings').length > 0);
+});
+
+test('a host that no longer answers /health is offline, and its /sensors is never asked', async () => {
+  addCamera();
+  for (const down of [() => answer({ error: 'x' }, 404), () => { throw new TypeError('fetch failed'); }, () => answer(healthBody({ model: 'sonoff' }))]) {
+    resetCameraSensorsForTest();
+    healthOver = down;
+    now += 10 * 60_000;
+    await tickOnce();
+    assert.equal(liveSensors(CAM).status, 'offline');
+  }
+  assert.equal(fetchCalls.length, 0);
+  assert.equal(rows('sensor_readings').length, 0);
+});
+
+test('/health is asked again after five minutes, not on every poll', async () => {
+  addCamera();
+  await tickOnce();
+  await step(5000);
+  await step(5000);
+  assert.equal(healthCalls.length, 1);
+  await step(5 * 60_000);
+  assert.equal(healthCalls.length, 2);
+});
+
+test('a group switched off in the middle of a minute is not stored when that minute is written', async () => {
+  addCamera();
+  await tickOnce();
+  db.prepare('UPDATE cameras SET sensor_groups = ? WHERE id = ?').run(JSON.stringify({ climate: true, radar: false, light: true, pad: true }), CAM);
+  await step(65_000);
+  const stored = new Set(rows('nlcam_readings').map((r) => r.metric));
+  assert.deepEqual([...stored].sort(), ['light_lux', 'pad_occupied'], 'the radar metrics of the finished minute were dropped');
+});
+
+test('a prune of a long history deletes every expired row in batches and keeps the rest', async () => {
+  addCamera('long');
+  const nowMin = Math.floor(Date.now() / 60000);
+  const insert = db.prepare('INSERT INTO nlcam_readings (camera_id, bucket, metric, n) VALUES (?, ?, ?, 1)');
+  db.transaction(() => {
+    for (let i = 0; i < 2500; i++) insert.run('long', nowMin - 40 * 24 * 60 - i, 'presence');
+    insert.run('long', nowMin - 60, 'presence');
+  })();
+  await pruneNlcamReadings();
+  assert.deepEqual(rows('nlcam_readings').map((r) => r.bucket - nowMin), [-60]);
 });
