@@ -78,6 +78,8 @@ whether any camera's topic is actually being published to. See "Troubleshooting"
 
 ## Temperature / humidity
 
+> A [Nightlight Camera](cameras.md#nightlight-cameras-and-their-sensors) whose sensors are switched on in Nightlight takes its temperature and humidity from the camera directly, and its MQTT readings are ignored for that camera. Switch off its room temperature and humidity group to use MQTT again.
+
 On each camera's edit page, set **MQTT topic** to whatever topic your sensor publishes to (e.g.
 `zigbee2mqtt/nursery-sensor`). Nightlight subscribes to it and accepts a **JSON payload with
 numeric `temperature` and/or `humidity` fields** — nothing else is read from this payload

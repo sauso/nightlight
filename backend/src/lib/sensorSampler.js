@@ -1,6 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
 import { getReading } from './mqttClient.js';
+import { usesApiClimate } from './nightlightCamera.js';
 
 // Persists each camera's latest MQTT temperature/humidity reading over time so the app can chart
 // trends (and, in Stage 2, correlate overnight warmth with wake-ups). MQTT readings are otherwise
@@ -27,7 +28,7 @@ export function sampleSensorReadings() {
   try {
     cams = db
       .prepare(
-        `SELECT id, mqtt_topic FROM cameras
+        `SELECT id, mqtt_topic, sensor_source, sensor_groups FROM cameras
            WHERE mqtt_topic IS NOT NULL AND mqtt_topic != '' AND (disabled IS NULL OR disabled = 0)`
       )
       .all();
@@ -37,6 +38,10 @@ export function sampleSensorReadings() {
   const now = Date.now();
   let written = 0;
   for (const cam of cams) {
+    // A Nightlight Camera whose own climate switch is on has ONE climate source, its API (lib/cameraSensors.js): this
+    // camera is skipped whether or not the API answered just now, so a night never mixes two sources or counts a
+    // five-minute slot twice. Switching the climate group off hands the camera back to MQTT.
+    if (usesApiClimate(cam)) continue;
     const r = getReading(cam.mqtt_topic);
     if (!r || now - (r.receivedAt || 0) > FRESH_MS) continue;
     const temperature = typeof r.temperature === 'number' ? r.temperature : null;
