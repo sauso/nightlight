@@ -40,7 +40,7 @@ test('merges private candidates, sanitises LAN text, and keeps RTSP separate fro
   assert.ok(result.dropped >= 3);
   assert.equal(result.candidates.some((item) => item.ip === '192.168.1.3'), false);
   assert.equal(updates.length >= 2, true);
-  assert.deepEqual(bonjour.stopped.sort(), ['rtsp', 'thingino']);
+  assert.deepEqual(bonjour.stopped.sort(), ['nightlight-cam', 'rtsp', 'thingino']);
   assert.equal(bonjour.destroyed, 1);
 });
 
@@ -64,7 +64,7 @@ test('abort stops both browsers and destroys an owned Bonjour instance', async (
     wsProbe: async () => {}, timeoutMs: 30000 });
   controller.abort();
   await pending;
-  assert.deepEqual(bonjour.stopped.sort(), ['rtsp', 'thingino']);
+  assert.deepEqual(bonjour.stopped.sort(), ['nightlight-cam', 'rtsp', 'thingino']);
   assert.equal(bonjour.destroyed, 1);
 });
 
@@ -73,7 +73,7 @@ test('an existing announcer instance is browsed but never destroyed', async () =
   const result = await discoverCameras({ createBonjour: () => { throw new Error('created another socket'); },
     reuseBonjour: bonjour, wsProbe: async () => {}, timeoutMs: 5 });
   assert.equal(result.sourceErrors.length, 0);
-  assert.deepEqual(bonjour.stopped.sort(), ['rtsp', 'thingino']);
+  assert.deepEqual(bonjour.stopped.sort(), ['nightlight-cam', 'rtsp', 'thingino']);
   assert.equal(bonjour.destroyed, 0);
 });
 
@@ -93,7 +93,7 @@ test('one browser stop throwing still closes the other browser and owned socket'
     return options.type === 'thingino' ? { stop: () => { throw new Error('stop failed'); } } : browser;
   };
   await discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 5 });
-  assert.deepEqual(bonjour.stopped, ['rtsp']);
+  assert.deepEqual(bonjour.stopped, ['nightlight-cam', 'rtsp']);
   assert.equal(bonjour.destroyed, 1);
 });
 
@@ -205,4 +205,79 @@ test('manager retains at most eight finished scans', async () => {
   }
   assert.equal(manager.get(ids[0]), null);
   assert.equal(manager.get(ids[8]).done, true);
+});
+
+// A Nightlight Camera (the nightlight-cam project) announces `_nightlight-cam._tcp` and is found without WS-Discovery.
+test('a Nightlight Camera record is a candidate with its own source, name, product and RTSP port', async () => {
+  const bonjour = bonjourFixture();
+  const pending = discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 20 });
+  bonjour.callbacks['nightlight-cam']({ addresses: ['192.168.3.20'], name: 'Bedroom', port: 8554,
+    txt: { txtvers: '1', product: 'Nightlight Camera', id: 'abc123', version: '0.1.0', onvif: '80' } });
+  const result = await pending;
+  assert.equal(result.candidates.length, 1);
+  const [camera] = result.candidates;
+  assert.deepEqual(camera.sources, ['nightlight']);
+  assert.equal(camera.name, 'Bedroom');
+  assert.equal(camera.product, 'Nightlight Camera');
+  // The record's own port is the RTSP port: no `_rtsp._tcp` record is needed (the default would be 554).
+  assert.equal(camera.rtspPort, 8554);
+});
+
+test('the same camera found by WS-Discovery and mDNS is one candidate, whichever answers first', async () => {
+  for (const wsFirst of [true, false]) {
+    const bonjour = bonjourFixture();
+    const ws = ({ onDevice }) => onDevice({ probeMatches: { probeMatch: { XAddrs: 'http://192.168.3.20/onvif' } } });
+    const pending = discoverCameras({ createBonjour: () => bonjour, timeoutMs: 20,
+      // wsFirst=false: the WS-Discovery answer arrives AFTER the mDNS record (a few ticks later, inside the scan).
+      wsProbe: async (args) => {
+        if (wsFirst) { ws(args); return; }
+        for (let i = 0; i < 3; i++) await new Promise((resolve) => setImmediate(resolve));
+        ws(args);
+      } });
+    // wsFirst: the ONVIF candidate already exists (and has the default port) when the mDNS record arrives.
+    await new Promise((resolve) => setImmediate(resolve));
+    bonjour.callbacks['nightlight-cam']({ addresses: ['192.168.3.20'], name: 'Bedroom', port: 8554,
+      txt: { product: 'Nightlight Camera' } });
+    const result = await pending;
+    assert.equal(result.candidates.length, 1, `wsFirst=${wsFirst}`);
+    assert.deepEqual(result.candidates[0].sources.sort(), ['nightlight', 'onvif'], `wsFirst=${wsFirst}`);
+    // The announced name beats the WS-Discovery one, and the announced port reaches a candidate ONVIF found first.
+    assert.equal(result.candidates[0].name, 'Bedroom');
+    assert.equal(result.candidates[0].rtspPort, 8554);
+  }
+});
+
+test('a Nightlight Camera record at a public address is dropped and counted', async () => {
+  const bonjour = bonjourFixture();
+  const pending = discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 10 });
+  bonjour.callbacks['nightlight-cam']({ addresses: ['8.8.8.8', '::1'], name: 'Elsewhere', port: 554,
+    txt: { product: 'Nightlight Camera' } });
+  const result = await pending;
+  assert.equal(result.candidates.length, 0);
+  assert.ok(result.dropped >= 1);
+});
+
+test('a hostile Nightlight Camera record: bad TXT is dropped, a bad port falls back to 554, the name is cleaned', async () => {
+  const bonjour = bonjourFixture();
+  const pending = discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 20 });
+  bonjour.callbacks['nightlight-cam']({ addresses: ['192.168.3.21'], name: 'Cot‮​\n', port: 70000,
+    txt: { product: '<script>alert(1)</script>', streamer: 'x'.repeat(41) } });
+  bonjour.callbacks['nightlight-cam']({ addresses: ['192.168.3.22'], name: 'Two', port: 0, txt: { product: 'p'.repeat(41) } });
+  bonjour.callbacks['nightlight-cam']({ addresses: ['192.168.3.23'], name: 'Three', port: '8554', txt: undefined });
+  bonjour.callbacks['nightlight-cam'](null);
+  const result = await pending;
+  assert.equal(result.candidates.length, 3);
+  const first = result.candidates.find((item) => item.ip === '192.168.3.21');
+  assert.equal(first.name, 'Cot');
+  assert.equal('product' in first, false);
+  assert.equal('streamer' in first, false);
+  for (const item of result.candidates) assert.equal(item.rtspPort, 554, item.ip);
+});
+
+test('a Thingino record still keeps its Thingino source and is not read as a Nightlight Camera', async () => {
+  const bonjour = bonjourFixture();
+  const pending = discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 10 });
+  bonjour.callbacks.thingino({ addresses: ['192.168.1.30'], name: 'thingino-cam', txt: { product: 'Thingino 1' } });
+  const result = await pending;
+  assert.deepEqual(result.candidates[0].sources, ['mdns']);
 });
