@@ -315,6 +315,8 @@ describe('the corrupt-timestamp rule restarts on a large jump, not on start-up j
     assert.equal(isCorruptTimestampLine('[mpegts] DTS discontinuity in stream 0'), true);
     assert.equal(isCorruptTimestampLine('DTS discontinuity in stream 1: packet 19 with DTS abc, packet 20 with DTS def'), true);
     assert.equal(isCorruptTimestampLine(dtsLine('1'.repeat(25), '2'.repeat(25))), true, 'a field too long to trust');
+    // The LAST field too: without a "no further digit" guard its first 20 digits parsed and a huge jump read as small.
+    assert.equal(isCorruptTimestampLine(dtsLine('1' + '0'.repeat(19), '1' + '0'.repeat(20))), true, 'a last field of 21 digits (its first 20 would equal the first field)');
     assert.equal(isCorruptTimestampLine(dtsLine(10, 20).replace('packet 20 with DTS 20', 'packet 20 with DTS')), true);
   });
 

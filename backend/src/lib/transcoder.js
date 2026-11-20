@@ -158,7 +158,7 @@ const noop = () => {};
 // What FFmpeg prints when a gap between two packets is more than 1000x the average gap since the first packet:
 //   "DTS discontinuity in stream <n>: packet <i> with DTS <a>, packet <j> with DTS <b>"
 // FFmpeg emits it while it PROBES a new input (its frame-rate estimate in avformat_find_stream_info, the first few
-// seconds of a session; taken from the cameras' own description of the source, the file was not re-read here). The
+// seconds of a session; confirmed in the review of this change by reading demux.c of FFmpeg 8.1). The
 // measurement agrees: every hit in the staging log of 2026-11-20 (330 lines, one camera) names a packet number of
 // 109 or less, one to three lines per session, none later. The input here is stamped with the arrival time (-use_wallclock_as_timestamps),
 // so the DTS is when each packet ARRIVED, never the camera's own (possibly corrupt) RTP timestamp. What the line
@@ -173,7 +173,7 @@ const noop = () => {};
 // produced the line in the retained logs (0 of ~139,000 lines, 2026-11-17 to 2026-11-20), so nothing measured says
 // where their limit is. A jump this size, in either direction, restarts.
 export const DTS_RESTART_JUMP_TICKS = 480000n;
-const DTS_DISCONTINUITY_LINE = /DTS discontinuity in stream (\d{1,3}): packet \d{1,10} with DTS (-?\d{1,20}), packet \d{1,10} with DTS (-?\d{1,20})/;
+const DTS_DISCONTINUITY_LINE = /DTS discontinuity in stream (\d{1,3}): packet \d{1,10} with DTS (-?\d{1,20}), packet \d{1,10} with DTS (-?\d{1,20})(?!\d)/;
 
 // True when this stderr line is a timestamp discontinuity large enough to restart the camera over. A line that
 // names a discontinuity but cannot be parsed (a future FFmpeg changed its wording, a field too long) restarts as it
