@@ -127,6 +127,20 @@ test('docker-publish.yml: packages: write is granted only to mirror-ghcr and cop
   assert.ok(!read('docker-publish.yml').some((l) => !isNoise(l) && /write-all/.test(l)));
 });
 
+// The two jobs that can write packages log in to Docker Hub only to READ; they must use the read-only token, so a
+// bug or a compromise there cannot push to Docker Hub. The push token stays in build-and-push (the publish) only.
+test('docker-publish.yml: the packages: write jobs log in to Docker Hub with the READ-ONLY token, never the push token', () => {
+  const wf = workflow('docker-publish.yml');
+  for (const id of ['mirror-ghcr', 'copy-tags']) {
+    const hubLogins = wf.jobOf(id).steps.filter((s) => usesAction(s, 'docker/login-action') && !ghcrLogin(s));
+    assert.equal(hubLogins.length, 1, `${id}: expected exactly one Docker Hub login`);
+    assert.match(val(sub(hubLogins[0], 'with'), 'password'), /^\$\{\{\s*secrets\.DOCKERHUB_READ_TOKEN\s*\}\}$/, `${id} must use the read-only token`);
+  }
+  // The push token is used by exactly one job: the publish.
+  const jobsUsingPush = Object.keys(wf.jobs).filter((id) => wf.jobOf(id).steps.some((s) => /secrets\.DOCKERHUB_TOKEN\b/.test(val(sub(s, 'with'), 'password') || '')));
+  assert.deepEqual(jobsUsingPush, ['build-and-push']);
+});
+
 test('docker-publish.yml: mirror-ghcr runs after a successful build-and-push, on its own, with env-only inputs', () => {
   const wf = workflow('docker-publish.yml');
   const { job, steps } = wf.jobOf('mirror-ghcr');
