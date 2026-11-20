@@ -808,7 +808,9 @@ export function lastCompletedNightDate(childId) {
 // Overnight temperature/humidity for the child's cameras (those with an MQTT sensor) across
 // [startSql, asOfSql). Returns a summary (avg/min/max, Celsius + %) always, plus a downsampled
 // per-5-min series when includeSeries is set (for the detail chart). Null when there are no readings —
-// so a child without a temp/humidity sensor simply shows no climate. Times are the same UTC
+// so a child without a temp/humidity sensor simply shows no climate. A reading a Nightlight Camera marked SIMULATED
+// (invented bench data) is never part of a night: `simulated = 0` on both queries, because this average is stored on the
+// night and feeds the warm/cool insight. Times are the same UTC
 // 'YYYY-MM-DD HH:MM:SS' strings sensor_readings.created_at uses, so a lexical range works.
 function nightClimate(cams, startSql, asOfSql, { includeSeries = false } = {}) {
   if (!cams.length) return null;
@@ -818,7 +820,7 @@ function nightClimate(cams, startSql, asOfSql, { includeSeries = false } = {}) {
       `SELECT AVG(temperature) AS ta, MIN(temperature) AS tmin, MAX(temperature) AS tmax, COUNT(temperature) AS tn,
               AVG(humidity) AS ha, MIN(humidity) AS hmin, MAX(humidity) AS hmax, COUNT(humidity) AS hn
          FROM sensor_readings
-         WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ?`
+         WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ? AND simulated = 0`
     )
     .get(...cams, startSql, asOfSql);
   if (!agg || (!agg.tn && !agg.hn)) return null;
@@ -832,7 +834,7 @@ function nightClimate(cams, startSql, asOfSql, { includeSeries = false } = {}) {
     const rows = db
       .prepare(
         `SELECT created_at AS t, temperature, humidity FROM sensor_readings
-           WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ? ORDER BY created_at`
+           WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ? AND simulated = 0 ORDER BY created_at`
       )
       .all(...cams, startSql, asOfSql);
     // Bucket to a 5-min grid and average across cameras, so multiple sensors (or jittery timestamps)

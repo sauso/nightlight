@@ -46,6 +46,8 @@ import { childTracksSleep } from '../lib/sleepAnalysis.js';
 import { purgeCamera, preflightCameraPurge, purgeFailureReason } from '../lib/entityPurge.js';
 import { recordingReadiness } from '../lib/recordingReadiness.js';
 import { createScanManager } from '../lib/cameraDiscovery.js';
+import { NLCAM_SOURCE, NLCAM_PORT, GROUPS, isNightlightHost, cameraHost, cameraLogin, readHealth, readCapabilities, parseGroups } from '../lib/nightlightCamera.js';
+import { liveSensors, retryCameraSensors } from '../lib/cameraSensors.js';
 
 const router = Router();
 
@@ -318,7 +320,11 @@ router.post('/onvif-probe', requireAdmin, asyncHandler(async (req, res) => {
       });
       result.backchannelVerified = rtspUrl ? await verifyBackchannel(rtspUrl) : false;
     }
-    res.json(result);
+    // Is it a Nightlight Camera (its own sensor API on port 8080)? Asked only after the ONVIF probe succeeded, only of a
+    // literal private address, and silently: most cameras have nothing there. The ONVIF answer is unchanged in every
+    // case; a Nightlight Camera just carries one extra object, validated and filtered by readHealth.
+    const nightlight = await readHealth(String(host).trim());
+    res.json(nightlight ? { ...result, nightlight_camera: nightlight } : result);
   } catch (err) {
     // Expected failure mode (wrong IP/creds, not an ONVIF camera, timeout). Use 422, NOT a
     // 5xx: a reverse proxy (e.g. Cloudflare) will replace a 5xx from the origin with its own
@@ -677,6 +683,8 @@ router.get('/', asyncHandler(async (req, res) => {
       // poll of this list. It's off by design — report not-ready without querying.
       status: cam.disabled ? { ready: false, tracks: [] } : await getPathStatus(cam.mediamtx_path),
       mqtt: cam.mqtt_topic ? getReading(cam.mqtt_topic) : null,
+      // Only on a camera whose owner switched its own sensors on; from memory, no request to the camera. Additive.
+      ...(cam.sensor_source === NLCAM_SOURCE ? { nightlight_sensors: liveSensors(cam.id) } : {}),
     }))
   );
   res.json(withStatus);
@@ -729,13 +737,75 @@ router.get('/:id/sensor-history', requireAuth, (req, res) => {
   const hours = Math.min(168, Math.max(1, parseInt(req.query.hours, 10) || 24));
   const rows = db
     .prepare(
-      `SELECT created_at AS t, temperature, humidity FROM sensor_readings
+      `SELECT created_at AS t, temperature, humidity, simulated FROM sensor_readings
          WHERE camera_id = ? AND created_at >= datetime('now', ?)
          ORDER BY created_at ASC`
     )
-    .all(req.params.id, `-${hours} hours`);
+    .all(req.params.id, `-${hours} hours`)
+    // `simulated` is ADDED (a boolean): a Nightlight Camera's invented bench readings stay on the chart, labelled.
+    .map((row) => ({ ...row, simulated: !!row.simulated }));
   res.json({ hours, readings: rows });
 });
+
+// A Nightlight Camera's own sensors (lib/nightlightCamera.js). Admin only.
+// GET asks the camera now (health and capabilities, 3 s each, silently "not detected" on any failure) and joins what the
+// poller holds in memory. Never returns the login.
+async function nightlightState(cam) {
+  const host = cameraHost(cam);
+  const port = cam.sensor_api_port || NLCAM_PORT;
+  const enabled = cam.sensor_source === NLCAM_SOURCE;
+  const base = { enabled, groups: parseGroups(cam.sensor_groups), device_id: cam.nlcam_device_id || null };
+  const live = enabled ? liveSensors(cam.id) : null;
+  if (!isNightlightHost(host)) return { ...base, detected: false, reason: 'address', status: live?.status || 'off', readings: live?.metrics || {} };
+  const health = await readHealth(host, { port });
+  if (!health) return { ...base, detected: false, reason: 'no_answer', status: live?.status || 'off', readings: live?.metrics || {} };
+  const login = cameraLogin(cam);
+  const capabilities = login ? await readCapabilities(host, login, { port }) : null;
+  return {
+    ...base, detected: true, device_id: health.device_id, firmware: health.firmware, simulated: health.simulated,
+    capabilities, status: live?.status || 'off', readings: live?.metrics || {},
+  };
+}
+
+router.get('/:id/nightlight', requireAdmin, asyncHandler(async (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  res.json(await nightlightState(cam));
+}));
+
+// `enabled` switches the camera's sensors on or off (on re-asks the camera: the server, not the client, decides it is a
+// Nightlight Camera and records its id); `groups` sets any of climate/radar/light/pad; `retry` resumes a poll stopped by
+// a failed login. A refusal is a 4xx with its message (a proxy hides a 5xx body).
+router.put('/:id/nightlight', requireAdmin, asyncHandler(async (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  const { enabled, groups, retry } = req.body || {};
+  if (enabled !== undefined && typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be true or false' });
+  if (retry !== undefined && typeof retry !== 'boolean') return res.status(400).json({ error: 'retry must be true or false' });
+  if (groups !== undefined && (!groups || typeof groups !== 'object' || Array.isArray(groups)
+    || Object.keys(groups).some((key) => !GROUPS.includes(key) || typeof groups[key] !== 'boolean'))) {
+    return res.status(400).json({ error: `groups must only hold ${GROUPS.join(', ')}, each true or false` });
+  }
+  if (enabled === true) {
+    const host = cameraHost(cam);
+    const port = cam.sensor_api_port || NLCAM_PORT;
+    const health = isNightlightHost(host) ? await readHealth(host, { port }) : null;
+    if (!health) {
+      return res.status(422).json({ error: 'This camera did not answer as a Nightlight Camera. Check that it is on, and that it was added by its IP address.' });
+    }
+    db.prepare('UPDATE cameras SET sensor_source = ?, nlcam_device_id = ?, sensor_api_port = ? WHERE id = ?')
+      .run(NLCAM_SOURCE, health.device_id, health.api_port, cam.id);
+  } else if (enabled === false) {
+    db.prepare('UPDATE cameras SET sensor_source = NULL WHERE id = ?').run(cam.id);
+  }
+  if (groups) {
+    db.prepare('UPDATE cameras SET sensor_groups = ? WHERE id = ?').run(JSON.stringify({ ...parseGroups(cam.sensor_groups), ...groups }), cam.id);
+  }
+  if (retry) retryCameraSensors(cam.id);
+  const fresh = db.prepare('SELECT * FROM cameras WHERE id = ?').get(cam.id);
+  const on = fresh?.sensor_source === NLCAM_SOURCE;
+  res.json({ enabled: on, groups: parseGroups(fresh?.sensor_groups), status: on ? liveSensors(cam.id).status : 'off' });
+}));
 
 // Per-minute motion/sound activity timeline for one camera (the raw signal sleep tracking is built
 // on). Any signed-in user. `hours` (default 24, capped at 7 days); ascending by minute. Empty until

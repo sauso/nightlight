@@ -1215,6 +1215,39 @@ db.exec(`
   )
 `);
 
+// Nightlight Camera sensors (lib/nightlightCamera.js, lib/cameraSensors.js). All additive; an older version ignores them.
+//  - cameras.sensor_source: NULL, or 'nightlight-api' when the owner chose to use the camera's own sensors.
+//    sensor_api_port is the camera's API port (8080), nlcam_device_id the camera's own id (set by the server after it
+//    has asked the camera, never taken from a client), sensor_groups the switches as JSON ({climate,radar,light,pad}
+//    booleans; NULL means all on). None of these names holds a secret: the login is the stream login already stored.
+//  - sensor_readings.simulated: 1 for a reading the camera said was invented (a bench camera). DEFAULT 0, so every
+//    existing row keeps meaning "real" and no stored or reported number moves. sleepAnalysis.js nightClimate ignores
+//    rows with simulated = 1.
+//  - nlcam_readings: per-minute radar / light / bed-pad aggregates, shaped like esphome_readings. CASCADE: deleting a
+//    camera deletes its rows. Nothing reads it yet (a later phase feeds the night card; see lib/cameraSensors.js).
+const camerasColumnsNl = db.prepare('PRAGMA table_info(cameras)').all().map((c) => c.name);
+if (!camerasColumnsNl.includes('sensor_source')) db.exec('ALTER TABLE cameras ADD COLUMN sensor_source TEXT');
+if (!camerasColumnsNl.includes('sensor_api_port')) db.exec('ALTER TABLE cameras ADD COLUMN sensor_api_port INTEGER NOT NULL DEFAULT 8080');
+if (!camerasColumnsNl.includes('nlcam_device_id')) db.exec('ALTER TABLE cameras ADD COLUMN nlcam_device_id TEXT');
+if (!camerasColumnsNl.includes('sensor_groups')) db.exec('ALTER TABLE cameras ADD COLUMN sensor_groups TEXT');
+const sensorReadingsColumns = db.prepare('PRAGMA table_info(sensor_readings)').all().map((c) => c.name);
+if (!sensorReadingsColumns.includes('simulated')) db.exec('ALTER TABLE sensor_readings ADD COLUMN simulated INTEGER NOT NULL DEFAULT 0');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS nlcam_readings (
+    camera_id TEXT NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
+    bucket INTEGER NOT NULL,
+    metric TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    mean REAL,
+    min REAL,
+    max REAL,
+    last REAL,
+    simulated INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (camera_id, bucket, metric)
+  ) WITHOUT ROWID;
+  CREATE INDEX IF NOT EXISTS idx_nlcam_readings_bucket ON nlcam_readings(bucket);
+`);
+
 // Push a notification when a child's nightly sleep report is computed (window closed + row stored).
 // On by default; fires only for a freshly-closed night (a mid-day restart re-computing an old night
 // does not re-notify). See lib/sleepReportAlert.js.
