@@ -228,14 +228,19 @@ test('the same camera found by WS-Discovery and mDNS is one candidate, whichever
     const bonjour = bonjourFixture();
     const ws = ({ onDevice }) => onDevice({ probeMatches: { probeMatch: { XAddrs: 'http://192.168.3.20/onvif' } } });
     const pending = discoverCameras({ createBonjour: () => bonjour, timeoutMs: 20,
-      wsProbe: async (args) => { if (wsFirst) ws(args); } });
+      // wsFirst=false: the WS-Discovery answer arrives AFTER the mDNS record (a few ticks later, inside the scan).
+      wsProbe: async (args) => {
+        if (wsFirst) { ws(args); return; }
+        for (let i = 0; i < 3; i++) await new Promise((resolve) => setImmediate(resolve));
+        ws(args);
+      } });
     // wsFirst: the ONVIF candidate already exists (and has the default port) when the mDNS record arrives.
     await new Promise((resolve) => setImmediate(resolve));
     bonjour.callbacks['nightlight-cam']({ addresses: ['192.168.3.20'], name: 'Bedroom', port: 8554,
       txt: { product: 'Nightlight Camera' } });
     const result = await pending;
     assert.equal(result.candidates.length, 1, `wsFirst=${wsFirst}`);
-    assert.deepEqual(result.candidates[0].sources.sort(), wsFirst ? ['nightlight', 'onvif'] : ['nightlight']);
+    assert.deepEqual(result.candidates[0].sources.sort(), ['nightlight', 'onvif'], `wsFirst=${wsFirst}`);
     // The announced name beats the WS-Discovery one, and the announced port reaches a candidate ONVIF found first.
     assert.equal(result.candidates[0].name, 'Bedroom');
     assert.equal(result.candidates[0].rtspPort, 8554);
