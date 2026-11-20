@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Thermometer, Droplet } from 'lucide-react';
 import { api } from '../lib/api.js';
+import SimulatedBadge from './SimulatedBadge.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 
 // Last-24h temperature & humidity for a camera that has an MQTT sensor topic, shown on the Child
@@ -81,13 +82,17 @@ export default function SensorHistoryCard({ camera }) {
   }, [readings, toF]);
 
   if (readings === null) return null; // don't flash an empty card while loading
+  // A Nightlight Camera's invented bench readings are charted (that is what they are for) but labelled.
+  const anySimulated = readings.some((r) => r.simulated === true);
   const hasData = temp.length > 0 || humidity.length > 0;
 
   return (
     <div className="card sensor-card">
       {/* Icon and 15px bold title, the same heading as Timelapse, Recent alerts and Recordings (owner, staging phone 2026-11-13: this
           one was still the 12px grey label). */}
-      <div className="sensor-card__title"><Thermometer size={16} aria-hidden="true" /> Room climate · last 24h</div>
+      <div className="sensor-card__title"><Thermometer size={16} aria-hidden="true" /> Room climate · last 24h
+        {anySimulated && <SimulatedBadge className="sensor-card__badge" />}
+      </div>
       {!hasData ? (
         <div className="camera-tile__sub" style={{ padding: '6px 2px' }}>
           Collecting data — temperature and humidity will chart here once a few readings come in from

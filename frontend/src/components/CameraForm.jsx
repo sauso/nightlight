@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Zap, AudioLines, Clock, RotateCcw, Trash2, ChevronDown } from 'lucide-react';
+import { Zap, AudioLines, Clock, RotateCcw, Trash2, ChevronDown, Activity } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
@@ -170,6 +170,17 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   useEffect(() => {
     if (confirmMsg || (pageError && pageError !== IP_FIRST_ERROR && pageError !== CHILD_FIRST_ERROR)) setAdvancedOpen(true);
   }, [pageError, confirmMsg]);
+
+  // Is this saved camera a Nightlight Camera whose sensors were never switched on? One background question to the server
+  // (which asks the camera on port 8080), only when the camera does not already carry its id. A camera that is not one,
+  // or does not answer, simply shows no row; nothing here waits on it or blocks the form.
+  const [nlDetected, setNlDetected] = useState(false);
+  useEffect(() => {
+    if (isNew || !cam || cam.nlcam_device_id) return undefined;
+    let alive = true;
+    Promise.resolve(api.get(`/cameras/${id}/nightlight`)).then((r) => { if (alive && r?.detected === true) setNlDetected(true); }).catch(() => {});
+    return () => { alive = false; };
+  }, [id, isNew, cam?.nlcam_device_id, !!cam]);
 
   // Back to what is stored. useFormDraft sees form == baseline and removes the stored draft.
   function discardDraft() {
@@ -438,6 +449,17 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
                     value={cam.detect_schedule_enabled ? `${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)}` : 'Always'}
                     onClick={() => navigate(`/cameras/${id}/schedule`, detFrom)} />
                 </div>
+                {/* Only for a camera that is a Nightlight Camera: recorded when its sensors were switched on, or found by the
+                    one background check below. Its own screen, like the detection rows. */}
+                {(cam.nlcam_device_id || nlDetected) && (
+                  <>
+                    <div className="section-title">Nightlight Camera</div>
+                    <div className="card camera-form__nav-card">
+                      <NavRow Icon={Activity} label="Sensors" sub="Room temperature, radar, light and bed pad"
+                        value={cam.sensor_source ? 'On' : 'Off'} onClick={() => navigate(`/cameras/${id}/nightlight`, detFrom)} />
+                    </div>
+                  </>
+                )}
               </>
             )}
 

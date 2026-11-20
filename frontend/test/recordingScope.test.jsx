@@ -256,6 +256,13 @@ const panel = async () => {
   await openAdvanced();
   return within(await screen.findByRole('region', { name: 'Recording and alerts' }));
 };
+// Fails the FIRST recording-readiness request only. Any other request the page makes (the Nightlight Camera check in CameraForm asks
+// the server whether the camera is one) must not use up the rejection, so it is matched by path, not by call order.
+function failReadinessOnce() {
+  let failed = false;
+  getSpy.mockImplementation((path) => (String(path).includes('recording-readiness') && !failed
+    ? ((failed = true), Promise.reject(new Error('boom'))) : Promise.resolve(READY)));
+}
 const readinessCalls = () => getSpy.mock.calls.filter(([p]) => String(p).includes('recording-readiness'));
 
 beforeEach(() => {
@@ -286,7 +293,7 @@ describe('the panel, as an admin', () => {
   });
 
   test('a failed check says so inline and leaves the set-up rows alone; Check again recovers', async () => {
-    getSpy.mockRejectedValueOnce(new Error('boom'));
+    failReadinessOnce();
     const { user } = mount();
     const p = await panel();
     expect((await p.findByRole('alert')).textContent).toMatch(/Couldn’t check whether this camera is ready right now/);
@@ -303,7 +310,7 @@ describe('the panel, as an admin', () => {
     const { user } = mount();
     const p = await panel();
     expect(await p.findByText('Recording buffer')).toBeTruthy();
-    getSpy.mockRejectedValueOnce(new Error('boom'));
+    failReadinessOnce();
     await user.click(p.getByRole('button', { name: 'Check again' }));
     expect((await p.findByRole('alert')).textContent).toMatch(/Couldn’t check whether this camera is ready right now/);
     // The stale answer must be gone, or the admin reads it as the result of the recheck.

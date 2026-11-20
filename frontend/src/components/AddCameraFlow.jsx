@@ -5,6 +5,8 @@ import { useCameras } from '../lib/CamerasContext.jsx';
 import { probeCamera, buildCameraPayload } from '../lib/cameraConnect.js';
 import CameraDiscovery from './CameraDiscovery.jsx';
 import CameraForm from './CameraForm.jsx';
+import SwitchRow from './SwitchRow.jsx';
+import SimulatedBadge from './SimulatedBadge.jsx';
 
 // Adding a camera, as separate cards (#950): the search, one card per camera it found, then, for the one the
 // person picks, a card that asks only for the camera's login, and last a card for adding by hand. Used by the
@@ -83,6 +85,11 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
   // The probe's answer, kept so "Save anyway" does not log in to the camera a second time. Cleared when the
   // login changes, because the answer belongs to the login that produced it.
   const probed = useRef(null);
+  // A Nightlight Camera is offered its sensors once, between the probe and the save: `offer` is what the card shows,
+  // `offerSeen` makes the next press of Add camera save (using the cached probe) instead of asking again.
+  const [offer, setOffer] = useState(null);
+  const [useSensors, setUseSensors] = useState(true);
+  const offerSeen = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -94,7 +101,10 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
   const childId = initialChildId || (kids.length === 1 ? kids[0].id : chosenChild);
 
   function loginChanged(setter) {
-    return (event) => { setter(event.target.value); probed.current = null; setConfirmMsg(''); setError(''); setCanEnterDetails(false); };
+    return (event) => {
+      setter(event.target.value); probed.current = null; setConfirmMsg(''); setError(''); setCanEnterDetails(false);
+      offerSeen.current = false; setOffer(null);
+    };
   }
 
   async function submit(force = false) {
@@ -106,6 +116,13 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
         probed.current = await probeCamera({ host: candidate.ip, username, password });
         // The person left while the camera was answering: do not go on to save something they walked away from.
         if (!mounted.current) return;
+      }
+      // A Nightlight Camera: stop once, show the offer, and let the next press of Add camera save. Any other camera never
+      // reaches this branch (its probe answer carries no `nightlight`), so its flow is exactly what it was.
+      if (probed.current.nightlight && !offerSeen.current) {
+        offerSeen.current = true;
+        setOffer(probed.current.nightlight);
+        return;
       }
       const { fields, extra } = probed.current;
       const form = {
@@ -119,6 +136,11 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
         child_id: childId,
       };
       const saved = await api.post('/cameras', buildCameraPayload(form, extra, { force }), { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
+      // The camera is added either way; switching its sensors on is a second request the server decides on (it asks the
+      // camera itself). If it fails, the camera's own Sensors screen can switch them on, so the add is not undone.
+      if (offer && useSensors && saved?.id) {
+        try { await api.put(`/cameras/${saved.id}/nightlight`, { enabled: true }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS }); } catch { /* switch on later */ }
+      }
       await refresh();
       if (mounted.current) onCreated?.(saved);
     } catch (err) {
@@ -166,6 +188,16 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
           {kids.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
         </select>
       </div>}
+      {offer && (
+        <div className="camera-connect__nightlight" role="group" aria-label="Nightlight Camera detected">
+          <p className="camera-connect__nightlight-title">
+            Nightlight Camera detected {offer.simulated && <SimulatedBadge />}
+          </p>
+          <SwitchRow label="Use its room sensors" checked={useSensors} disabled={busy}
+            sub="Temperature, humidity, presence and more, read from the camera every few seconds. You can change this later."
+            onChange={(event) => setUseSensors(event.target.checked)} />
+        </div>
+      )}
       {error && <div className="camera-connect__error" role="alert">
         <AlertTriangle size={17} aria-hidden="true" />
         <div>{error}
