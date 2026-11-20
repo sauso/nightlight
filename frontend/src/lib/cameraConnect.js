@@ -36,6 +36,10 @@ export async function probeCamera({ host, username, password, id }) {
       onvif_profile_token: r.profileToken || null,
     },
     caps: { backchannel_supported: r.backchannel, backchannel_verified: r.backchannelVerified },
+    // Present only when the camera answered, on port 8080, as a Nightlight Camera: { device_id, firmware, simulated }.
+    // The server checks again when the sensors are switched on; this only decides whether to offer them.
+    nightlight: r.nightlight_camera && typeof r.nightlight_camera === 'object'
+      ? { firmware: r.nightlight_camera.firmware || null, simulated: r.nightlight_camera.simulated !== false } : null,
     summary: `Found stream${res ? ` — ${res}` : ''}${talk}${ptz}${motion}${low}. Port & path filled in.`,
   };
 }

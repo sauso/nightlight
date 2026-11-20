@@ -12,6 +12,7 @@ import AlertList from '../components/AlertList.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import { loadState } from '../lib/loadState.js';
 import SensorHistoryCard from '../components/SensorHistoryCard.jsx';
+import { usesCameraClimate } from '../lib/nightlightSensors.js';
 import SleepSummaryCard from '../components/SleepSummaryCard.jsx';
 import RecordingsCard from '../components/RecordingsCard.jsx';
 import MorningReviewCard from '../components/MorningReviewCard.jsx';
@@ -206,7 +207,7 @@ export default function ChildDetail() {
         <div className="child-page__recordings"><RecordingsCard key={id} childId={id} /></div>
 
         <div className="child-page__sensors">
-          {childCams.filter((c) => c.mqtt_topic).map((c) => (
+          {childCams.filter((c) => c.mqtt_topic || usesCameraClimate(c)).map((c) => (
             <SensorHistoryCard key={c.id} camera={c} />
           ))}
         </div>

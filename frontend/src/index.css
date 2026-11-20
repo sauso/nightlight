@@ -4004,3 +4004,17 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
 }
 .user-row__sessions[hidden] { display: none; }
 .user-row__sessions .list-row:last-child { border-bottom: none; }
+
+/* Nightlight Camera sensors (PR for #nlcam): the offer on the add card, the Sensors screen, the Simulated badge. */
+.camera-connect__nightlight { margin: 14px 0 4px; padding: 12px 14px; border: 1px solid var(--accent-line); border-radius: 12px; }
+.camera-connect__nightlight-title { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-weight: 700; font-size: 15px; }
+.nlcam-card .card-heading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nlcam-card__badge, .sensor-card__badge { margin-left: 4px; }
+.nlcam-status { margin: 8px 0 4px; font-size: 14px; font-weight: 700; color: var(--text-secondary); }
+.nlcam-status--ok { color: var(--live); }
+.nlcam-status--offline, .nlcam-status--login_failed, .nlcam-status--wrong_device { color: var(--offline); }
+.nlcam-readings { margin: 0 0 8px; }
+.nlcam-readings__row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 15px; }
+.nlcam-readings__row:first-child { border-top: 0; }
+.nlcam-readings dt { color: var(--text-secondary); }
+.nlcam-readings dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
