@@ -1223,8 +1223,10 @@ body.in-pip .tile-menu-backdrop {
 }
 
 /* #1076: the sheet's two destinations are full-width rows, with a clear 56px tap target. */
-.tile-menu__actions { display: grid; gap: 4px; margin-bottom: 8px; }
-.tile-menu__action { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text-primary); font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+.tile-menu__actions { display: flex; gap: 8px; margin-bottom: 8px; }
+/* Stop and Camera settings sit on ONE line as two equal outlined buttons, like the Restart pair under them (owner, 2026-11-20: two
+   full-width text rows looked bad). Stop alone (a caregiver has no Camera settings) takes the whole line. */
+.tile-menu__action { display: flex; flex: 1 1 0; align-items: center; justify-content: center; gap: 8px; min-width: 0; min-height: 48px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text-primary); font: inherit; font-size: 15px; font-weight: 600; text-align: center; cursor: pointer; }
 .tile-menu__action--stop { color: var(--offline); }
 .tile-menu__action:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .tile-menu__action:active { background: var(--child-action-active); }

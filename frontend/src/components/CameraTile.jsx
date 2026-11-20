@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Bell, Square, Play, RotateCcw, Power, BellOff } from 'lucide-react';
 import { usesCameraClimate } from '../lib/nightlightSensors.js';
-import SimulatedBadge from './SimulatedBadge.jsx';
 import { useNavigate } from 'react-router-dom';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -1138,7 +1137,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
           </div>
         </div>
-        {/* A Nightlight Camera's chips sit side by side and wrap (temperature, humidity, the Simulated tag); every other camera
+        {/* A Nightlight Camera's chips sit side by side and wrap (temperature, humidity); every other camera
             keeps the stacked column it always had. */}
         <div className={`status-row${camera.nightlight_sensors ? ' status-row--wrap' : ''}`}>
           {snoozedUntil && (
@@ -1153,7 +1152,6 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               {text}
             </span>
           ))}
-          {camera.nightlight_sensors?.simulated === true && <SimulatedBadge />}
         </div>
       </div>
     </div>
