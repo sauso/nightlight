@@ -155,6 +155,37 @@ const noop = () => {};
 // read that as "not running" and queued a second start, whose own stop then killed the first one's fresh
 // ffmpeg. A start that ends without launching leaves `pending` before its caller resumes, so right after
 // `await startTranscoder(...)` this reports only the process.
+// What FFmpeg prints when a gap between two packets is more than 1000x the average gap since the first packet:
+//   "DTS discontinuity in stream <n>: packet <i> with DTS <a>, packet <j> with DTS <b>"
+// FFmpeg emits it while it PROBES a new input (its frame-rate estimate in avformat_find_stream_info, the first few
+// seconds of a session; confirmed in the review of this change by reading demux.c of FFmpeg 8.1). The
+// measurement agrees: every hit in the staging log of 2026-11-20 (330 lines, one camera) names a packet number of
+// 109 or less, one to three lines per session, none later. The input here is stamped with the arrival time (-use_wallclock_as_timestamps),
+// so the DTS is when each packet ARRIVED, never the camera's own (possibly corrupt) RTP timestamp. What the line
+// reports now is packets arriving in a clump at the start of a session: a Wi-Fi camera's Opus audio did it in
+// two sessions out of three (110 ms to 410 ms jumps measured), and a 15-restarts-in-2-minutes loop followed.
+// A real corruption is a jump to billions (about 2^31 ticks, the 32-bit rollover). So restart only on a big jump.
+//
+// 480000 ticks: the DTS is in the stream's own time base, which the line does not state (90 kHz video, 8 to 48 kHz
+// audio). 480000 is 60 s at the slowest audio clock (8 kHz), 10 s at 48 kHz and 5.3 s at 90 kHz: no arrival clump
+// of a stream that then carries on looks like that, and 2^31 is more than four thousand times over it. A guess
+// from one Wi-Fi camera and the rollover case, not a calibration: the Thingino cameras on production never
+// produced the line in the retained logs (0 of ~139,000 lines, 2026-11-17 to 2026-11-20), so nothing measured says
+// where their limit is. A jump this size, in either direction, restarts.
+export const DTS_RESTART_JUMP_TICKS = 480000n;
+const DTS_DISCONTINUITY_LINE = /DTS discontinuity in stream (\d{1,3}): packet \d{1,10} with DTS (-?\d{1,20}), packet \d{1,10} with DTS (-?\d{1,20})(?!\d)/;
+
+// True when this stderr line is a timestamp discontinuity large enough to restart the camera over. A line that
+// names a discontinuity but cannot be parsed (a future FFmpeg changed its wording, a field too long) restarts as it
+// always did: when unsure, fail toward the old rule, not toward silence.
+export function isCorruptTimestampLine(line) {
+  if (typeof line !== 'string' || !line.includes('DTS discontinuity in stream')) return false;
+  const match = DTS_DISCONTINUITY_LINE.exec(line);
+  if (!match) return true;
+  const jump = BigInt(match[3]) - BigInt(match[2]);
+  return (jump < 0n ? -jump : jump) > DTS_RESTART_JUMP_TICKS;
+}
+
 export function isRunning(cameraId) {
   return processes.has(cameraId) || (startChains.get(cameraId)?.pending ?? 0) > 0;
 }
@@ -331,12 +362,13 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped, pre
     });
 
     let lastLine = '';
-    // This camera occasionally sends one corrupted RTP timestamp (jumping to
-    // billions, near the 32-bit rollover point) which poisons every downstream
-    // PTS/DTS calculation for the rest of the session - no ffmpeg flag can clean
-    // that up after the fact once it's happened. Catching the discontinuity as
-    // soon as ffmpeg reports it and restarting immediately limits the damage to
-    // a ~5s reconnect blip instead of hours of garbled output.
+    // A camera that sent one corrupted RTP timestamp (a jump to billions, near the 32-bit rollover point) used to
+    // poison every downstream PTS/DTS calculation for the rest of the session, and no ffmpeg flag can clean that up
+    // after the fact. Catching a LARGE discontinuity as soon as ffmpeg reports it and restarting at once limits the
+    // damage to a ~5s reconnect blip instead of hours of garbled output. Since the input is stamped with arrival time
+    // (-use_wallclock_as_timestamps) that corruption can no longer reach the DTS, so this is now only a guard; a small
+    // jump is start-up arrival jitter, not corruption, and must not restart anything (see
+    // DTS_RESTART_JUMP_TICKS above).
     let restarting = false;
     forwardProcessLines(proc, proc.stderr, (line) => {
       // Drop the benign per-packet timestamp spam from the logs (and from lastLine, so the exit
@@ -345,7 +377,8 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped, pre
       if (isNoisyMediaLine(line)) return;
       lastLine = line;
       logger.raw(`ffmpeg:${mediamtxPath}`, line);
-      if (!restarting && line.includes('DTS discontinuity in stream')) {
+      // A small jump (start-up arrival jitter) is only logged, by the raw line above: no restart, no history row.
+      if (!restarting && isCorruptTimestampLine(line)) {
         restarting = true;
         logger.error(
           `[ffmpeg:${mediamtxPath}] camera sent a corrupt timestamp - restarting now rather than let the session run poisoned`

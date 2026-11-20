@@ -26,6 +26,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- A camera on Wi-Fi was restarted every few seconds as "corrupt timestamp", so its live view never settled: FFmpeg prints a timestamp-jump line while it probes a new connection, and packets arriving in a clump at that moment set it off. The restart now needs a large jump (more than 480000 ticks of the stream clock, 10 seconds for 48 kHz audio); small start-up jitter is only logged.
 - Creating the first admin, creating an account and changing an account's password now answer 400 (not 500) when the password is not text.
 - Sign-in, two-factor and password-confirmation fields now accept only text; a field of another type is treated as a wrong value, like a missing one.
 - Changing a password now returns a validation error for malformed password fields instead of a server error (#1093).
