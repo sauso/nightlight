@@ -150,7 +150,8 @@ inspect_digest() {
 
 # True only when the WHOLE last inspect error is EXACTLY the registry's not-found for reference $1:
 # "ERROR: <reference>: not found", as buildx printed it against a real registry (a Docker Hub reference is
-# printed with docker.io/ in front). Trailing spaces, tabs and a CR are ignored; nothing else is. A substring match
+# printed with docker.io/ in front only for an unqualified Docker Hub reference). Trailing spaces, tabs and a CR
+# are ignored; nothing else is. A substring match
 # would read "...:1.2.3: not found in token scope" or "...@sha256:<digest>: not found" as "the tag is absent", and
 # an absent X.Y.Z tag is the one case that is copied without the refusal check.
 is_not_found() {
@@ -158,7 +159,12 @@ is_not_found() {
   while :; do
     case $line in *' '|*"$TAB"|*"$CR") line=${line%?} ;; *) break ;; esac
   done
-  case $line in "ERROR: $1: not found"|"ERROR: docker.io/$1: not found") return 0 ;; esac
+  case $line in "ERROR: $1: not found") return 0 ;; esac
+  # Buildx adds docker.io/ only to an unqualified Docker Hub name. Accepting it before a host-qualified
+  # reference such as ghcr.io/... would turn an unrelated registry error into proof that a release is absent.
+  host=${1%%/*}
+  case $host in *.*|*:*|localhost) return 1 ;; esac
+  case $line in "ERROR: docker.io/$1: not found") return 0 ;; esac
   return 1
 }
 

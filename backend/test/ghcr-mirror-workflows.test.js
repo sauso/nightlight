@@ -109,7 +109,10 @@ test('docker-publish.yml: publish and copy dispatch have only the intended trigg
   assert.equal(val(sub(inputs, 'force'), 'default'), 'false');
   assert.match(val(wf.jobOf('gate').job, 'if'), /inputs\.copy_tags\s*==\s*''/);
   assert.match(val(wf.jobOf('build-and-push').job, 'if'), /inputs\.copy_tags\s*==\s*''/);
-  assert.match(val(wf.jobOf('copy-tags').job, 'if'), /inputs\.copy_tags\s*!=\s*''\s*&&\s*!inputs\.gate_only/);
+  const copyIf = val(wf.jobOf('copy-tags').job, 'if');
+  assert.match(copyIf, /^\$\{\{\s*inputs\.copy_tags\s*!=\s*''\s*&&\s*!inputs\.gate_only\s*\}\}$/,
+    'copy-tags must run only for a copy dispatch that is not gate_only');
+  assert.doesNotMatch(copyIf, /always\(\)|\|\|/, 'an OR or always() could bypass the copy gate');
 });
 
 test('docker-publish.yml: packages: write is granted only to mirror-ghcr and copy-tags', () => {
@@ -221,7 +224,10 @@ test('docker-publish.yml: copy-tags resolves through the script, after validatio
   assert.match(val(sub(steps[check], 'env'), 'COPY_TAGS'), /^\$\{\{\s*inputs\.copy_tags\s*\}\}$/);
   const copy = stepIndex(steps, runsMirror, 'running ghcr-mirror.sh');
   assert.ok(copy > Math.max(...logins.map(([, i]) => i)));
-  assert.match(runText(steps[copy]), /ghcr-mirror\.sh --resolve/);
+  const copyRun = runText(steps[copy]);
+  assert.match(copyRun, /^\s*export TAGS="\$\{COPY_TAGS\/\/,\/ \}"\s*$/m,
+    'Copy each tag must use the input, converting commas to spaces');
+  assert.match(copyRun, /\bsh scripts\/ghcr-mirror\.sh --resolve\b/);
   assert.match(val(sub(steps[copy], 'env'), 'COPY_TAGS'), /^\$\{\{\s*inputs\.copy_tags\s*\}\}$/);
   assert.match(val(sub(steps[copy], 'env'), 'FORCE'), /^\$\{\{\s*inputs\.force\s*\}\}$/);
   assert.equal(val(steps[copy], 'continue-on-error'), undefined);

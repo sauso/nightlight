@@ -229,6 +229,7 @@ jobs:
     # waits for the other instead of racing it. cancel-in-progress: false, so neither cancels a running promotion
     # or copy. GitHub keeps only ONE pending run per group: a copy queued while another copy (or the rebuild) is
     # waiting replaces the waiting one, which may be a scheduled weekly rebuild (it then runs next Monday).
+    # Do not dispatch a copy of dev or latest during its publish: the copy can restore an older digest; mirror-ghcr stays outside this group because a pending mirror could be replaced.
     concurrency:
       group: weekly-rebuild
       cancel-in-progress: false

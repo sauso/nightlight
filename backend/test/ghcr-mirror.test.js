@@ -251,6 +251,7 @@ const LOOKALIKES = [
   `ERROR: ${DST}:1.2.3: not found, retrying`,
   `WARNING: ${DST}:1.2.3: not found`,
   `ERROR: ${DST}:1.2.30: not found`,
+  `ERROR: docker.io/${DST}:1.2.3: not found`,
   `WARNING: something unrelated\nERROR: ${DST}:1.2.3: not found`,
 ];
 for (const msg of LOOKALIKES) {
@@ -264,6 +265,14 @@ for (const msg of LOOKALIKES) {
     assert.equal(moving.registry.dev, DIGEST);
   });
 }
+
+test('an access-denied registry error for a release tag fails closed', { skip: skipShell }, (t) => {
+  const r = run(t, { env: { DIGEST, TAGS: '1.2.3', FAKE_MISSING_MSG: 'ERROR: access denied' } });
+  if (!r) return;
+  assert.equal(r.status, 1, r.out);
+  assert.deepEqual(copyCalls(r), []);
+  assert.match(r.out, /access denied/);
+});
 
 test('the exact not-found error still means "absent", with trailing spaces or a CR', { skip: skipShell }, (t) => {
   for (const msg of [`ERROR: ${DST}:1.2.3: not found`, `ERROR: ${DST}:1.2.3: not found \r`]) {
@@ -315,6 +324,15 @@ test('--resolve keeps the refusal rule and FORCE, and the first failure code win
   const both = run(t, { args: ['--resolve'], env: { TAGS: 'dev', DIGEST }, source: { dev: DIGEST } });
   assert.equal(both.status, 2, both.out);
   assert.deepEqual(both.calls, []);
+});
+
+test('--resolve returns the first failure code when a later tag also fails', { skip: skipShell }, (t) => {
+  const r = run(t, { args: ['--resolve'], env: { TAGS: '1.2.3 dev' },
+    source: { '1.2.3': DIGEST }, registry: { '1.2.3': OLD } });
+  if (!r) return;
+  assert.equal(r.status, 3, r.out); // release refusal (3), then missing Docker Hub dev (1)
+  assert.deepEqual(copyCalls(r), []);
+  assert.match(r.out, RECOPY('dev'));
 });
 
 test('a failed copy exits non-zero, prints the re-copy command, and the next tag is still tried', { skip: skipShell }, (t) => {

@@ -295,6 +295,11 @@ and says so.
 - **Two publishes close together.** Two pushes to `dev` a few minutes apart can leave `:dev` (on either
   registry) on the older commit when the older run finishes last. Docker Hub already behaves this way; the
   mirror copies whatever digest its own run published, so the two can disagree until the next push.
+- **A copy dispatch during a publish.** `copy_tags` resolves the digest Docker Hub serves when it starts. If a
+  newer publish and its mirror finish before that copy writes to ghcr.io, the copy can put the older digest back.
+  Its read-back still succeeds because it checks the digest it resolved. Do not dispatch a copy of `dev` or
+  `latest` while a publish of that tag is running. The mirror job does not use the weekly-rebuild concurrency
+  group: GitHub keeps only one pending run per group, so another copy could replace a pending mirror.
 - **A failed copy.** If ghcr.io is down, the publish run shows a red `mirror-ghcr` job while Docker Hub
   already has the image. A red mirror never blocks or undoes the Docker Hub publish.
 
