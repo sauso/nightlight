@@ -176,6 +176,8 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   // or does not answer, simply shows no row; nothing here waits on it or blocks the form.
   const [nlDetected, setNlDetected] = useState(false);
   useEffect(() => {
+    // Detection belongs to ONE camera: reset when the page is reused for another one.
+    setNlDetected(false);
     if (isNew || !cam || cam.nlcam_device_id) return undefined;
     let alive = true;
     Promise.resolve(api.get(`/cameras/${id}/nightlight`)).then((r) => { if (alive && r?.detected === true) setNlDetected(true); }).catch(() => {});

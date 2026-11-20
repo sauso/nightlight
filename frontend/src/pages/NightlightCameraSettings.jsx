@@ -52,14 +52,17 @@ export default function NightlightCameraSettings() {
   const chain = useRef(Promise.resolve());
   const alive = useRef(true);
   const pending = useRef(0);
+  // Every load takes a number; a save takes one too. Only the NEWEST answer is applied, so a poll that was already out when a
+  // switch was pressed (or an older poll that finishes after a newer one) can never put an old value back (code review).
+  const seq = useRef(0);
 
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     try {
       const next = await api.get(`/cameras/${id}/nightlight`);
-      // A poll that lands while a switch is still being saved would put the old value back for a moment.
-      if (alive.current && pending.current === 0) { setInfo(next); setLoadError(null); }
+      if (alive.current && mine === seq.current && pending.current === 0) { setInfo(next); setLoadError(null); }
     } catch (err) {
-      if (alive.current) setLoadError(err);
+      if (alive.current && mine === seq.current) setLoadError(err);
     }
   }, [id]);
 
@@ -73,6 +76,7 @@ export default function NightlightCameraSettings() {
   // One request per change, in the order they were made (a later change must never be overtaken by an earlier one).
   function send(body, optimistic) {
     if (optimistic) setInfo((prev) => (prev ? optimistic(prev) : prev));
+    seq.current++; // any poll already out is now older than this change
     pending.current++;
     setSave({ state: 'saving' });
     chain.current = chain.current.then(async () => {
@@ -118,7 +122,12 @@ export default function NightlightCameraSettings() {
           <div className="save-flag">{save.state === 'saving' ? 'Saving…' : save.state === 'saved' ? 'Saved ✓' : ''}</div>
         )}
 
-        {!info.detected ? (
+        {loadError && (
+          // A later refresh failed (the server, not the camera): the numbers below are the last good ones.
+          <div className="error-banner" role="alert">Couldn&rsquo;t refresh this camera&rsquo;s status. What is shown may be out of date.</div>
+        )}
+
+        {!info.detected && (
           <section className="card nlcam-card">
             <h2 className="card-heading">Not answering as a Nightlight Camera</h2>
             <p className="camera-tile__sub">
@@ -128,7 +137,11 @@ export default function NightlightCameraSettings() {
             </p>
             <button type="button" className="btn btn-sm" onClick={load}>Try again</button>
           </section>
-        ) : (
+        )}
+
+        {/* Stored sensors stay controllable while the camera does not answer: an owner must be able to switch polling OFF
+            (or fix a group) even when the camera is unplugged. Only a camera that is neither on nor detected has nothing here. */}
+        {(info.detected || info.enabled) && (
           <>
             <section className="card nlcam-card">
               <h2 className="card-heading">

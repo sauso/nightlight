@@ -168,7 +168,7 @@ test('a failed login says so and offers Retry, which asks the server to resume',
 });
 
 test('a camera that does not answer as a Nightlight Camera says so, and a name-added camera explains the limit', async () => {
-  renderScreen(info({ detected: false, reason: 'address' }));
+  renderScreen(info({ detected: false, reason: 'address', enabled: false, status: 'off', readings: {} }));
   expect(await screen.findByText('Not answering as a Nightlight Camera')).toBeInTheDocument();
   expect(screen.getByText(/added by a name/)).toBeInTheDocument();
   expect(screen.queryByRole('switch', { name: "Use this camera's sensors" })).toBeNull();
@@ -232,4 +232,39 @@ test('the chart card labels itself when any point is simulated, and not otherwis
   real.unmount();
   card([{ t: '2026-11-20 01:00:00', temperature: 20, humidity: 50, simulated: false }, { t: '2026-11-20 02:00:00', temperature: 99, humidity: 99, simulated: true }]);
   expect(await screen.findByText('Simulated sensors')).toBeInTheDocument();
+});
+
+// Code review (Codex, 2026-11-20).
+test('stored sensors can still be switched off while the camera does not answer', async () => {
+  const { user } = renderScreen(info({ detected: false, reason: 'no_answer', enabled: true, status: 'offline', readings: {} }));
+  expect(await screen.findByText('Not answering as a Nightlight Camera')).toBeInTheDocument();
+  const master = screen.getByRole('switch', { name: "Use this camera's sensors" });
+  expect(master).toBeChecked();
+  api.put.mockResolvedValue({ enabled: false, groups: {}, status: 'off' });
+  await user.click(master);
+  await waitFor(() => expect(api.put).toHaveBeenCalledWith('/cameras/cam-nl/nightlight', { enabled: false }));
+});
+
+test('a refresh that fails after a good load says the numbers may be out of date', async () => {
+  let calls = 0;
+  api.get.mockImplementation(() => (++calls === 1 ? Promise.resolve(info()) : Promise.reject(new Error('server down'))));
+  renderAsAdmin(<Routes><Route path="/cameras/:id/nightlight" element={<NightlightCameraSettings />} /></Routes>,
+    { cameras: [CAMERA], route: '/cameras/cam-nl/nightlight', settings: { temp_unit: 'C' } });
+  expect(await screen.findByText('Connected')).toBeInTheDocument();
+  expect(screen.queryByText(/Couldn.t refresh/)).toBeNull();
+  // The screen polls every 5 s; wait for the second request (a real timer: the screen owns its interval).
+  expect(await screen.findByText(/Couldn.t refresh/, {}, { timeout: 8000 })).toBeInTheDocument();
+  expect(screen.getByText('Connected')).toBeInTheDocument(); // the last good values stay on screen
+}, 12000);
+
+test('a new login after the offer starts the offer on again, even if it was switched off before', async () => {
+  const { user, form } = await pickAndLogin();
+  await user.click(within(form).getByRole('button', { name: 'Add camera' }));
+  const first = await screen.findByRole('group', { name: 'Nightlight Camera detected' });
+  await user.click(within(first).getByRole('switch', { name: 'Use its room sensors' }));
+  expect(within(first).getByRole('switch', { name: 'Use its room sensors' })).not.toBeChecked();
+  await user.type(within(form).getByLabelText('Password'), 'x');
+  await user.click(within(form).getByRole('button', { name: 'Add camera' }));
+  const second = await screen.findByRole('group', { name: 'Nightlight Camera detected' });
+  expect(within(second).getByRole('switch', { name: 'Use its room sensors' })).toBeChecked();
 });

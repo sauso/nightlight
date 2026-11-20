@@ -103,7 +103,7 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
   function loginChanged(setter) {
     return (event) => {
       setter(event.target.value); probed.current = null; setConfirmMsg(''); setError(''); setCanEnterDetails(false);
-      offerSeen.current = false; setOffer(null);
+      offerSeen.current = false; setOffer(null); setUseSensors(true); // a new login is a new offer, on by default
     };
   }
 
