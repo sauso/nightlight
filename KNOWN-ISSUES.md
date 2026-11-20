@@ -39,7 +39,7 @@ without anyone doing anything. In **Camera history** it shows as a `restart` (of
 **Why:** Some IP cameras occasionally glitch their RTSP feed — a corrupted timestamp
 (non-monotonic DTS) or a dropped connection (RTSP "end of file"). This is the **camera's
 firmware**, not Nightlight. FFmpeg detects the bad stream and Nightlight restarts that
-camera's transcoder, which is the few-second blip.
+camera's transcoder, which is the few-second blip. The "corrupt timestamp" restart needs a real jump (more than 480000 ticks of the stream's clock, about 10 seconds for 48 kHz audio): the small timing jitter FFmpeg reports in the first seconds of a connection, which a camera on Wi-Fi shows often, no longer restarts anything.
 
 **What to do:** Nothing — it's self-healing by design. If one specific camera does this
 constantly, it's worth power-cycling that camera or checking its firmware; the app can

@@ -288,3 +288,87 @@ describe('#553 the clip segmenter and runFfmpeg', () => {
     assert.equal(lines('could not signal ffmpeg').length, 1);
   });
 });
+
+// The "corrupt timestamp" restart acts on a LARGE jump only. A Wi-Fi camera's audio arrives in clumps while FFmpeg probes
+// a new input, FFmpeg prints a DTS-discontinuity line for a 110 ms jump, and the old rule restarted the camera on every
+// session: 15 restarts in two minutes on staging (2026-11-20). The bench line below is that camera's real one.
+const { isCorruptTimestampLine, DTS_RESTART_JUMP_TICKS } = await import('../src/lib/transcoder.js');
+const dtsLine = (a, b, stream = 1) =>
+  `[in#0/rtsp @ 0x151a4e80e340] DTS discontinuity in stream ${stream}: packet 19 with DTS ${a}, packet 20 with DTS ${b}`;
+const BENCH_LINE = dtsLine(86166861346709n, 86166861351996n); // a 5287-tick jump: 110 ms at 48 kHz
+
+describe('the corrupt-timestamp rule restarts on a large jump, not on start-up jitter', () => {
+  test('d1: the line itself is judged by its jump, in either direction, at an exact threshold', () => {
+    assert.equal(DTS_RESTART_JUMP_TICKS, 480000n);
+    assert.equal(isCorruptTimestampLine(BENCH_LINE), false, 'the bench camera\'s 110 ms clump');
+    assert.equal(isCorruptTimestampLine(dtsLine(1000, 1000 + 2 ** 31)), true, 'the 32-bit rollover jump of the original incident');
+    assert.equal(isCorruptTimestampLine(dtsLine(1000, 1000 + 480000)), false, 'exactly at the threshold is not over it');
+    assert.equal(isCorruptTimestampLine(dtsLine(1000, 1000 + 480001)), true, 'one tick over');
+    assert.equal(isCorruptTimestampLine(dtsLine(1000 + 480001, 1000)), true, 'a jump backwards is just as large');
+    assert.equal(isCorruptTimestampLine(dtsLine(1000 + 480000, 1000)), false);
+    assert.equal(isCorruptTimestampLine(dtsLine(-300000, 300000)), true, 'negative DTS: 600000 ticks apart');
+    assert.equal(isCorruptTimestampLine(dtsLine(-100, 200)), false);
+    assert.equal(isCorruptTimestampLine(`2026-11-20 13:46:55 [ffmpeg:cam_x] ${dtsLine(5, 480006, 0)}`), true, 'text before the line (a log prefix)');
+  });
+
+  test('d2: a line that names a discontinuity but cannot be parsed still restarts (fail toward the old rule)', () => {
+    assert.equal(isCorruptTimestampLine('[mpegts] DTS discontinuity in stream 0'), true);
+    assert.equal(isCorruptTimestampLine('DTS discontinuity in stream 1: packet 19 with DTS abc, packet 20 with DTS def'), true);
+    assert.equal(isCorruptTimestampLine(dtsLine('1'.repeat(25), '2'.repeat(25))), true, 'a field too long to trust');
+    assert.equal(isCorruptTimestampLine(dtsLine(10, 20).replace('packet 20 with DTS 20', 'packet 20 with DTS')), true);
+  });
+
+  test('d3: lines that are not a discontinuity never restart', () => {
+    assert.equal(isCorruptTimestampLine('[rtsp @ 0x1] max delay reached. need to consume packet'), false);
+    assert.equal(isCorruptTimestampLine(''), false);
+    assert.equal(isCorruptTimestampLine(undefined), false);
+  });
+
+  test('d4: the bench line does NOT SIGTERM the process and records no restart', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    logger.clear();
+    await startTranscoder('cam-d4', 'rtsp://192.0.2.10:554/d4', 'path_d4', 'D4');
+    const proc = spawnsFor('path_d4').at(-1);
+    proc.stderr.emit('data', Buffer.from(`${BENCH_LINE}\n`));
+    proc.stderr.emit('data', Buffer.from(`${BENCH_LINE}\n`));
+    assert.deepEqual(proc.signals, []);
+    assert.equal(cameraEvents.filter((e) => e.id === 'cam-d4').length, 0);
+    assert.equal(lines('camera sent a corrupt timestamp').length, 0);
+    assert.equal(lines('DTS discontinuity in stream 1').length, 2, 'the line is still logged');
+    assert.equal(isRunning('cam-d4'), true);
+    const stop = stopTranscoder('cam-d4');
+    await settle();
+    await stop;
+  });
+
+  test('d5: a rollover-sized jump SIGTERMs once and records the restart, as before; a second large jump does not repeat it', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    logger.clear();
+    await startTranscoder('cam-d5', 'rtsp://192.0.2.10:554/d5', 'path_d5', 'D5');
+    const proc = spawnsFor('path_d5').at(-1);
+    proc.stderr.emit('data', Buffer.from(`${dtsLine(1000, 1000 + 2 ** 31)}\n`));
+    proc.stderr.emit('data', Buffer.from(`${dtsLine(1000, 1000 + 2 ** 31)}\n`));
+    assert.deepEqual(proc.signals, ['SIGTERM'], 'one kill per session');
+    assert.deepEqual(cameraEvents.filter((e) => e.id === 'cam-d5'),
+      [{ id: 'cam-d5', type: 'restart', detail: 'camera sent a corrupt timestamp' }]);
+    assert.equal(lines('camera sent a corrupt timestamp').length, 1);
+    const stop = stopTranscoder('cam-d5');
+    await settle();
+    await stop;
+  });
+
+  test('d6: a line that cannot be parsed still SIGTERMs, and a small jump first does not use up the session\'s one restart', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    logger.clear();
+    await startTranscoder('cam-d6', 'rtsp://192.0.2.10:554/d6', 'path_d6', 'D6');
+    const proc = spawnsFor('path_d6').at(-1);
+    proc.stderr.emit('data', Buffer.from(`${BENCH_LINE}\n`));
+    assert.deepEqual(proc.signals, []);
+    proc.stderr.emit('data', Buffer.from('[mpegts] DTS discontinuity in stream 0\n'));
+    assert.deepEqual(proc.signals, ['SIGTERM']);
+    assert.equal(cameraEvents.filter((e) => e.id === 'cam-d6').length, 1);
+    const stop = stopTranscoder('cam-d6');
+    await settle();
+    await stop;
+  });
+});

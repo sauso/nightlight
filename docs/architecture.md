@@ -153,7 +153,8 @@ reconciliation. Three independent mechanisms keep the pipeline alive without man
   enabled camera, and the camera paths are reconciled as soon as the new MediaMTX is up).
 - FFmpeg and MediaMTX processes both auto-restart on unexpected exit (`transcoder.js`,
   `mediamtxProcess.js`), and `transcoder.js` also watches for a specific known bad-camera
-  symptom ("DTS discontinuity") and proactively restarts rather than let a session run poisoned.
+  symptom ("DTS discontinuity" with a jump over 480000 ticks; smaller start-up jitter is only logged, and a line it
+  cannot parse still restarts) and proactively restarts rather than let a session run poisoned.
 
 **One start at a time per camera (#478).** The reconcile pass, the camera watchdog, the audio watchdog
 and the camera routes (add, an edit with a new address, enable, **Restart stream**, a failed delete putting
