@@ -57,7 +57,7 @@ docker run -d \
 
 Replace `/path/to/your/data` with a persistent folder on your host.
 
-Prefer GitHub's registry? Use `ghcr.io/sauso/nightlight:latest` in place of `sauso/nightlight:latest`. Tags match from the first mirrored publish; older tags need a [backfill](operations.md#registries).
+Prefer GitHub's registry? Use `ghcr.io/sauso/nightlight:latest` in place of `sauso/nightlight:latest`. The tags are the same on both ([how the registries relate](operations.md#registries)).
 
 ### What the options do
 

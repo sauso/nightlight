@@ -1,6 +1,6 @@
 # Home Assistant
 
-**Status: experimental.** Nightlight is available as an app for Home Assistant OS, from a separate repository you add by hand. It has not been installed on a real Home Assistant system yet, so please [report what you find](https://github.com/sauso/nightlight-ha-addon/issues).
+**Status: experimental.** Nightlight is available as an app for Home Assistant OS, from a separate repository you add by hand. Please [report what you find](https://github.com/sauso/nightlight-ha-addon/issues).
 
 Home Assistant used to call apps "add-ons". It is the same thing.
 

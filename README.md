@@ -53,7 +53,7 @@ Replace `/path/to/your/data` with a persistent folder on your host. `PUID=99` an
 
 `--stop-timeout 30` gives Nightlight time to finish saving a recording when the container is stopped; without it Docker can kill the container first. `--log-opt` stops Docker's logs growing without limit.
 
-The image is also published at `ghcr.io/sauso/nightlight` under the same tags from the first mirrored publish. Older tags need a [backfill](docs/operations.md#registries).
+The image is also published at `ghcr.io/sauso/nightlight` under the same tags. [How the two registries relate](docs/operations.md#registries).
 
 Open `http://<server-ip>:4000` from a device on the same network. Create your administrator account, add a child, then connect a camera from the **Cameras** tab.
 
@@ -69,7 +69,7 @@ In **Community Applications**, search for **Nightlight**, select **Install**, ch
 
 ## Running on Home Assistant
 
-Nightlight runs as an **app** on Home Assistant OS (`amd64` or `aarch64`), added from its own repository. It is **experimental**: it has been installed and set up on one Home Assistant system so far.
+Nightlight runs as an **app** on Home Assistant OS (`amd64` or `aarch64`), added from its own repository. It is **experimental**.
 
 [![Open your Home Assistant and add this repository.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fsauso%2Fnightlight-ha-addon)
 
