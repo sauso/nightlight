@@ -21,7 +21,7 @@ const POLL_MS = 5000;
 
 const GROUP_ROWS = [
   { key: 'climate', fitted: 'environment', label: 'Room temperature and humidity', sub: 'Joins the room climate on the charts and in each night.' },
-  { key: 'radar', fitted: 'radar', label: 'Radar', sub: 'Presence, heart rate, breathing rate and distance. Shown live only for now.' },
+  { key: 'radar', fitted: 'radar', label: 'Radar', sub: 'Presence, heart rate, breathing rate and distance. Heart and breathing rate also appear on the night, as sensor estimates.' },
   { key: 'light', fitted: null, label: 'Ambient light', sub: 'How bright the room is.' },
   { key: 'pad', fitted: 'pressure', label: 'Bed pad', sub: 'Whether the bed pad feels someone on it.' },
 ];

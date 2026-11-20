@@ -25,6 +25,7 @@ import { addDays, nightDetailPath, describeSettings } from '../lib/nightView.js'
 import { timelineDrawingSegments } from '../lib/timelineDrawing.js';
 import { splitMorningWake } from '../lib/nightWakes.js';
 import { markerLeft, tickLabelAlign } from '../lib/timelineEdges.js';
+import SimulatedBadge from '../components/SimulatedBadge.jsx';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -1294,7 +1295,11 @@ function VitalsTracks({ night, startMs, endMs }) {
           className={`sleep-climate--rr${showHr ? ' sleep-climate--next' : ''}`} icon={<Wind size={13} aria-hidden="true" />} label="Breathing"
           caption={captionOf(vitals.rr, '/min', rr)} format={(v) => String(Math.round(v))} />
       )}
-      <div className="sleep-vitals__note">Sensor estimates from the radar, not for medical use.</div>
+      <div className="sleep-vitals__note">
+        Sensor estimates from the radar, not for medical use.
+        {/* Only when a used minute came from a camera running invented bench data (the server adds the flag then and only then). */}
+        {vitals.simulated === true && <> <SimulatedBadge /></>}
+      </div>
       {/* Only when a dashed bridge is actually drawn on one of the tracks. */}
       {(hasHole(hr) || hasHole(rr)) && (
         <div className="sleep-vitals__legend">

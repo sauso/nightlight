@@ -11,6 +11,11 @@
 // placeholder, and the 1 m distance cut. So the screen never draws a minute the shadow would call "no vital signs".
 // Rows are never read raw here: a 0 is "no value" (docs/esphome.md), never a heart rate of 0.
 //
+// A NIGHTLIGHT CAMERA on the child is a second source (lib/cameraVitals.js, owner 2026-11-20). It has its OWN minute rule,
+// the same shape with the breathing minimum scaled to the camera's 5 s read (6 updates, not 30); the sleep shadow does not
+// read it, so "the same definition as the shadow" holds for ESPHome rows and the camera is a documented difference. When
+// a used camera minute was flagged simulated (a bench camera) the result carries `simulated: true`, and only then.
+//
 // ⚠️ KNOWN LIMITS (docs/esphome.md, lib/sleepSensor.js):
 //   - The thresholds assume the stock firmware, which reports several times a minute. A device configured to report less
 //     often (a throttle filter, a 60 s interval) never reaches them and shows nothing: a gap, not a wrong number.
@@ -25,6 +30,7 @@
 //     esphome-boundaries.test.js lets only lib/sleepSensor.js do that, and this one reads through it.)
 import { toSqlUtc } from './sleepAnalysis.js';
 import { readDeviceMinutes, readableLimitMin, validHrMinute, validRrMinute } from './sleepSensor.js';
+import { readCameraMinutes, validCameraHr, validCameraRr } from './cameraVitals.js';
 import { logger } from './logger.js';
 
 const MINUTE_MS = 60000;
@@ -87,23 +93,43 @@ export function nightVitals(childId, startMs, endMs, {
   const readToMin = Math.min(Math.max(Math.ceil(endMs / MINUTE_MS), toMin), limitMin);
   if (!(readToMin > readFromMin)) return null;
   const { perMinute, vitalsSeen } = readDeviceMinutes(childId, readFromMin, readToMin);
-  if (!vitalsSeen) return null;
+  // A Nightlight Camera on the child is a second source (lib/cameraVitals.js, its own scaled minute rule). A child with
+  // neither gets null, exactly as before cameras existed.
+  const camera = readCameraMinutes(childId, readFromMin, readToMin);
+  if (!vitalsSeen && !camera.vitalsSeen) return null;
 
-  // One value per minute and role: the mean over the devices with a valid row.
-  const minutes = [];
+  // One value per minute and role: the mean over the devices (and cameras) with a valid row.
+  const slots = new Map();
+  const add = (min, role, value) => {
+    let slot = slots.get(min);
+    if (!slot) slots.set(min, (slot = { hrs: [], rrs: [] }));
+    (role === 'hr' ? slot.hrs : slot.rrs).push(value);
+  };
   for (const [min, devices] of perMinute) {
-    const hrs = [];
-    const rrs = [];
     for (const d of devices.values()) {
-      if (validHrMinute(d.hr, d.dist) && Number.isFinite(d.hr.mean)) hrs.push(d.hr.mean);
-      if (validRrMinute(d.rr, d.dist) && Number.isFinite(d.rr.mean)) rrs.push(d.rr.mean);
+      if (validHrMinute(d.hr, d.dist) && Number.isFinite(d.hr.mean)) add(min, 'hr', d.hr.mean);
+      if (validRrMinute(d.rr, d.dist) && Number.isFinite(d.rr.mean)) add(min, 'rr', d.rr.mean);
     }
-    if (hrs.length || rrs.length) minutes.push({ min, hr: hrs.length ? mean(hrs) : null, rr: rrs.length ? mean(rrs) : null });
   }
+  // `simulated`: a camera minute that was used and was flagged invented (a bench camera), so the screen can say so.
+  const simulatedMinutes = [];
+  for (const [min, cameras] of camera.perMinute) {
+    for (const c of cameras.values()) {
+      let used = false;
+      if (validCameraHr(c.hr, c.dist)) { add(min, 'hr', c.hr.mean); used = true; }
+      if (validCameraRr(c.rr, c.dist)) { add(min, 'rr', c.rr.mean); used = true; }
+      if (used && c.simulated) simulatedMinutes.push(min);
+    }
+  }
+  const minutes = [...slots].map(([min, s]) => ({ min, hr: s.hrs.length ? mean(s.hrs) : null, rr: s.rrs.length ? mean(s.rrs) : null }));
   if (!minutes.length) return null;
   minutes.sort((a, b) => a.min - b.min);
 
   const out = { hr: summarise(minutes, 'hr', fromMin, toMin), rr: summarise(minutes, 'rr', fromMin, toMin) };
+  // Added only when true, so an answer for a child without a simulated camera is byte-identical to before. And only when a
+  // simulated minute is one of those the answer SHOWS: inside the summary window, or (with a series) inside the drawn range.
+  // A simulated minute read only because the summary window reaches it, or before the onset, must not label real figures.
+  if (simulatedMinutes.some((m) => (m >= fromMin && m < toMin) || (series && m >= startMin && m < endMin))) out.simulated = true;
   if (series) {
     const buckets = new Map();
     // Only the display range [startMin, endMin): minutes read for the summary alone stay out of the chart.

@@ -2279,6 +2279,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .clip-player__actions { display: inline-flex; align-items: center; gap: 4px; }
 .clip-player__actions .icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
 .clip-protected-badge { display: inline-flex; align-items: center; gap: 3px; border-radius: 20px; padding: 1px 6px; color: var(--text-secondary); background: var(--bg-elevated-2); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.simulated-badge { display: inline-flex; align-items: center; border-radius: 20px; padding: 1px 8px; color: var(--text-secondary); background: var(--bg-elevated-2); font-size: 11px; font-weight: 600; white-space: nowrap; }
 .clip-protection-note { color: var(--text-secondary); font-size: 12px; line-height: 1.4; margin: -4px 0 12px; text-align: center; }
 .btn-block { display: block; width: 100%; text-align: center; }
 .icon-btn--danger { color: var(--offline); }
@@ -2592,6 +2593,13 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   align-items: flex-end;
   gap: 4px;
   flex: none;
+}
+
+.status-row--wrap {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 .camera-tile__reading {
