@@ -3779,7 +3779,10 @@ input[type='range'] {
 .find-card__sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .find-card__results { list-style: none; margin: 14px 0 0; padding: 0; border-top: 1px solid var(--night-divider); }
 .find-card__results li + li { border-top: 1px solid var(--night-divider); }
-.find-card__result { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 8px 0; border: 0; background: none; color: var(--night-text); font: inherit; text-align: left; cursor: pointer; }
+/* The 10px side padding is cancelled by the -10px side margin, so an unselected row's text and chip stay where they were; it is
+   there so the selected ring (drawn INSIDE the row, below) has a gap to the tile icon and the chip instead of sitting on them
+   (owner screenshot, 2026-11-20). The card's own side padding (16px) is wider than the 10px the row reaches into, which leaves the ring 6px from the card edge. */
+.find-card__result { display: flex; align-items: center; gap: 12px; width: calc(100% + 20px); min-height: 56px; padding: 8px 10px; margin: 0 -10px; border: 0; background: none; color: var(--night-text); font: inherit; text-align: left; cursor: pointer; }
 .find-card__result[aria-disabled="true"] { cursor: default; }
 .find-card__result--selected { outline: 2px solid var(--night-link); outline-offset: -2px; border-radius: 10px; }
 .find-card__tile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--night-divider); color: var(--night-link); }
