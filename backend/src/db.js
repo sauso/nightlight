@@ -1349,4 +1349,12 @@ db.prepare("UPDATE settings SET server_id = ? WHERE id = 'app' AND server_id IS 
 // it had before this boot and the next start retries from there — rather than being stuck half-way.
 db.exec('COMMIT');
 
+// How many days the per-minute device readings are kept: the one setting both the ESPHome readings and a Nightlight
+// Camera's (lib/cameraSensors.js) follow, default 30. It lives here because only the files in esphome-boundaries.test.js
+// may name the ESPHome settings and tables, and a reader should not have to.
+export function deviceReadingRetentionDays() {
+  const days = Number(db.prepare("SELECT esphome_retention_days AS days FROM settings WHERE id = 'app'").get()?.days);
+  return Number.isFinite(days) && days > 0 ? days : 30;
+}
+
 export default db;

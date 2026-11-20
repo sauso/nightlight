@@ -6,7 +6,7 @@
 //    average work unchanged. A camera has ONE climate source: while its climate switch is on, lib/sensorSampler.js
 //    skips it (no mixing, no double weighting; an API outage is an honest gap).
 //  - Radar (presence, heart rate, breathing rate, distance), light and the bed pad go to nlcam_readings, one row per
-//    camera, minute and quantity (mean/min/max/n/last), like esphome_readings. NOTHING reads them in this phase:
+//    camera, minute and quantity (mean/min/max/n/last), like the ESPHome readings. NOTHING reads them in this phase:
 //    the night card, the score and the sleep shadow are not fed from the camera (they need a per-source rule; a 5 s
 //    poll cannot meet the "30 breathing updates per minute" rule that was measured on ESPHome).
 //  - Only `ok` readings, only for the groups the owner left on, only plausible numbers (see nightlightCamera.js).
@@ -24,7 +24,7 @@
 //    drops the result unless it still matches (sensor_readings has no foreign key, so a late write would leave an
 //    orphan row).
 import { createHash } from 'node:crypto';
-import db from '../db.js';
+import db, { deviceReadingRetentionDays } from '../db.js';
 import { logger } from './logger.js';
 import { safeInterval } from './processGuards.js';
 import {
@@ -257,7 +257,7 @@ export function liveSensors(cameraId, now = clock()) {
 const PRUNE_BATCH = 1000;
 export async function pruneNlcamReadings() {
   try {
-    const days = db.prepare("SELECT esphome_retention_days AS days FROM settings WHERE id = 'app'").get()?.days || 30;
+    const days = deviceReadingRetentionDays();
     const cutoff = Math.floor(Date.now() / MINUTE_MS) - days * 24 * 60;
     const batch = db.prepare(
       `DELETE FROM nlcam_readings WHERE (camera_id, bucket, metric) IN
