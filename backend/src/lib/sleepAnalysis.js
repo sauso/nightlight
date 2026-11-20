@@ -2009,15 +2009,18 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));
     if (!bedOccupiedAfter(q, nextPutDown?.idx)) continue;
     if (preMin - q > PREWINDOW_ONSET_FREE_MIN) {
-      // The later real put-down cannot vouch for this one. Count only observed minutes before
-      // that cut; missing video neither adds evidence nor raises the required count.
+      // A later non-isolated put-down cannot vouch for this one. Size the requirement over
+      // every watched minute through the window start, but count evidence only before the cut.
+      // Otherwise a spurious put-down shortly after one bed blip makes the required count
+      // shrink to one and restores the false early onset (2026-11-20 live reproduction).
+      // Missing video raises neither the requirement nor the evidence count.
       const end = Math.min(preMin, nextPutDown?.idx ?? preMin);
       let watched = 0;
       let occupied = 0;
-      for (let i = q; i < end; i++) {
+      for (let i = q; i < preMin; i++) {
         if (state[i] === null) continue;
         watched++;
-        if (bedPeakAt[i] >= OCCUPANCY_MIN_PEAK) occupied++;
+        if (i < end && bedPeakAt[i] >= OCCUPANCY_MIN_PEAK) occupied++;
       }
       if (occupied < Math.ceil(watched / PREWINDOW_EVIDENCE_PER_MIN)) {
         rejectedPrewindowPutDowns.add(putDown);

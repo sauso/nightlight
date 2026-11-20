@@ -321,9 +321,12 @@ movement elsewhere in the picture, and no noise. There is no setting for any of 
 check still asks for at least 3 minutes with movement in the bed, however slight, in the 2½ hours
 after the child settles.
 For a put-down whose settle is **more than 50 minutes before the window**, Nightlight also needs
-about one watched minute with a small bed movement per 30 watched minutes until the window or the
-next real put-down, whichever comes first. A minute without video does not raise that requirement,
-and movement elsewhere in the picture does not cancel a bed movement. Within 50 minutes, the
+about one minute with a small bed movement per 30 watched minutes through to the window start.
+Only movement before the next **non-isolated logged put-down** counts as evidence: an isolated blip
+with quiet recorded on either side does not cut it. The requirement still uses the whole watched
+span to the window start, so a later put-down can remove evidence but never lower the requirement.
+A minute without video does not raise that requirement, and movement elsewhere in the picture does
+not cancel a bed movement. Within 50 minutes, the
 existing checks still apply. This extra check stopped false early bedtimes on an empty-looking bed,
 including one live night that otherwise said a child was asleep before they were put down.
 

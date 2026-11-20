@@ -209,6 +209,39 @@ describe('far pre-window put-downs need watched evidence', () => {
     assert.equal(hhmm(night.onset_at), '18:31', 'the later real put-down may anchor, but the 17:00 one cannot');
   });
 
+  test('a short evidence cut keeps the full-span need at both live and later clocks', (t) => {
+    windowAt19();
+    layNight(at(16, 55), at(20, 0), {
+      noise: [[at(16, 55), at(19, 20)]], still: 0.0001, noiseP75: 8,
+      move: [[at(17, 0), at(17, 1)]],
+    });
+    db.prepare('UPDATE activity_samples SET sound_level = 1.7 WHERE camera_id = ?').run(CAM);
+    peak(at(17, 10));
+    // Household sound makes the 17:19 log non-isolated without adding bed evidence.
+    putDown(at(17, 0));
+    putDown(at(17, 19));
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    const outcomes = [];
+    for (const clock of [at(19, 22), at(20, 0)]) {
+      t.mock.timers.setTime(clock.getTime());
+      const night = computeNight(CHILD, DATE);
+      outcomes.push([night.status, hhmm(night.onset_at)]);
+    }
+    assert.deepEqual(outcomes, [['no_sleep', null], ['empty', null]]);
+  });
+
+  test('guard: a cut after sufficient stirs keeps a real far-early onset', () => {
+    windowAt19();
+    layNight(at(16, 55), at(7, 0, 1), {
+      still: 0.0001, move: [[at(17, 0), at(17, 3)], [at(22, 0), at(22, 5)]],
+    });
+    for (const m of [at(17, 10), at(17, 30), at(17, 50), at(18, 10)]) peak(m);
+    peak(at(18, 29), 0.0001, 0.04); // non-isolated later log cuts after all four stirs
+    putDown(at(17, 0));
+    putDown(at(18, 30));
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '17:03');
+  });
+
   test('the second onset pass skips a rejected put-down and takes the real 20:03 settle', () => {
     windowAt19();
     layNight(at(16, 55), at(7, 0, 1), {
@@ -263,6 +296,18 @@ describe('far pre-window put-downs need watched evidence', () => {
     farPutDown(40);
     t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
     assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:20');
+  });
+
+  test('within-margin live fail-open needs the end-of-timeline early return', (t) => {
+    windowAt19();
+    layNight(at(16, 55), at(21, 10), {
+      noise: [[at(16, 55), at(19, 20)]], still: 0.0001,
+    });
+    putDown(at(18, 20)); // 40-minute gap; fewer than three occupied readings
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:20');
+    t.mock.timers.setTime(at(21, 10).getTime());
+    assert.equal(computeNight(CHILD, DATE).onset_at, null);
   });
 
   test('guard: the pre-window count uses minute indexes across a daylight-saving change', () => {

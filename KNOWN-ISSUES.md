@@ -1669,8 +1669,11 @@ changed in #669 (3 minutes, 2½ hours, 0.0005), and there is no setting.
 
 The newer far-early rule adds a separate check after those guards. If a child seems to settle more
 than 50 minutes before the configured window, at least one watched minute in 30 must show even a
-small bed movement (0.0005 or more) before the window or the next real put-down. It counts the
-watched minutes only. Movement elsewhere in the picture does not cancel a bed reading. This closes
+small bed movement (0.0005 or more). The requirement uses all watched minutes from the settle to
+the window start. Evidence stops at the next **non-isolated logged put-down**; a logged blip with
+quiet recorded on both sides does not cut it. This cut can remove evidence but never reduce the
+requirement. Unwatched minutes do not raise it. Movement elsewhere in the picture does not cancel
+a bed reading. This closes
 the "exactly 3" escape for far-early onsets: movement in the real put-down's lead-in or after the
 window cannot by itself rescue a false earlier one. Within the 50-minute margin, the old limit
 remains. A false far-early put-down now cannot be revived by the later onset pass either.
