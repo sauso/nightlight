@@ -1118,7 +1118,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           </div>
         )}
       </div>
-      <div className={`camera-tile__meta${camera.nightlight_sensors ? ' camera-tile__meta--chips' : ''}`}>
+      <div className="camera-tile__meta">
         <div className="camera-tile__meta-left">
           {dragHandleProps && (
             <button className="drag-handle" {...dragHandleProps} aria-label={`Reorder ${camera.name}`}>
@@ -1137,9 +1137,9 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
           </div>
         </div>
-        {/* A Nightlight Camera's chips sit side by side and wrap (temperature, humidity); every other camera
-            keeps the stacked column it always had. */}
-        <div className={`status-row${camera.nightlight_sensors ? ' status-row--wrap' : ''}`}>
+        {/* Every camera's chips stack in the same right-hand column, a Nightlight Camera's too (owner screenshot
+            2026-11-20: its side-by-side chips did not match the others). */}
+        <div className="status-row">
           {snoozedUntil && (
             <span className="camera-tile__reading" title={`Alerts muted until ${snoozeText}`}>
               <BellOff size={16} className="camera-tile__reading-icon" aria-hidden="true" />

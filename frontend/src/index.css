@@ -2597,19 +2597,6 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   flex: none;
 }
 
-.status-row--wrap {
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-}
-/* A Nightlight Camera's chips are wider than the column the other cameras have. Left as a flex item that cannot shrink, they
-   squeezed the name to one letter per line on a phone ("Benc / h / Came / ra", owner screenshot 2026-11-20): the strip now
-   wraps, so the chips take their own line under the name when they do not fit beside it, and sit beside it when they do. */
-.camera-tile__meta--chips { flex-wrap: wrap; row-gap: 6px; }
-.camera-tile__meta--chips .camera-tile__meta-left { flex: 1 1 auto; }
-.camera-tile__meta--chips .status-row--wrap { flex: 0 1 auto; margin-left: auto; }
-
 .camera-tile__reading {
   display: inline-flex;
   align-items: center;
