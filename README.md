@@ -12,9 +12,18 @@ Built for parents. Friendly to self-hosters. Open source.
 
 ## See Nightlight in action
 
-| Live view | A child's last night | Morning check |
-| --- | --- | --- |
-| ![Live view of two cameras on a phone](docs/screenshots/live-mobile.png) | ![A child's overview with last night's sleep summary on a phone](docs/screenshots/child-mobile.png) | ![The morning check asking whether the wake time is right, on a phone](docs/screenshots/review-mobile.png) |
+<table>
+  <tr>
+    <th width="33%" align="center">Live view</th>
+    <th width="33%" align="center">A child's last night</th>
+    <th width="33%" align="center">Morning check</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/framed/live-mobile.png" alt="Live view of two cameras on a phone" width="230"></td>
+    <td align="center"><img src="docs/screenshots/framed/child-mobile.png" alt="A child's overview with last night's sleep summary on a phone" width="230"></td>
+    <td align="center"><img src="docs/screenshots/framed/review-mobile.png" alt="The morning check asking whether the wake time is right, on a phone" width="230"></td>
+  </tr>
+</table>
 
 [See the full walkthrough](docs/README.md#visual-walkthrough), from first-run setup to a caregiver's view. These are captures of a made-up household with a synthetic camera picture, not live footage or real data, and they may lag behind the latest UI.
 
