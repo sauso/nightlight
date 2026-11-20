@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { discoverCameras, createScanManager } from '../src/lib/cameraDiscovery.js';
+import { discoverCameras, createScanManager, MDNS_REQUERY_MS } from '../src/lib/cameraDiscovery.js';
 
 function bonjourFixture() {
   const callbacks = {};
@@ -280,4 +280,78 @@ test('a Thingino record still keeps its Thingino source and is not read as a Nig
   bonjour.callbacks.thingino({ addresses: ['192.168.1.30'], name: 'thingino-cam', txt: { product: 'Thingino 1' } });
   const result = await pending;
   assert.deepEqual(result.candidates[0].sources, ['mdns']);
+});
+
+// A camera whose first mDNS answer is lost must still appear within the scan: the browsers ask again (bonjour-service's
+// Browser sends one query and never another, so before this a lost packet hid a camera until the next scan).
+function requeryFixture(counts, { throwOn, answerOnUpdate } = {}) {
+  const bonjour = bonjourFixture();
+  const find = bonjour.find.bind(bonjour);
+  bonjour.find = (options, callback) => {
+    const browser = find(options, callback);
+    return { ...browser, update() {
+      counts[options.type] = (counts[options.type] || 0) + 1;
+      if (throwOn === options.type) throw new Error('socket closed');
+      if (answerOnUpdate && options.type === answerOnUpdate.type) answerOnUpdate.answer(bonjour);
+    } };
+  };
+  return bonjour;
+}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('every mDNS browser asks again on the schedule, and the default schedule ends inside the 30 s scan', async () => {
+  const counts = {};
+  const bonjour = requeryFixture(counts);
+  await discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 150, requeryAtMs: [10, 30, 50] });
+  assert.deepEqual(counts, { thingino: 3, 'nightlight-cam': 3, rtsp: 3 });
+  // The shipped schedule: the first repeat comes within about a second, they ascend, and none outlives a 30 s scan.
+  assert.ok(MDNS_REQUERY_MS.length >= 3);
+  assert.ok(MDNS_REQUERY_MS[0] <= 2000);
+  assert.deepEqual([...MDNS_REQUERY_MS].sort((a, b) => a - b), MDNS_REQUERY_MS);
+  assert.ok(MDNS_REQUERY_MS.at(-1) < 30000);
+});
+
+test('a camera that answers only the second query is found; with no repeat it is missed', async () => {
+  const answer = { type: 'nightlight-cam', answer: (bonjour) => bonjour.callbacks['nightlight-cam']({
+    addresses: ['192.168.3.20'], name: 'Bedroom', port: 554, txt: { product: 'Nightlight Camera' } }) };
+  const withRepeat = await discoverCameras({ createBonjour: () => requeryFixture({}, { answerOnUpdate: answer }),
+    wsProbe: async () => {}, timeoutMs: 80, requeryAtMs: [10] });
+  assert.deepEqual(withRepeat.candidates.map((item) => item.ip), ['192.168.3.20']);
+  const without = await discoverCameras({ createBonjour: () => requeryFixture({}, { answerOnUpdate: answer }),
+    wsProbe: async () => {}, timeoutMs: 80, requeryAtMs: [] });
+  assert.equal(without.candidates.length, 0);
+});
+
+test('a query scheduled after the scan ends is never sent, and one that is aborted early is cancelled', async () => {
+  const late = {};
+  await discoverCameras({ createBonjour: () => requeryFixture(late), wsProbe: async () => {}, timeoutMs: 40, requeryAtMs: [10, 100] });
+  await wait(150);
+  assert.deepEqual(late, { thingino: 1, 'nightlight-cam': 1, rtsp: 1 }, 'the 100 ms query is past the 40 ms scan');
+  const aborted = {};
+  const controller = new AbortController();
+  const pending = discoverCameras({ createBonjour: () => requeryFixture(aborted), wsProbe: async () => {},
+    timeoutMs: 30000, requeryAtMs: [60], signal: controller.signal });
+  controller.abort();
+  await pending;
+  await wait(120);
+  assert.deepEqual(aborted, {}, 'an aborted scan sent no further query');
+});
+
+test('a browser whose update throws does not end the scan or stop the other browsers', async () => {
+  const counts = {};
+  const bonjour = requeryFixture(counts, { throwOn: 'thingino' });
+  const pending = discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 80, requeryAtMs: [10, 30] });
+  bonjour.callbacks['nightlight-cam']({ addresses: ['192.168.3.20'], name: 'Bedroom', port: 554 });
+  const result = await pending;
+  assert.deepEqual(result.sourceErrors, []);
+  assert.equal(result.candidates.length, 1);
+  assert.equal(counts['nightlight-cam'], 2);
+  assert.equal(counts.rtsp, 2);
+  assert.equal(counts.thingino, 2, 'the throwing browser is still asked each time');
+});
+
+test('a scan with the default schedule asks again after about a second (the shipped path, not an injected one)', async () => {
+  const counts = {};
+  await discoverCameras({ createBonjour: () => requeryFixture(counts), wsProbe: async () => {}, timeoutMs: 1300 });
+  assert.deepEqual(counts, { thingino: 1, 'nightlight-cam': 1, rtsp: 1 });
 });

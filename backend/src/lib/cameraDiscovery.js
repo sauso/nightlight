@@ -46,10 +46,19 @@ export function probeOnvifDiscovery({ timeoutMs, onDevice }) {
 // existingHosts: the IPs of cameras already saved. A discovered camera at one of those IPs is NOT dropped; it is
 // returned with `alreadyAdded: true` so the screen can show it greyed out (#950). It still counts toward the
 // 20-candidate cap and still passes the private-address filter and the name sanitising like any other.
+// When, after a scan starts, the mDNS browsers ask again (milliseconds). bonjour-service 1.4.4's Browser sends ONE query
+// when it starts and never another (read in its dist/lib/browser.js, 2026-11-20), so a single lost packet, which is
+// ordinary for multicast over Wi-Fi or through a router relaying between VLANs, hid a camera for the whole 30 s scan
+// and it appeared only on the next one (owner: a Nightlight Camera was missed, then found on a refresh). RFC 6762
+// 5.2 asks for a repeat after about a second and then a doubling interval; this follows that, and stops short of the
+// 30 s scan so a late query cannot outlive it. Not calibrated: the gaps are the RFC's, not measured on this network.
+export const MDNS_REQUERY_MS = [1000, 3000, 7000, 15000, 25000];
+
 export async function discoverCameras({
   createBonjour = defaultCreateBonjour, reuseBonjour = null,
   wsProbe = probeOnvifDiscovery, onCandidate = () => {}, signal,
   timeoutMs = 30000, now = Date.now, existingHosts = new Set(),
+  requeryAtMs = MDNS_REQUERY_MS,
 } = {}) {
   const candidates = new Map();
   const sourceErrors = [];
@@ -95,6 +104,7 @@ export async function discoverCameras({
     let bonjour, owned = false;
     let mdnsEmitter;
     const browsers = [];
+    let requeryTimers = [];
     let rejectMdns;
     const failure = new Promise((_, reject) => { rejectMdns = reject; });
     const onFatal = (error) => rejectMdns(error);
@@ -132,6 +142,19 @@ export async function discoverCameras({
         }
       });
       browsers.push(rtsp);
+      // Ask again on the schedule above, on every browser (a browser's update() re-sends its PTR query). One that
+      // throws (a socket that just closed) must not end the scan or stop the others; a query after the scan ended is
+      // skipped, and every timer is cleared in the finally below so none outlives the scan.
+      requeryTimers = requeryAtMs.filter((ms) => ms < timeoutMs).map((ms) => {
+        const timer = setTimeout(() => {
+          if (!alive()) return;
+          for (const browser of browsers) {
+            try { browser?.update?.(); } catch { /* the next query or the scan's end handles it */ }
+          }
+        }, ms);
+        timer.unref?.();
+        return timer;
+      });
       const untilAbort = new Promise((resolve) => {
         if (!alive()) return resolve();
         controller.signal.addEventListener('abort', resolve, { once: true });
@@ -139,6 +162,7 @@ export async function discoverCameras({
       await Promise.race([untilAbort, failure]);
     } finally {
       mdnsEmitter?.off('error', onFatal);
+      for (const timer of requeryTimers) clearTimeout(timer);
       for (const browser of browsers) {
         try { browser?.stop(); } catch { /* the other browser and socket still need closing */ }
       }
