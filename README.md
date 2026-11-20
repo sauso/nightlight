@@ -32,7 +32,7 @@ Nightlight is designed for local-network use first. Remote viewing is possible, 
 
 You'll need an always-on Linux host running Docker (such as Unraid or an arm64 Raspberry Pi) and a camera that exposes an RTSP stream. ONVIF is useful but optional. Performance depends on your hardware, camera count and enabled analysis features, and there isn't a published minimum-hardware benchmark. [What you need, and what has been tested](docs/requirements.md) says what is known and what isn't.
 
-On Unraid? Jump to [Running on Unraid](#running-on-unraid). Anywhere else, run Nightlight on a trusted home network:
+On Unraid? Jump to [Running on Unraid](#running-on-unraid). On Home Assistant OS? See [Running on Home Assistant](#running-on-home-assistant). Anywhere else, run Nightlight on a trusted home network:
 
 ```bash
 docker run -d \
@@ -66,6 +66,18 @@ In **Community Applications**, search for **Nightlight**, select **Install**, ch
 **Already installed from an older template?** Unraid keeps your saved template, so it doesn't pick up the shutdown setting by itself. Edit the container and make sure **Extra Parameters** contains `--stop-timeout 30`, so recordings can finish saving when the container stops.
 
 [Manual template install and other setup details](docs/installation.md#unraid)
+
+## Running on Home Assistant
+
+Nightlight runs as an **app** on Home Assistant OS (`amd64` or `aarch64`), added from its own repository. It is **experimental**: it has been installed and set up on one Home Assistant system so far.
+
+[![Open your Home Assistant and add this repository.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fsauso%2Fnightlight-ha-addon)
+
+Or add it by hand: in Home Assistant, go to **Settings → Apps → Install app**, open the menu at the top right, choose **Repositories** and enter `https://github.com/sauso/nightlight-ha-addon`. Then install **Nightlight**, start it and select **Open Web UI**. Older Home Assistant versions call this **Settings → Add-ons → Add-on store**.
+
+The app uses host networking, so Nightlight is served on port 4000 of the Home Assistant machine. If you open Home Assistant through a custom domain, **Open Web UI** follows that domain: open `http://<home-assistant-ip>:4000` instead.
+
+[The Home Assistant guide](docs/home-assistant.md) has the limits (backups pause the app; recordings are not in its backups) and what is untested. The app itself lives in [sauso/nightlight-ha-addon](https://github.com/sauso/nightlight-ha-addon).
 
 ## What can it do?
 
