@@ -332,9 +332,11 @@ access. After it is public, copy the tags published before the mirror existed wi
 The copy jobs log in to Docker Hub for reads because copying an image index with its attestation
 manifests makes dozens of manifest requests per tag; anonymous requests on shared runner IPs risk rate
 limits. They use a separate read-only Docker Hub token (the repository secret `DOCKERHUB_READ_TOKEN`, a
-personal access token with "Repo Public Read-only" and no other permission), so the jobs that can write to
-ghcr.io cannot push to Docker Hub. If you fork the repository, create your own and set that secret; without
-it the two jobs fail at the Docker Hub login.
+personal access token with "Repo Public Read-only" and no other permission), so the `mirror-ghcr` and
+`copy-tags` jobs, which can write to ghcr.io, cannot push to Docker Hub. (The weekly rebuild job still holds
+both the push token, to promote `:latest` and `:dev`, and the ghcr.io write permission, for its copy step;
+splitting it into two jobs is a possible follow-up.) If you fork the repository, create your own read-only
+token and set that secret; without it the two copy jobs fail at the Docker Hub login.
 
 A red `mirror-ghcr` on a dev push also keeps the release PR's `gh pr checks` loop waiting, even though
 Docker Hub published successfully. Re-run the newest mirror job, or accept the red check with the owner.
