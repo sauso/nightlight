@@ -436,8 +436,8 @@ const ONSET_LOOKBEHIND_MS = 3 * 60 * 60 * 1000;
 // placed, fusses a little, then settles).
 const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
 // A far pre-window put-down over an empty-looking bed gave false onsets on 2026-10-10 (#669),
-// 2026-11-07 and 2026-11-20 (52, 83/84 and 117 minutes early). On the 2026-11-20 staging
-// snapshot, 62 owner-corrected nights had no confirmed real onset over 50 minutes early; the
+// 2026-09-05, 2026-11-07 and 2026-11-20 (52, 84, 83 and 117 minutes early, respectively).
+// On the 2026-11-20 staging snapshot, 62 owner-corrected nights had no confirmed real onset over 50 minutes early; the
 // 2026-09-06 real case sits exactly at 50 (displayed gap 46). The 2026-11-20 false span had
 // 2 occupied minutes of 117, and 2026-11-07 had 0 of 83. One per 30 watched minutes scales
 // the existing OCCUPANCY_MIN_MINUTES comment's quietest-real rate (5-9 per 150) at its low end.

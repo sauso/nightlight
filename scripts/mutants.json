@@ -15970,8 +15970,8 @@
     "replace": "const OCCUPANCY_MIN_MINUTES = 2;",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T2:",
-    "note": "2 accepts the 2026-10-10 child A 19:07 candidate (exactly 2 occupied minutes before the next put-down) on both databases. The knob is the bound, not the threshold."
+    "namePattern": "#669 T2 within margin:",
+    "note": "The within-margin twin rejects exactly 2 occupied minutes under guard 3 and accepts a threshold of 2."
   },
   {
     "label": "#669 M-669-03: the occupancy threshold rises to 4",
@@ -15980,8 +15980,8 @@
     "replace": "const OCCUPANCY_MIN_MINUTES = 4;",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T2:",
-    "note": "4 would be fitted to one night and eats into the measured floor of real onsets (5-9 occupied minutes in 150). T2's second half (exactly 3 = accepted) pins it."
+    "namePattern": "#669 T2 within margin:",
+    "note": "The within-margin twin accepts exactly 3 occupied minutes under guard 3 and rejects a threshold of 4."
   },
   {
     "label": "#669 M-669-04: the bound is inclusive (`<=`): the next put-down's own minute is counted",
@@ -15990,7 +15990,7 @@
     "replace": "for (let i = from; i <= end; i++) {",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T3:"
+    "namePattern": "#669 T3 within margin:"
   },
   {
     "label": "#669 M-669-05: fail-open 1 removed (a settle near the end of the timeline is judged by the bounded count)",
@@ -15999,8 +15999,8 @@
     "replace": "// fail-open 1 removed (mutant)",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T6a:",
-    "note": "Kept deliberately and FIRST: the before/after replay was measured with this order. T6a pins the known limit it leaves (an in-progress night at 20:30 still shows the false 18:06 put-down)."
+    "namePattern": "within-margin live fail-open needs the end-of-timeline early return",
+    "note": "The sparse within-margin live fixture accepts a put-down only while its 150-minute look-ahead exceeds the recorded timeline."
   },
   {
     "label": "#669 M-669-06: fail-open 2 removed (an unobserved minute inside the count reads as an empty bed)",
@@ -16009,7 +16009,7 @@
     "replace": "// fail-open 2 removed (mutant)",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T6b:"
+    "namePattern": "#669 T6b within margin:"
   },
   {
     "label": "#669 M-669-07: the bound's default is gone (undefined -> Math.min is NaN -> every put-down with no later one is rejected)",

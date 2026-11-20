@@ -326,18 +326,21 @@ Only movement before the next **non-isolated logged put-down** counts as evidenc
 with quiet recorded on either side does not cut it. The requirement still uses the whole watched
 span to the window start, so a later put-down can remove evidence but never lower the requirement.
 A minute without video does not raise that requirement, and movement elsewhere in the picture does
-not cancel a bed movement. Within 50 minutes, the
-existing checks still apply. This extra check stopped false early bedtimes on an empty-looking bed,
-including one live night that otherwise said a child was asleep before they were put down.
+not cancel a bed movement. Within 50 minutes, the existing checks still apply. This extra check
+stopped false early bedtimes on an empty-looking bed, including one live night that otherwise said a
+child was asleep before they were put down. It does not catch every case: a put-down that an older
+check rejects first can still leave the asleep time at the window start over an empty bed.
 
 This is a cautious estimate from two cameras in one house, not a measurement of the confirmed real
 early nights: their minute samples had already expired. The 50-minute margin rests on one confirmed
 real early night. About 18-22% of 57 completed nights had fewer than three small bed movements in
-their first 46 minutes, and one reviewed night had none in 117 minutes. A child who truly falls
+their first 46 minutes. That figure is a proxy for quiet early sleepers, not this rule's rejection
+rate; one reviewed night had none in 117 minutes. A child who truly falls
 asleep more than 50 minutes early and lies very still may therefore be shown as falling asleep at
 the window start, late by as much as the whole early span. This is most likely if the bed zone sees
 only part of the child, or the window is set so late that every night counts as early. You can
-[correct the asleep time in the morning review](#correcting-a-night).
+[correct the asleep time in the morning review](#correcting-a-night). If your child is usually
+asleep more than 50 minutes before the window opens, move the window start to their usual bedtime.
 
 **Known limits** (details, and the nights they come from, in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)):
 

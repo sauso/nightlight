@@ -1676,7 +1676,9 @@ requirement. Unwatched minutes do not raise it. Movement elsewhere in the pictur
 a bed reading. This closes
 the "exactly 3" escape for far-early onsets: movement in the real put-down's lead-in or after the
 window cannot by itself rescue a false earlier one. Within the 50-minute margin, the old limit
-remains. A false far-early put-down now cannot be revived by the later onset pass either.
+remains. The later onset pass skips a far-early put-down only when this new evidence check rejects it.
+If an older check rejects it first, the later pass may still place the asleep time at the window start
+over an empty bed, with **In bed** blank.
 
 The margin comes from 62 owner-corrected nights in one house: confirmed real early onsets were at
 most 50 minutes before the window, while four known false ones were 52, 83, 84 and 117 minutes
@@ -1741,6 +1743,9 @@ has not been measured across other homes.
   they woke), and a quiet evening with nothing to break the stillness over the empty bed, which can still be
   read as a child asleep from the window's opening. A camera outage between a false put-down and the next
   put-down still makes the older guard accept it; within the 50-minute margin that can still be the onset.
+- **Follow-up:** a far-early put-down rejected by the older occupancy check, or an earlier nap put-down,
+  can still hold the onset at the window start in a quiet house. Only a put-down rejected by the newer
+  evidence check is skipped in the later onset pass.
 - **Saved nights may keep their old answer** on the child's page. A saved night self-updates for up to three
   hours after its window closes; older rows wait for an admin to use **Recompute this night**. The detail
   view can work a night out afresh, so it can differ from the saved card until then.
