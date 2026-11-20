@@ -354,12 +354,15 @@ describe('simulated vitals are labelled', () => {
   test('the card shows the Simulated badge only when the server flagged the vitals', async () => {
     const flagged = showCard({ ...OK_NIGHT, vitals: { hr: HR, rr: RR, simulated: true } });
     expect(await screen.findByText('Simulated sensors')).toBeTruthy();
+    // The button's spoken name replaces its contents, so it must say it too.
+    expect(cardName()).toMatch(/sensor estimate, simulated sensors/);
     flagged.unmount();
     cleanup();
     vi.restoreAllMocks();
     showCard({ ...OK_NIGHT, vitals: { hr: HR, rr: RR } });
     await screen.findByText(/bpm avg/);
     expect(screen.queryByText('Simulated sensors')).toBeNull();
+    expect(cardName()).not.toMatch(/simulated/);
   });
 
   test('the detail page shows it beside the estimate note, and not when the vitals are real', async () => {

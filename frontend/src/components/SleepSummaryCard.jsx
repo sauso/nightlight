@@ -102,7 +102,7 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
   const vitalsLabel = hrAvg == null && rrAvg == null ? null : [
     hrAvg != null && `heart rate ${hrAvg} beats per minute`,
     rrAvg != null && `breathing ${rrAvg} breaths per minute`,
-  ].filter(Boolean).map((s) => `average ${s}`).join(', ').replace(/^a/, 'A') + ' (sensor estimate)';
+  ].filter(Boolean).map((s) => `average ${s}`).join(', ').replace(/^a/, 'A') + (vitals?.simulated === true ? ' (sensor estimate, simulated sensors)' : ' (sensor estimate)');
 
   // The label above the duration: a small moon and the words. The moon marks "overnight sleep" the way it did when it sat
   // at the left of the card; one place for it so every state that has a label gets the same one.

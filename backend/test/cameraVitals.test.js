@@ -207,3 +207,31 @@ test('reads only: no row of any table changes', () => {
   run({ series: true });
   assert.equal(JSON.stringify(db.prepare('SELECT * FROM nlcam_readings ORDER BY bucket, metric').all()), before);
 });
+
+// Code review (Codex, 2026-11-20): the flag was set from any simulated minute READ, including ones the answer does not show.
+test('simulated labels only what the answer shows: a flagged minute outside the summary window and the drawn range does not', () => {
+  hr(2, 70);              // real, inside the summary window (minutes 10..60)
+  hr(0, 90, 8, 1);        // flagged, but before the onset and outside the card's range
+  const summaryOnly = nightVitals(CHILD, at(10), at(60), { nowMs: NOW, summaryFromMs: at(10), summaryToMs: at(60) });
+  assert.equal(summaryOnly, null, 'nothing valid inside the window: the real minute 2 is before it too');
+  hr(20, 72);
+  const card = nightVitals(CHILD, at(10), at(60), { nowMs: NOW, summaryFromMs: at(10), summaryToMs: at(60) });
+  assert.deepEqual(card.hr, { avg: 72, min: 72, max: 72, minutes: 1 });
+  assert.equal('simulated' in card, false, 'the flagged minute 0 is read for the union but not shown');
+  hr(30, 80, 8, 1);
+  assert.equal(nightVitals(CHILD, at(10), at(60), { nowMs: NOW, summaryFromMs: at(10), summaryToMs: at(60) }).simulated, true, 'a flagged minute inside the window labels it');
+  // A flagged minute only in the drawn range (before a later onset): the chart shows it, so the series read is labelled.
+  db.prepare('DELETE FROM nlcam_readings').run();
+  hr(12, 70);
+  hr(5, 85, 8, 1);
+  const detail = nightVitals(CHILD, at(0), at(60), { nowMs: NOW, series: true, summaryFromMs: at(10), summaryToMs: at(60) });
+  assert.equal(detail.simulated, true, 'the series draws minute 5');
+  const cardOnly = nightVitals(CHILD, at(0), at(60), { nowMs: NOW, summaryFromMs: at(10), summaryToMs: at(60) });
+  assert.equal('simulated' in cardOnly, false, 'the same night as a summary-only read does not show minute 5');
+});
+
+test('the end of the range is exclusive: a row in the minute that starts at the end is not read', () => {
+  hr(59, 70);
+  hr(60, 555);
+  assert.deepEqual(run().hr, { avg: 70, min: 70, max: 70, minutes: 1 });
+});

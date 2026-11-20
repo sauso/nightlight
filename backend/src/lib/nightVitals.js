@@ -112,13 +112,13 @@ export function nightVitals(childId, startMs, endMs, {
     }
   }
   // `simulated`: a camera minute that was used and was flagged invented (a bench camera), so the screen can say so.
-  let simulated = false;
+  const simulatedMinutes = [];
   for (const [min, cameras] of camera.perMinute) {
     for (const c of cameras.values()) {
       let used = false;
       if (validCameraHr(c.hr, c.dist)) { add(min, 'hr', c.hr.mean); used = true; }
       if (validCameraRr(c.rr, c.dist)) { add(min, 'rr', c.rr.mean); used = true; }
-      if (used && c.simulated) simulated = true;
+      if (used && c.simulated) simulatedMinutes.push(min);
     }
   }
   const minutes = [...slots].map(([min, s]) => ({ min, hr: s.hrs.length ? mean(s.hrs) : null, rr: s.rrs.length ? mean(s.rrs) : null }));
@@ -126,8 +126,10 @@ export function nightVitals(childId, startMs, endMs, {
   minutes.sort((a, b) => a.min - b.min);
 
   const out = { hr: summarise(minutes, 'hr', fromMin, toMin), rr: summarise(minutes, 'rr', fromMin, toMin) };
-  // Added only when true, so an answer for a child without a simulated camera is byte-identical to before.
-  if (simulated) out.simulated = true;
+  // Added only when true, so an answer for a child without a simulated camera is byte-identical to before. And only when a
+  // simulated minute is one of those the answer SHOWS: inside the summary window, or (with a series) inside the drawn range.
+  // A simulated minute read only because the summary window reaches it, or before the onset, must not label real figures.
+  if (simulatedMinutes.some((m) => (m >= fromMin && m < toMin) || (series && m >= startMin && m < endMin))) out.simulated = true;
   if (series) {
     const buckets = new Map();
     // Only the display range [startMin, endMin): minutes read for the summary alone stay out of the chart.

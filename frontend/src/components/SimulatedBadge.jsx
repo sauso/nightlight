@@ -2,8 +2,8 @@
 // them for a real room. Its readings are also kept out of every night's figures by the server.
 export default function SimulatedBadge({ className = '' }) {
   return (
-    <span className={`status-badge status-badge--off status-badge--sm ${className}`.trim()}
-      title="This camera is sending invented readings (test data). They are never used for sleep figures.">
+    <span className={`simulated-badge ${className}`.trim()}
+      title="This camera is sending invented readings (test data). They can be shown, but are never part of a night's sleep figures, score or summary.">
       Simulated sensors
     </span>
   );
