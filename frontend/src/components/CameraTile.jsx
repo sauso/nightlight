@@ -1119,7 +1119,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
           </div>
         )}
       </div>
-      <div className="camera-tile__meta">
+      <div className={`camera-tile__meta${camera.nightlight_sensors ? ' camera-tile__meta--chips' : ''}`}>
         <div className="camera-tile__meta-left">
           {dragHandleProps && (
             <button className="drag-handle" {...dragHandleProps} aria-label={`Reorder ${camera.name}`}>
