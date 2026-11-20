@@ -2594,6 +2594,13 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   flex: none;
 }
 
+.status-row--wrap {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+}
+
 .camera-tile__reading {
   display: inline-flex;
   align-items: center;

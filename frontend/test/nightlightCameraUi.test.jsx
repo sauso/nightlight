@@ -190,20 +190,20 @@ test('tile chips: an ordinary camera shows its MQTT readings exactly as before',
   expect(cameraReadingParts({ mqtt: null }, 'C')).toEqual([]);
 });
 
-test('tile chips: a Nightlight Camera with its climate switch on shows the camera’s readings, not MQTT’s, plus ok radar readings only', () => {
+test('tile chips: a Nightlight Camera with its climate switch on shows the camera’s temperature and humidity, not MQTT’s, and never the radar readings', () => {
   const camera = { sensor_source: 'nightlight-api', sensor_groups: null, mqtt: { temperature: 99, humidity: 99 },
     nightlight_sensors: live({ temperature: 21.4, humidity: 45, presence: 1, heart_rate: 92.4, breathing_rate: 22 }) };
-  expect(texts(cameraReadingParts(camera, 'C'))).toEqual(['21.4°C', '45%', 'Present', '92 bpm', '22/min']);
-  expect(cameraReadingParts(camera, 'C').find((p) => p.key === 'hr').title).toMatch(/not for medical use/);
+  // Five chips made the tile a tall stack (owner, 2026-11-20): presence, heart rate and breathing rate live on the Sensors screen and in the night.
+  expect(texts(cameraReadingParts(camera, 'C'))).toEqual(['21.4°C', '45%']);
   expect(texts(cameraReadingParts(camera, 'F'))[0]).toBe('70.5°F');
   // Nothing the server did not mark ok and fresh: missing keys draw nothing (never 0, never NaN).
   expect(texts(cameraReadingParts({ ...camera, nightlight_sensors: live({}) }, 'C'))).toEqual([]);
-  expect(texts(cameraReadingParts({ ...camera, nightlight_sensors: live({ heart_rate: Number.NaN, presence: 0 }) }, 'C'))).toEqual(['Nobody there']);
+  expect(texts(cameraReadingParts({ ...camera, nightlight_sensors: live({ temperature: Number.NaN, humidity: 45 }) }, 'C'))).toEqual(['45%']);
 });
 
-test('tile chips: with the climate switch off the camera’s MQTT readings are used again, and a radar switch off hides the radar chips', () => {
-  const camera = { sensor_source: 'nightlight-api', sensor_groups: JSON.stringify({ climate: false, radar: false }), mqtt: { temperature: 19, humidity: 40 },
-    nightlight_sensors: live({ temperature: 21.4, humidity: 45, presence: 1, heart_rate: 92 }) };
+test('tile chips: with the climate switch off the camera’s MQTT readings are used again', () => {
+  const camera = { sensor_source: 'nightlight-api', sensor_groups: JSON.stringify({ climate: false }), mqtt: { temperature: 19, humidity: 40 },
+    nightlight_sensors: live({ temperature: 21.4, humidity: 45 }) };
   expect(texts(cameraReadingParts(camera, 'C'))).toEqual(['19.0°C', '40%']);
 });
 

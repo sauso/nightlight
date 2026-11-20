@@ -8,6 +8,7 @@ import { scoreOf, scoreLabel, bandOf, bandWord, pendingNightText } from '../lib/
 import { nightSummaryText } from '../lib/nightSummaryPhrases.js';
 import ScoreRing from './ScoreRing.jsx';
 import NightPendingRing from './NightPendingRing.jsx';
+import SimulatedBadge from './SimulatedBadge.jsx';
 
 // Sleep summary in the Child detail hero. Reads the LIVE endpoint: while a night is in progress it shows
 // "Tonight · so far" (recomputed on demand, capped at now — so a morning wake shows within a minute or
@@ -228,6 +229,7 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
           <div className="night__vitals">
             {hrAvg != null && <span className="night__vital"><HeartPulse size={14} aria-hidden="true" />{hrAvg} bpm avg</span>}
             {rrAvg != null && <span className="night__vital"><Wind size={14} aria-hidden="true" />{rrAvg}/min avg</span>}
+            {vitals?.simulated === true && <SimulatedBadge />}
           </div>
         )}
       </button>

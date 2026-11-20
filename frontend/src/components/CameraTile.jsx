@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Bell, Square, Play, RotateCcw, Power, BellOff } from 'lucide-react';
-import { HeartPulse, Wind, User } from 'lucide-react';
-import { parseSensorGroups, usesCameraClimate } from '../lib/nightlightSensors.js';
+import { usesCameraClimate } from '../lib/nightlightSensors.js';
 import SimulatedBadge from './SimulatedBadge.jsx';
 import { useNavigate } from 'react-router-dom';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
@@ -62,24 +61,18 @@ export function readingParts(mqtt, tempUnit) {
 }
 
 // The chips on a tile. A Nightlight Camera whose own sensors are on shows ITS temperature and humidity when its climate
-// switch is on (the server then ignores that camera's MQTT readings, so MQTT's chips would be stale or wrong), plus the
-// radar's presence, heart rate and breathing rate when that switch is on. Every one is hidden unless the server said the
-// reading was ok and fresh (liveSensors in the backend returns only those). Heart and breathing rate are sensor
-// estimates, not for medical use: the title says so. Any other camera: exactly readingParts(mqtt).
+// switch is on (the server then ignores that camera's MQTT readings, so MQTT's chips would be stale or wrong), each hidden
+// unless the server said the reading was ok and fresh (liveSensors in the backend returns only those). The radar's
+// presence, heart rate and breathing rate are deliberately NOT on the tile (owner, 2026-11-20: five chips made it a tall
+// stack, and a heart-rate number on a glance-at-it tile is an unvalidated estimate): they are on the camera's Sensors
+// screen and, for a night, on the sleep card and timeline. Any other camera: exactly readingParts(mqtt).
 export function cameraReadingParts(camera, tempUnit) {
   const live = camera?.nightlight_sensors;
   if (!live || camera?.sensor_source !== 'nightlight-api') return readingParts(camera?.mqtt, tempUnit);
-  const groups = parseSensorGroups(camera.sensor_groups);
   const m = live.metrics || {};
-  const parts = usesCameraClimate(camera)
+  return usesCameraClimate(camera)
     ? readingParts({ temperature: m.temperature, humidity: m.humidity }, tempUnit)
     : readingParts(camera.mqtt, tempUnit);
-  if (groups.radar) {
-    if (Number.isFinite(m.presence)) parts.push({ key: 'presence', Icon: User, text: m.presence === 1 ? 'Present' : 'Nobody there' });
-    if (Number.isFinite(m.heart_rate)) parts.push({ key: 'hr', Icon: HeartPulse, text: `${Math.round(m.heart_rate)} bpm`, title: 'Heart rate: a sensor estimate, not for medical use' });
-    if (Number.isFinite(m.breathing_rate)) parts.push({ key: 'rr', Icon: Wind, text: `${Math.round(m.breathing_rate)}/min`, title: 'Breathing rate: a sensor estimate, not for medical use' });
-  }
-  return parts;
 }
 
 // MM:SS for the running recording timer.
@@ -1145,7 +1138,9 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
           </div>
         </div>
-        <div className="status-row">
+        {/* A Nightlight Camera's chips sit side by side and wrap (temperature, humidity, the Simulated tag); every other camera
+            keeps the stacked column it always had. */}
+        <div className={`status-row${camera.nightlight_sensors ? ' status-row--wrap' : ''}`}>
           {snoozedUntil && (
             <span className="camera-tile__reading" title={`Alerts muted until ${snoozeText}`}>
               <BellOff size={16} className="camera-tile__reading-icon" aria-hidden="true" />
