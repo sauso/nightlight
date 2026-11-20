@@ -149,6 +149,11 @@ The seeded child's sleep window is 19:00 to 07:00, and the child page only reads
 when you run it between about 17:00 and 08:00 UTC, `run.sh` seeds in a fixed-offset zone where it is about midday (the
 times in the pictures then read "GMT+10" or similar instead of "UTC").
 
+The three phone pictures on the front-page README are drawn inside a phone frame, all the same size, by
+`node e2e/walkthrough/phone-frame.mjs` (it reads `docs/screenshots/{live,child,review}-mobile.png` and writes
+`docs/screenshots/framed/`). Run it after a refresh and commit the framed images too; it refuses a screenshot that is
+not 390 x 844 at 2x, so a changed capture size shows up as an error instead of a stretched picture.
+
 `playwright/tests/05-screenshots.spec.js` still captures a few screens into `playwright/screenshots/` (uploaded by
 CI as the `docs-screenshots` artifact), but only as a smoke test that those screens render. The committed images
 come from the walkthrough, not from that artifact.
