@@ -14,8 +14,9 @@ on:
         type: boolean
         default: false
 
-# Least privilege (#566 bullet 5): this workflow only reads the repository (the Docker Hub push uses its own secrets, not this token), so the token it is handed is
-# limited to that instead of the repository default (which may include write).
+# Least privilege (#566 bullet 5): the token every job gets by default only reads the repository (the Docker Hub push
+# uses its own secrets, not this token), instead of the repository default (which may include write). ONE job needs
+# more: mirror-ghcr pushes to ghcr.io, so it alone is granted `packages: write`, in its own permissions block below.
 permissions:
   contents: read
 
@@ -56,6 +57,10 @@ jobs:
     # gate_only always skips the publish, even after a successful gate check.
     if: ${{ !cancelled() && (needs.gate.result == 'success' || needs.gate.result == 'skipped') && !inputs.gate_only }}
     runs-on: ubuntu-latest
+    # For mirror-ghcr: the digest Docker Hub now serves, and the bare tags it was published under.
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.mirror-tags.outputs.tags }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,6 +94,7 @@ jobs:
         run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -110,3 +116,72 @@ jobs:
           provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The tag list for mirror-ghcr, as BARE tags (dev, 0b0a244), not metadata-action's full references
+      # (sauso/nightlight:dev). The runner drops any job output that contains a secret's value ("Skip output
+      # since it may contain secret"), and the Docker Hub username secret is the same word as the repository
+      # owner: this job's log already prints the image as ***/nightlight. Bare tags cannot contain it.
+      # The script's --check also validates every tag, so a tag the mirror would refuse shows up here.
+      # AFTER the push and continue-on-error, so it can never fail the Docker Hub publish: if it fails, the
+      # mirror job gets no tags and goes red on its own, loudly.
+      - name: List the published tags for the ghcr.io mirror
+        id: mirror-tags
+        continue-on-error: true
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -eu
+          BARE=$(sh scripts/ghcr-mirror.sh --check)
+          echo "tags=$(printf '%s' "$BARE" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
+  # The ghcr.io mirror (docs/operations.md, "Registries"): copies the image build-and-push just published to
+  # ghcr.io/sauso/nightlight under the same tags, BY DIGEST, so both registries serve identical bytes, SBOM
+  # and provenance included. A SEPARATE JOB so that a ghcr.io outage or a permission mistake can never stop
+  # or fail the Docker Hub publish: this runs only after build-and-push has finished. Its red only makes
+  # the run red; the deploy and release skills read build-and-push's own result. To repair a red mirror,
+  # re-run the failed job, or dispatch ghcr-copy.yml for the tag (the script prints the command).
+  mirror-ghcr:
+    needs: build-and-push
+    # `!cancelled()` replaces the implicit success() on purpose: success() also looks at gate, which a dev push
+    # SKIPS, so without it this job would be skipped on every dev push although build-and-push succeeded.
+    # build-and-push's own result is the gate. gate_only never publishes, so it never mirrors either.
+    if: ${{ !cancelled() && needs.build-and-push.result == 'success' && !inputs.gate_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The ONLY job in this workflow that can write packages: GITHUB_TOKEN pushes to ghcr.io (no stored
+    # registry secret). The workflow has no pull_request trigger, so a fork's pull request never reaches it.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out the mirror script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here needs git credentials, so the token (which can write packages) is not left in .git/config.
+          persist-credentials: false
+
+      - name: Set up Docker Buildx (for imagetools)
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Read-only use: each copy reads the index and its manifests from Docker Hub once per tag, and anonymous
+      # Docker Hub reads are rate-limited per IP on shared runner IPs (the same reason ghcr-copy.yml logs in).
+      - name: Log in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Inputs only through env (never ${{ }} inside run), as the script expects. Empty TAGS here means
+      # build-and-push's "List the published tags" step failed: its log says which tag it refused.
+      - name: Copy the published tags to ghcr.io by digest
+        env:
+          DIGEST: ${{ needs.build-and-push.outputs.digest }}
+          TAGS: ${{ needs.build-and-push.outputs.tags }}
+        run: sh scripts/ghcr-mirror.sh

@@ -258,7 +258,64 @@ What the test does not cover:
 Each run's summary on the repository's Actions page lists the digest the tag had before. To go back
 to that image, pull it by digest (`docker pull sauso/nightlight@sha256:<digest>`) or pin a release
 tag. The maintainer can point the tag itself back with
-`docker buildx imagetools create -t sauso/nightlight:latest sauso/nightlight@sha256:<previous digest>`.
+`docker buildx imagetools create -t sauso/nightlight:latest sauso/nightlight@sha256:<previous digest>`,
+then copy it to ghcr.io with `ghcr-copy.yml` (see [Registries](#registries)); the run summary prints both commands.
+
+### Registries
+
+The same image is published in two places. Pull from whichever you prefer.
+
+| Registry | Image | What it is |
+| --- | --- | --- |
+| Docker Hub | `sauso/nightlight` | The primary. The examples and the Unraid template use it. |
+| GitHub Container Registry | `ghcr.io/sauso/nightlight` | A mirror, copied from Docker Hub. |
+
+Each time a tag is published to Docker Hub (`:latest`, `:dev`, a release's `X.Y.Z` and `X.Y`, and the
+short commit tag), the publish workflow's `mirror-ghcr` job copies it to ghcr.io **by digest**. Both
+registries then serve the same bytes, SBOM and provenance included. To check a tag, compare the two
+digests; they must be the same:
+
+```bash
+docker buildx imagetools inspect sauso/nightlight:latest --format '{{json .Manifest.Digest}}'
+docker buildx imagetools inspect ghcr.io/sauso/nightlight:latest --format '{{json .Manifest.Digest}}'
+```
+
+A release tag (`X.Y.Z`) on ghcr.io is never moved to a different image without a person deciding. If
+Docker Hub's copy of a release changes (a release published again after a mistake), the mirror refuses
+and says so.
+
+**When the two can differ:**
+
+- **The weekly rebuild, until the next release.** The rebuild copies its new `:latest` and `:dev` to
+  ghcr.io too, but a Monday run uses the workflow file on `main`, and `main` gets the copy step only with
+  the next release. Until then (releases are on hold during the Node 26 soak), ghcr.io's `:latest` and
+  `:dev` can lag Docker Hub's by a week of base-image patches, until the next publish of that tag.
+  Release tags are never rebuilt, so they always match.
+- **Two publishes close together.** Two pushes to `dev` a few minutes apart can leave `:dev` (on either
+  registry) on the older commit when the older run finishes last. Docker Hub already behaves this way; the
+  mirror copies whatever digest its own run published, so the two can disagree until the next push.
+- **A failed copy.** If ghcr.io is down, the publish run shows a red `mirror-ghcr` job while Docker Hub
+  already has the image. A red mirror never blocks or undoes the Docker Hub publish.
+
+**Repairing a red mirror** (maintainer): open the run on the Actions page and choose **Re-run failed
+jobs**. That copies the same digest again. Or copy named tags with the copy workflow:
+
+```bash
+gh workflow run ghcr-copy.yml --ref dev -f tags="0.49.0 latest"
+```
+
+It copies whatever Docker Hub's tag serves when it runs, and logs what the ghcr.io tag pointed at
+before. Tags can be separated by spaces or commas. It refuses to move an existing `X.Y.Z` tag to a
+different image unless you add `-f force=true`: check which image is right first. A failed job prints
+the exact command for its tag. The copy waits for a running weekly rebuild rather than racing it.
+
+**Making the package public** (once, the repository owner): GitHub creates the ghcr.io package as
+**private** on its first publish, so a pull without signing in fails until it is public. Go to your
+GitHub profile → **Packages** → **nightlight** → **Package settings** → **Change visibility** →
+**Public**. This cannot be undone. Never push to `ghcr.io/sauso/nightlight` by hand: the workflows push
+with the repository's own token, and a package first created by a person's push does not give that token
+access. After it is public, copy the tags published before the mirror existed with `ghcr-copy.yml`
+(above).
 
 ## 2. Stopping cleanly
 

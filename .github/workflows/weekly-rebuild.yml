@@ -9,7 +9,8 @@ name: Weekly image rebuild
 #
 # Refreshes only the MOVING tags: :latest (prod) and :dev (staging). The immutable vX.Y.Z
 # release tags are never re-pointed, so a pinned version keeps pulling the exact artifact it
-# always did.
+# always did. A promoted tag is then copied, by the same digest, to the ghcr.io mirror (the steps
+# after the promotion, and their limit until a release puts them on main).
 #
 # BUILD ONCE, TEST THOSE BYTES, PROMOTE THOSE BYTES (#566). Each branch is built once and pushed
 # WITHOUT a tag (by digest). That one digest is smoke-tested: the e2e pipeline prove-out
@@ -42,8 +43,9 @@ on:
         type: boolean
         default: false
 
-# Least privilege (#566 bullet 5): this workflow only reads the repository (the Docker Hub push uses its own secrets, not this token), so the token it is handed is
-# limited to that instead of the repository default (which may include write).
+# Least privilege (#566 bullet 5): the default token only reads the repository (the Docker Hub push uses its own
+# secrets, not this token), instead of the repository default (which may include write). The rebuild job also gets
+# `packages: write`, in its own block, for the ghcr.io mirror of the tag it promotes (and nothing else).
 permissions:
   contents: read
 
@@ -59,6 +61,11 @@ jobs:
     # purpose: a slow emulated arm64 build must not be cut off, but a hung step must not hold the
     # runner for GitHub's 6-hour default either.
     timeout-minutes: 45
+    # packages: write is for the ghcr.io mirror steps after the promotion (GITHUB_TOKEN pushes there). Nothing
+    # before the promotion uses it; the Docker Hub steps use their own secrets.
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       # main -> :latest (prod), dev -> :dev (staging). Each rebuilt from its own branch tip.
@@ -325,6 +332,50 @@ jobs:
             echo "result=dry run: would promote" >> "$GITHUB_OUTPUT"
           fi
 
+      # THE GHCR.IO MIRROR of the tag just promoted (docs/operations.md, "Registries"). These three steps run only
+      # when the step above PROMOTED: `result=promoted` is written only on the PROMOTE=true path, after the
+      # ls-remote race check, and only once the Docker Hub tag read back as the tested digest. So a dry run, a
+      # race skip, a red smoke or a failed Docker Hub read-back never touches ghcr.io. They are separate steps,
+      # AFTER the promotion, on purpose: a ghcr.io outage or login failure can then never stop or undo the
+      # Docker Hub promotion. It fails THIS job loudly instead (the summary says the Docker Hub tag did move,
+      # and how to copy again). The copy is from the promoted digest, the same bytes the smoke tested.
+      #
+      # ⚠️ A scheduled run uses main's copy of this file, so until a release puts this on main, Monday's rebuild
+      # moves Docker Hub's :latest / :dev and NOT ghcr.io's: the two serve different images for those tags
+      # until the next publish of each. A version tag (X.Y.Z) is never rebuilt, so it is not affected.
+      # Unproven until the first scheduled run after that release: a dry run skips these steps by design,
+      # and a non-dry dispatch also moves prod's :latest.
+      #
+      # The script comes from THIS WORKFLOW's commit (github.sha), not from the matrix checkout above: the
+      # file that calls it and the script must be the same version, and the matrix's main checkout has no
+      # script at all until a release puts it there (a dispatch from dev would otherwise fail after promoting).
+      - name: Check out the ghcr.io mirror script (this workflow's commit)
+        if: steps.promote.outputs.result == 'promoted'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .ghcr-mirror
+          sparse-checkout: scripts
+          # Nothing here needs git credentials, so the token (which can write packages) is not left in .git/config.
+          persist-credentials: false
+
+      - name: Log in to ghcr.io
+        id: ghcr-login
+        if: steps.promote.outputs.result == 'promoted'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy the promoted digest to ghcr.io/sauso/nightlight:${{ matrix.tag }}
+        id: ghcr
+        if: steps.promote.outputs.result == 'promoted'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ matrix.tag }}
+        run: sh .ghcr-mirror/scripts/ghcr-mirror.sh
+
       # Written for EVERY outcome (green, red, dry run, race), so the run page always says what :tag
       # serves now and what it served before, and a rollback is one copy-paste.
       - name: Summary
@@ -342,6 +393,8 @@ jobs:
           RESULT: ${{ steps.promote.outputs.result }}
           PREV_AT_PROMOTE: ${{ steps.promote.outputs.previous }}
           PREV_AT_START: ${{ steps.cand.outputs.previous }}
+          GHCR_LOGIN: ${{ steps.ghcr-login.outcome }}
+          GHCR_OUTCOME: ${{ steps.ghcr.outcome }}
         run: |
           PREV="${PREV_AT_PROMOTE:-$PREV_AT_START}"
           if [ -z "$RESULT" ]; then
@@ -351,6 +404,12 @@ jobs:
               RESULT="not promoted: a build or test step did not pass, so the tag was left as it was"
             fi
           fi
+          # The ghcr.io mirror runs only after a promotion; a failure there never undoes the Docker Hub one.
+          case "$GHCR_OUTCOME" in
+            success) GHCR="copied: serves the same digest as Docker Hub" ;;
+            failure) GHCR="FAILED: Docker Hub's :$TAG was promoted all the same; ghcr.io may still serve the previous image (copy command below)" ;;
+            *) if [ "$RESULT" = "promoted" ]; then GHCR="not run: a step before it failed (the ghcr.io login is ${GHCR_LOGIN:-unknown}); copy command below"; else GHCR="not run: only a successful promotion is copied"; fi ;;
+          esac
           {
             echo "### sauso/nightlight:$TAG, rebuilt from $REF"
             echo
@@ -363,11 +422,19 @@ jobs:
             echo "| amd64: AAC audio on the player's HLS path | ${AUDIO:-not run} |"
             echo "| arm64: start check | ${ARM64:-not run} |"
             echo "| Result | $RESULT |"
+            echo "| ghcr.io/sauso/nightlight:$TAG | $GHCR |"
             echo "| :$TAG before this run | \`${PREV:-unknown}\` |"
             if [ -n "$PREV_AT_PROMOTE" ]; then
               echo
-              echo "To point :$TAG back at the image it had before this run:"
+              echo "To point :$TAG back at the image it had before this run (Docker Hub first, then ghcr.io with the command below):"
               echo
               echo "\`docker buildx imagetools create -t sauso/nightlight:$TAG sauso/nightlight@$PREV_AT_PROMOTE\`"
+            fi
+            # The ghcr.io line goes through ghcr-copy.yml, never a hand push (docs/operations.md, "Registries").
+            if [ "$RESULT" = "promoted" ]; then
+              echo
+              echo "To copy :$TAG to ghcr.io (again, or after the rollback above; it copies whatever Docker Hub's :$TAG serves then):"
+              echo
+              echo "\`gh workflow run ghcr-copy.yml --repo $GITHUB_REPOSITORY --ref dev -f tags=$TAG\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
