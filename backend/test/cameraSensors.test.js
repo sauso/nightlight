@@ -385,3 +385,22 @@ test('a prune of a long history deletes every expired row in batches and keeps t
   await pruneNlcamReadings();
   assert.deepEqual(rows('nlcam_readings').map((r) => r.bucket - nowMin), [-60]);
 });
+
+// The mutant that removed the generation check survived the other late-write cases, because the camera's address and
+// login fingerprint catches most changes. This is the one it does not: switched off, noticed by a tick (which resets the
+// camera's poll state), then switched on again with the SAME address and login while the old request is still out.
+test('a request that was in flight across an off-and-on of the same camera is dropped', async () => {
+  addCamera();
+  let release;
+  onSensors = () => new Promise((resolve) => { release = () => resolve(answer(sensorsAnswer())); });
+  const pending = tickOnce();
+  await flush();
+  assert.ok(release, 'precondition: the request is in flight');
+  db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run(CAM);
+  await tickOnce(); // a tick sees it switched off and resets the camera's poll state
+  db.prepare('UPDATE cameras SET disabled = 0 WHERE id = ?').run(CAM);
+  release();
+  await pending;
+  assert.equal(rows('sensor_readings').length, 0);
+  assert.equal(rows('nlcam_readings').length, 0);
+});
