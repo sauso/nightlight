@@ -57,6 +57,8 @@ docker run -d \
 
 Replace `/path/to/your/data` with a persistent folder on your host.
 
+Prefer GitHub's registry? Use `ghcr.io/sauso/nightlight:latest` in place of `sauso/nightlight:latest`. Tags match from the first mirrored publish; older tags need a [backfill](operations.md#registries).
+
 ### What the options do
 
 **`PUID` and `PGID`** set which user and group own the files the container creates in your data directory. The defaults (99 and 100) match Unraid's own "nobody" and "users", so they are usually already right there. On another system, find your own with `id your_username`. Don't set `PUID=0`: it runs the app as root, and the container logs a warning at start if you do.

@@ -262,7 +262,9 @@ enforces the >=95% core-logic gate, plus the container-specific entrypoint check
 check), and `definition-of-done` (a warning-only docs/tests reminder, not a hard gate).
 
 `.github/workflows/docker-publish.yml` is separate — it builds and pushes a multi-arch
-(amd64/arm64) image to Docker Hub (`sauso/nightlight`) and runs no tests itself. Which tag it
+(amd64/arm64) image to Docker Hub (`sauso/nightlight`) and runs no tests itself. A second job,
+`mirror-ghcr`, then copies the same digest and tags to `ghcr.io/sauso/nightlight`; it can be red
+without the Docker Hub publish being affected (`docs/operations.md`, "Registries"). Which tag it
 publishes depends on the ref:
 - push to **`dev`** → `:dev` (staging). Does NOT touch `:latest`.
 - push to **`main`** or a **`v*` tag** → `:latest` (+ semver tags). This is production.
