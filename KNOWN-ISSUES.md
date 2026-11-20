@@ -1665,7 +1665,32 @@ child settles. A *got into bed* whose neighbouring minutes were both recorded an
 movement on its own: an adult reaching in) does not stop it. "Quiet" is the sleep timeline's own meaning of
 the word, not "the bed did not move": a minute is not quiet if anything moved in the bed, anything moved
 elsewhere in the picture (outside the bed zone), or the microphone heard a noise. None of the numbers
-changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
+changed in #669 (3 minutes, 2½ hours, 0.0005), and there is no setting.
+
+The newer far-early rule adds a separate check after those guards. If a child seems to settle more
+than 50 minutes before the configured window, at least one watched minute in 30 must show even a
+small bed movement (0.0005 or more). The requirement uses all watched minutes from the settle to
+the window start. Evidence stops at the next **non-isolated logged put-down**; a logged blip with
+quiet recorded on both sides does not cut it. This cut can remove evidence but never reduce the
+requirement. Unwatched minutes do not raise it. Movement elsewhere in the picture does not cancel
+a bed reading. This closes
+the "exactly 3" escape for far-early onsets: movement in the real put-down's lead-in or after the
+window cannot by itself rescue a false earlier one. Within the 50-minute margin, the old limit
+remains. The later onset pass skips a far-early put-down only when this new evidence check rejects it.
+If an older check rejects it first, the later pass may still place the asleep time at the window start
+over an empty bed, with **In bed** blank.
+
+The margin comes from 62 owner-corrected nights in one house: confirmed real early onsets were at
+most 50 minutes before the window, while four known false ones were 52, 83, 84 and 117 minutes
+early. The 50-minute edge rests on one real night. The evidence rate scales the older 5-9 bed
+movements per 150 minutes at its low end; it could not be replayed on the confirmed real early
+nights because their minute samples had expired. On 57 completed staging nights, about 18-22%
+had fewer than three occupied minutes in their first 46 minutes, and one reviewed night had none
+in 117. A very still real early sleeper beyond the margin can therefore be rejected and shown
+as asleep only from the window start, late by up to the whole early span. A bed zone seeing only
+part of a child, or a window set too late so that every night counts as early, is most affected.
+The morning correction flow fixes a late time. This was tuned on two cameras in one house and
+has not been measured across other homes.
 
 **What it changes, stated rather than guessed:**
 - **Measured on two cameras in one house.** Replaying every stored night on both databases with the cut
@@ -1690,11 +1715,10 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
   minute before the check (a constructed case, not a recorded night): the check is no longer alone in a quiet
   stretch, it cuts, and the asleep time moves from 19:04 to 19:33 again. A bedroom microphone hears the whole house, so this is likelier in a noisy home; a
   duplicate logged during a stretch of household noise cuts the same way.
-- **A real put-down logged with quiet either side is exempt too, so a false earlier one is still
-  believed.** The exception looks only at the minute either side of the *got into bed*, not at the
+- **A real put-down logged with quiet either side is exempt too.** The exception looks only at the minute either side of the *got into bed*, not at the
   put-down around it. In a quiet house, a real put-down whose movement pauses for a minute at the moment the
   classifier logs it is treated like a parent's glance: it does not stop the count, and a false put-down an
-  hour or two before it is accepted on its movement, exactly as before this change.
+  hour or two before it may still be accepted on its movement if it has enough evidence before the window.
 - **In bed can now be blank where it used to show the false put-down.** When the false put-down is discarded
   but the real one settled after the first long quiet stretch after the window opened (a quiet evening over
   the empty bed), the night falls back to that quiet stretch, and no put-down lies close enough before it to
@@ -1704,10 +1728,11 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
   child: a false 18:48 put-down reaches exactly 3 that way and stays the bedtime, 43 minutes early (staging
   got that night right, because it logged two more *got into bed* that cut earlier). Trimming the approach
   was tried and rejected: it also zeroes a child who is still stirring when the next put-down is logged.
-- **Any put-down whose 2½ hours run past the end of the timeline, in progress or not.** The count is only
+- **Any put-down whose 2½ hours run past the end of the timeline, in progress or not.** The older count is only
   cut once 2½ hours after the settle have been recorded; before that, "not enough of the night yet to
-  judge" accepts the put-down, as it always did. On a night still in progress that is tonight's live
-  figures showing a false early put-down as the bedtime until about 2½ hours after it; figures worked out
+  judge" accepts the put-down, as it always did. The new check still requires evidence when the settle
+  is more than 50 minutes before the window. Within that margin, a night in progress can show live
+  figures with a false put-down as the bedtime until about 2½ hours after it; figures worked out
   later, and the stored night, use the full rule. **A finished night is not exempt:** a false put-down
   within 2½ hours of the end of the night's window is accepted the same way, and so the real put-down
   after it is never considered. For example a false 05:15 put-down over an empty bed, a real one at 06:00
@@ -1717,9 +1742,13 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
 - **Not fixed:** a nap the child was lifted out of without waking (nothing between the nap and bedtime shows
   they woke), and a quiet evening with nothing to break the stillness over the empty bed, which can still be
   read as a child asleep from the window's opening. A camera outage between a false put-down and the next
-  put-down still makes the false one believed: an unrecorded stretch is not proof of an empty bed.
-- **Saved nights keep their old answer** on the child's page; the detail view works a night out afresh, so
-  the two can differ until an admin uses **Recompute this night** (docs/sleep-tracking.md, "Re-working out a night").
+  put-down still makes the older guard accept it; within the 50-minute margin that can still be the onset.
+- **Follow-up:** a far-early put-down rejected by the older occupancy check, or an earlier nap put-down,
+  can still hold the onset at the window start in a quiet house. Only a put-down rejected by the newer
+  evidence check is skipped in the later onset pass.
+- **Saved nights may keep their old answer** on the child's page. A saved night self-updates for up to three
+  hours after its window closes; older rows wait for an admin to use **Recompute this night**. The detail
+  view can work a night out afresh, so it can differ from the saved card until then.
 
 **What to do:** nothing, there is no setting for this. If a bedtime looks wrong, correct it in the morning
 review ("Was last night right?"): the reviewed nights are what this change was checked against.
