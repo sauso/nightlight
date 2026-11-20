@@ -2,7 +2,8 @@ name: Build and publish Docker image
 
 # Dev pushes publish :dev immediately. Main and v* tag publishes wait for the
 # newest main-push test run of the same commit to pass; gate_only checks the gate
-# without publishing an image.
+# without publishing an image. copy_tags builds nothing: it copies tags Docker Hub
+# already has to the ghcr.io mirror (job copy-tags; docs/operations.md, "Registries").
 on:
   push:
     branches: [main, dev]
@@ -13,10 +14,22 @@ on:
         description: Check the publish gate without pushing an image
         type: boolean
         default: false
+      # The ghcr.io copy lives HERE, not in a workflow of its own: GitHub registers a workflow for dispatch only
+      # once it is on the default branch, and this one already is, so `gh workflow run docker-publish.yml --ref dev
+      # -f copy_tags=...` runs dev's copy-tags job before a release. A new copy-only workflow could not be
+      # dispatched at all until the next release (found in review of the first version, which had one).
+      copy_tags:
+        description: 'Copy these tags from Docker Hub to ghcr.io instead of building (latest, dev, X.Y, X.Y.Z or a short sha; spaces or commas). Leave empty to publish.'
+        type: string
+        default: ''
+      force:
+        description: 'With copy_tags: let an existing X.Y.Z tag on ghcr.io move to the image Docker Hub serves now'
+        type: boolean
+        default: false
 
 # Least privilege (#566 bullet 5): the token every job gets by default only reads the repository (the Docker Hub push
-# uses its own secrets, not this token), instead of the repository default (which may include write). ONE job needs
-# more: mirror-ghcr pushes to ghcr.io, so it alone is granted `packages: write`, in its own permissions block below.
+# uses its own secrets, not this token), instead of the repository default (which may include write). TWO jobs need
+# more, each in its own permissions block below: mirror-ghcr and copy-tags push to ghcr.io (`packages: write`).
 permissions:
   contents: read
 
@@ -25,14 +38,19 @@ permissions:
 # (latest + sha + semver vs latest + sha), so keying concurrency on the commit lets
 # the tag run cancel the redundant branch run instead of building twice. A dry
 # gate check must neither cancel nor be cancelled by a real publish of that SHA.
-# On push events gate_only is empty, so both real runs use the build group.
+# On push events gate_only and copy_tags are empty, so both real runs use the build group.
+# A copy run gets a group of its own (its run id), so it can neither cancel nor be
+# cancelled by a publish of the same commit, or by another copy; copy-tags then queues
+# on the weekly-rebuild group (see that job).
 concurrency:
-  group: docker-publish-${{ github.sha }}-${{ inputs.gate_only && 'gate' || 'build' }}
+  group: docker-publish-${{ github.sha }}-${{ inputs.gate_only && 'gate' || inputs.copy_tags != '' && format('copy-{0}', github.run_id) || 'build' }}
   cancel-in-progress: true
 
 jobs:
   gate:
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || inputs.gate_only }}
+    # A copy run (copy_tags set) publishes nothing, so a copy dispatched from main or a tag is not gated: it would
+    # only wait on a test run for nothing. gate_only always checks the gate.
+    if: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && inputs.copy_tags == '' || inputs.gate_only }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -54,8 +72,10 @@ jobs:
     needs: gate
     # A dev push skips gate. Explicitly accepting skipped, with !cancelled(),
     # overrides needs' default success-only behaviour; a failed gate still blocks.
-    # gate_only always skips the publish, even after a successful gate check.
-    if: ${{ !cancelled() && (needs.gate.result == 'success' || needs.gate.result == 'skipped') && !inputs.gate_only }}
+    # gate_only always skips the publish, even after a successful gate check; so does a copy run (copy_tags set).
+    # On a push, inputs.copy_tags is null, and null == '' is true (Actions compares a null and a string as numbers,
+    # both 0), so a push publishes exactly as before.
+    if: ${{ !cancelled() && (needs.gate.result == 'success' || needs.gate.result == 'skipped') && !inputs.gate_only && inputs.copy_tags == '' }}
     runs-on: ubuntu-latest
     # For mirror-ghcr: the digest Docker Hub now serves, and the bare tags it was published under.
     outputs:
@@ -139,17 +159,20 @@ jobs:
   # and provenance included. A SEPARATE JOB so that a ghcr.io outage or a permission mistake can never stop
   # or fail the Docker Hub publish: this runs only after build-and-push has finished. Its red only makes
   # the run red; the deploy and release skills read build-and-push's own result. To repair a red mirror,
-  # re-run the failed job, or dispatch ghcr-copy.yml for the tag (the script prints the command).
+  # re-run the failed job ONLY if this is the newest publish of that tag (an older run's re-run would move
+  # :dev or :latest back to its older image), and never when "List the published tags" failed (a re-run
+  # reuses that empty output): dispatch a copy instead (`-f copy_tags=<tag>`; the script prints the command).
   mirror-ghcr:
     needs: build-and-push
     # `!cancelled()` replaces the implicit success() on purpose: success() also looks at gate, which a dev push
     # SKIPS, so without it this job would be skipped on every dev push although build-and-push succeeded.
-    # build-and-push's own result is the gate. gate_only never publishes, so it never mirrors either.
+    # build-and-push's own result is the gate: in a copy run or a gate_only run it is skipped, so this is too.
     if: ${{ !cancelled() && needs.build-and-push.result == 'success' && !inputs.gate_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # The ONLY job in this workflow that can write packages: GITHUB_TOKEN pushes to ghcr.io (no stored
-    # registry secret). The workflow has no pull_request trigger, so a fork's pull request never reaches it.
+    # One of the two jobs in this workflow that can write packages (copy-tags is the other): GITHUB_TOKEN pushes
+    # to ghcr.io (no stored registry secret). The workflow has no pull_request trigger, so a fork's pull request
+    # never reaches it.
     permissions:
       contents: read
       packages: write
@@ -163,8 +186,10 @@ jobs:
       - name: Set up Docker Buildx (for imagetools)
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      # Read-only use: each copy reads the index and its manifests from Docker Hub once per tag, and anonymous
-      # Docker Hub reads are rate-limited per IP on shared runner IPs (the same reason ghcr-copy.yml logs in).
+      # Read-only use: copying an index with its ~11 attestation manifests reads dozens of manifests from Docker Hub
+      # per tag, and anonymous Docker Hub reads are limited per IP, which runners share, so the copy would fail
+      # without a login. The cost: this job also holds the Docker Hub PUSH token. A read-only Docker Hub token as a
+      # separate secret would remove it from here and from copy-tags; not done yet (an owner decision).
       - name: Log in to Docker Hub
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -185,3 +210,68 @@ jobs:
           DIGEST: ${{ needs.build-and-push.outputs.digest }}
           TAGS: ${{ needs.build-and-push.outputs.tags }}
         run: sh scripts/ghcr-mirror.sh
+
+  # A COPY RUN (dispatched with copy_tags): copies tags Docker Hub already has to ghcr.io, for the tags published
+  # before the mirror existed and to repair a mirror. Nothing is built; gate, build-and-push and mirror-ghcr are
+  # skipped. Each tag's digest is read from Docker Hub once and copied from that digest (the script's --resolve),
+  # with the same refusal rule as the mirror: an existing X.Y.Z on ghcr.io is moved only with force.
+  #   gh workflow run docker-publish.yml --ref dev -f copy_tags="0.49.0 latest"
+  copy-tags:
+    if: ${{ inputs.copy_tags != '' && !inputs.gate_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The other job here that can write packages (see mirror-ghcr).
+    permissions:
+      contents: read
+      packages: write
+    # The SAME group as weekly-rebuild.yml (a workflow-level group there; groups are shared across workflows): this
+    # copies whatever Docker Hub's tag serves when it runs, and a rebuild may be promoting that very tag, so one
+    # waits for the other instead of racing it. cancel-in-progress: false, so neither cancels a running promotion
+    # or copy. GitHub keeps only ONE pending run per group: a copy queued while another copy (or the rebuild) is
+    # waiting replaces the waiting one, which may be a scheduled weekly rebuild (it then runs next Monday).
+    concurrency:
+      group: weekly-rebuild
+      cancel-in-progress: false
+    steps:
+      - name: Check out the mirror script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here needs git credentials, so the token (which can write packages) is not left in .git/config.
+          persist-credentials: false
+
+      # Before logging in anywhere: a bad tag stops the run here. The input arrives only through env (never
+      # ${{ }} inside run), commas become spaces, and the script's --check is the one allowlist every caller shares.
+      - name: Check the tags
+        env:
+          COPY_TAGS: ${{ inputs.copy_tags }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          export TAGS="${COPY_TAGS//,/ }"
+          sh scripts/ghcr-mirror.sh --check
+
+      - name: Set up Docker Buildx (for imagetools)
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Read-only use, for the same reason (and the same cost) as in mirror-ghcr.
+      - name: Log in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The script reads each tag on Docker Hub once, logs that digest and what the ghcr.io tag pointed at before,
+      # copies from the digest and reads it back. Every tag is tried; the first failure's code is the step's.
+      - name: Copy each tag by its Docker Hub digest
+        env:
+          COPY_TAGS: ${{ inputs.copy_tags }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          export TAGS="${COPY_TAGS//,/ }"
+          sh scripts/ghcr-mirror.sh --resolve

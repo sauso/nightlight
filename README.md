@@ -53,7 +53,7 @@ Replace `/path/to/your/data` with a persistent folder on your host. `PUID=99` an
 
 `--stop-timeout 30` gives Nightlight time to finish saving a recording when the container is stopped; without it Docker can kill the container first. `--log-opt` stops Docker's logs growing without limit.
 
-The same image is also on GitHub's registry as `ghcr.io/sauso/nightlight`, under the same tags ([how the two registries compare](docs/operations.md#registries)).
+The image is also published at `ghcr.io/sauso/nightlight` under the same tags from the first mirrored publish. Older tags need a [backfill](docs/operations.md#registries).
 
 Open `http://<server-ip>:4000` from a device on the same network. Create your administrator account, add a child, then connect a camera from the **Cameras** tab.
 

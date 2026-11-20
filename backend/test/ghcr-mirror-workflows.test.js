@@ -1,5 +1,5 @@
-// The three workflows that write to the ghcr.io mirror (docker-publish.yml's mirror-ghcr job, weekly-rebuild.yml's
-// steps after a promotion, ghcr-copy.yml) are checked here by STRUCTURE: YAML keys found by indentation, then the
+// The two workflows that write to the ghcr.io mirror (docker-publish.yml's mirror-ghcr and copy-tags jobs,
+// weekly-rebuild.yml's steps after a promotion) are checked here by STRUCTURE: YAML keys found by indentation, then the
 // values read as tokens, never as whole-file string matches, so a reformat or a comment cannot break it. There is no
 // YAML parser in the backend's dependencies (and none is added for this), so blocks are split by indentation the way
 // publish-gate.test.js reads the gate job's permissions. What is pinned, and why:
@@ -8,7 +8,7 @@
 // - A ghcr.io login or outage can never stop the Docker Hub publish or promotion: the mirror is its own job in
 //   docker-publish.yml, and comes after the promotion in weekly-rebuild.yml.
 // - Inputs reach the script only through env:, never as ${{ }} inside run: (where a value would become shell code).
-// - Every action is pinned to a commit SHA, the same one in all three files.
+// - Every action is pinned to a commit SHA, the same one in both files.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -98,14 +98,29 @@ function assertGhcrLogin(step) {
   assert.match(val(w, 'password'), /^\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}$/);
 }
 
-test('docker-publish.yml: packages: write is granted to mirror-ghcr ONLY', () => {
+test('docker-publish.yml: publish and copy dispatch have only the intended triggers and inputs', () => {
+  const wf = workflow('docker-publish.yml');
+  assert.deepEqual(Object.keys(sub(wf.top, 'on')), ['push', 'workflow_dispatch']);
+  const inputs = sub(sub(sub(wf.top, 'on'), 'workflow_dispatch'), 'inputs');
+  assert.deepEqual(Object.keys(inputs), ['gate_only', 'copy_tags', 'force']);
+  assert.equal(val(sub(inputs, 'copy_tags'), 'type'), 'string');
+  assert.equal(val(sub(inputs, 'copy_tags'), 'default'), "''");
+  assert.equal(val(sub(inputs, 'force'), 'type'), 'boolean');
+  assert.equal(val(sub(inputs, 'force'), 'default'), 'false');
+  assert.match(val(wf.jobOf('gate').job, 'if'), /inputs\.copy_tags\s*==\s*''/);
+  assert.match(val(wf.jobOf('build-and-push').job, 'if'), /inputs\.copy_tags\s*==\s*''/);
+  assert.match(val(wf.jobOf('copy-tags').job, 'if'), /inputs\.copy_tags\s*!=\s*''\s*&&\s*!inputs\.gate_only/);
+});
+
+test('docker-publish.yml: packages: write is granted only to mirror-ghcr and copy-tags', () => {
   const wf = workflow('docker-publish.yml');
   assert.deepEqual(perms(sub(wf.top, 'permissions')), { contents: 'read' }, 'top-level permissions changed');
-  assert.deepEqual(Object.keys(wf.jobs), ['gate', 'build-and-push', 'mirror-ghcr']);
+  assert.deepEqual(Object.keys(wf.jobs), ['gate', 'build-and-push', 'mirror-ghcr', 'copy-tags']);
   assert.deepEqual(perms(wf.jobOf('mirror-ghcr').permissions), { contents: 'read', packages: 'write' });
+  assert.deepEqual(perms(wf.jobOf('copy-tags').permissions), { contents: 'read', packages: 'write' });
   assert.equal(wf.jobOf('gate').permissions.packages, undefined, 'gate can write packages');
   assert.equal(wf.jobOf('build-and-push').permissions.packages, undefined, 'build-and-push can write packages');
-  assert.deepEqual(packagesGrants('docker-publish.yml'), ['packages: write'], 'a second packages grant somewhere');
+  assert.deepEqual(packagesGrants('docker-publish.yml'), ['packages: write', 'packages: write'], 'an extra packages grant somewhere');
   assert.ok(!read('docker-publish.yml').some((l) => !isNoise(l) && /write-all/.test(l)));
 });
 
@@ -117,6 +132,8 @@ test('docker-publish.yml: mirror-ghcr runs after a successful build-and-push, on
   // !cancelled() replaces the implicit success(), which a dev push (gate skipped) would turn false.
   assert.match(cond, /!cancelled\(\)/);
   assert.match(cond, /needs\.build-and-push\.result\s*==\s*'success'/);
+  assert.match(cond, /&&\s*needs\.build-and-push\.result\s*==\s*'success'\s*&&/, 'an OR could mirror a skipped or failed build');
+  assert.doesNotMatch(cond, /\|\|/, 'an OR could bypass the build result');
   assert.match(cond, /!inputs\.gate_only/);
   const login = stepIndex(steps, ghcrLogin, 'logging in to ghcr.io');
   assertGhcrLogin(steps[login]);
@@ -128,6 +145,7 @@ test('docker-publish.yml: mirror-ghcr runs after a successful build-and-push, on
   assert.match(val(env, 'TAGS'), /^\$\{\{\s*needs\.build-and-push\.outputs\.tags\s*\}\}$/);
   assert.equal(val(env, 'FORCE'), undefined, 'the publish must never force a release tag');
   assert.equal(val(sub(steps[checkout], 'with'), 'persist-credentials'), 'false');
+  assert.equal(val(steps[copy], 'continue-on-error'), undefined);
 });
 
 test('docker-publish.yml: build-and-push stays Docker Hub only and hands over the digest and BARE tags', () => {
@@ -147,11 +165,13 @@ test('docker-publish.yml: build-and-push stays Docker Hub only and hands over th
   assert.ok(list > build, 'the tag list step runs before the push (it could then block it)');
   assert.equal(val(steps[list], 'continue-on-error'), 'true', 'the tag list step can fail the Docker Hub job');
   assert.ok(runsCheck(steps[list]), 'the tag list is not made by ghcr-mirror.sh --check');
+  assert.equal(val(steps[list], 'continue-on-error'), 'true');
   assert.match(val(sub(steps[list], 'env'), 'TAGS'), /^\$\{\{\s*steps\.meta\.outputs\.tags\s*\}\}$/);
 });
 
 test('weekly-rebuild.yml: the ghcr.io copy comes after the Docker Hub promotion and only after it promoted', () => {
   const wf = workflow('weekly-rebuild.yml');
+  assert.deepEqual(Object.keys(sub(wf.top, 'on')), ['schedule', 'workflow_dispatch']);
   assert.deepEqual(perms(sub(wf.top, 'permissions')), { contents: 'read' });
   assert.deepEqual(Object.keys(wf.jobs), ['rebuild']);
   assert.deepEqual(perms(wf.jobOf('rebuild').permissions), { contents: 'read', packages: 'write' });
@@ -170,6 +190,7 @@ test('weekly-rebuild.yml: the ghcr.io copy comes after the Docker Hub promotion 
   assert.match(val(sub(copy, 'env'), 'DIGEST'), /^\$\{\{\s*steps\.build\.outputs\.digest\s*\}\}$/);
   assert.match(val(sub(copy, 'env'), 'TAGS'), /^\$\{\{\s*matrix\.tag\s*\}\}$/);
   assert.equal(val(sub(copy, 'env'), 'FORCE'), undefined);
+  assert.equal(val(copy, 'continue-on-error'), undefined);
   // The promote step must still write result=promoted only on its PROMOTE path, after the race check.
   const body = runText(steps[promote]);
   const race = body.indexOf('git ls-remote');
@@ -180,47 +201,45 @@ test('weekly-rebuild.yml: the ghcr.io copy comes after the Docker Hub promotion 
   const checkout = ghcrSteps.find(([s]) => usesAction(s, 'actions/checkout'))[0];
   assert.match(val(sub(checkout, 'with'), 'ref'), /^\$\{\{\s*github\.sha\s*\}\}$/);
   assert.equal(val(sub(checkout, 'with'), 'persist-credentials'), 'false');
+  const matrixCheckout = steps.find((s) => usesAction(s, 'actions/checkout') && val(sub(s, 'with'), 'ref') === '${{ matrix.ref }}');
+  assert.ok(matrixCheckout, 'matrix checkout missing');
+  assert.equal(val(sub(matrixCheckout, 'with'), 'persist-credentials'), 'false');
 });
 
-test('ghcr-copy.yml: manual only, one job with packages: write, the weekly-rebuild concurrency group', () => {
-  const wf = workflow('ghcr-copy.yml');
-  assert.deepEqual(Object.keys(sub(wf.top, 'on')), ['workflow_dispatch'], 'a trigger other than workflow_dispatch');
-  const inputs = sub(sub(sub(wf.top, 'on'), 'workflow_dispatch'), 'inputs');
-  assert.deepEqual(Object.keys(inputs), ['tags', 'force']);
-  assert.equal(val(sub(inputs, 'tags'), 'required'), 'true');
-  assert.equal(val(sub(inputs, 'force'), 'type'), 'boolean');
-  assert.equal(val(sub(inputs, 'force'), 'default'), 'false');
-  assert.deepEqual(perms(sub(wf.top, 'permissions')), { contents: 'read' });
-  assert.deepEqual(Object.keys(wf.jobs), ['copy']);
-  assert.deepEqual(perms(wf.jobOf('copy').permissions), { contents: 'read', packages: 'write' });
-  assert.deepEqual(packagesGrants('ghcr-copy.yml'), ['packages: write']);
+test('docker-publish.yml: copy-tags resolves through the script, after validation and login, with weekly concurrency', () => {
+  const wf = workflow('docker-publish.yml');
   const weekly = sub(workflow('weekly-rebuild.yml').top, 'concurrency');
-  const conc = sub(wf.top, 'concurrency');
+  const { job, steps } = wf.jobOf('copy-tags');
+  const conc = sub(job, 'concurrency');
   assert.equal(val(conc, 'group'), val(weekly, 'group'), 'not the weekly-rebuild group: a copy could race a promotion');
   assert.equal(val(conc, 'cancel-in-progress'), 'false');
-  const { steps } = wf.jobOf('copy');
   const check = stepIndex(steps, runsCheck, 'checking the tags');
   const logins = steps.map((s, i) => [s, i]).filter(([s]) => usesAction(s, 'docker/login-action'));
   assert.equal(logins.length, 2, 'expected a Docker Hub and a ghcr.io login');
   for (const [, i] of logins) assert.ok(i > check, 'a login runs before the tags are checked');
   assertGhcrLogin(logins.find(([s]) => ghcrLogin(s))[0]);
-  assert.match(val(sub(steps[check], 'env'), 'TAGS_INPUT'), /^\$\{\{\s*inputs\.tags\s*\}\}$/);
+  assert.match(val(sub(steps[check], 'env'), 'COPY_TAGS'), /^\$\{\{\s*inputs\.copy_tags\s*\}\}$/);
   const copy = stepIndex(steps, runsMirror, 'running ghcr-mirror.sh');
   assert.ok(copy > Math.max(...logins.map(([, i]) => i)));
+  assert.match(runText(steps[copy]), /ghcr-mirror\.sh --resolve/);
+  assert.match(val(sub(steps[copy], 'env'), 'COPY_TAGS'), /^\$\{\{\s*inputs\.copy_tags\s*\}\}$/);
   assert.match(val(sub(steps[copy], 'env'), 'FORCE'), /^\$\{\{\s*inputs\.force\s*\}\}$/);
+  assert.equal(val(steps[copy], 'continue-on-error'), undefined);
+  for (const s of steps.filter((s) => usesAction(s, 'actions/checkout')))
+    assert.equal(val(sub(s, 'with'), 'persist-credentials'), 'false');
 });
 
-test('no ${{ }} inside any run: block of the three workflows (inputs go through env:)', () => {
-  for (const name of ['docker-publish.yml', 'weekly-rebuild.yml', 'ghcr-copy.yml']) {
+test('no ${{ }} inside any run: block of the two workflows (inputs go through env:)', () => {
+  for (const name of ['docker-publish.yml', 'weekly-rebuild.yml']) {
     for (const body of runBodies(allSteps(workflow(name)))) {
       assert.doesNotMatch(body, /\$\{\{/, `${name}: an expression inside run:\n${body}`);
     }
   }
 });
 
-test('every action in the three workflows is pinned to a commit SHA, the same one in each file', () => {
+test('every action in the two workflows is pinned to a commit SHA, the same one in each file', () => {
   const pins = new Map();
-  for (const name of ['docker-publish.yml', 'weekly-rebuild.yml', 'ghcr-copy.yml']) {
+  for (const name of ['docker-publish.yml', 'weekly-rebuild.yml']) {
     const uses = read(name).filter((l) => !isNoise(l)).map((l) => /^\s*(?:- )?uses:\s*(\S+)/.exec(l)?.[1]).filter(Boolean);
     assert.ok(uses.length > 0, `${name}: no actions found`);
     for (const u of uses) {

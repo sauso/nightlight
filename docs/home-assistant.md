@@ -5,7 +5,7 @@
 ## What it will be
 
 - **A custom add-on repository.** You add its address in Home Assistant under **Settings → Add-ons → Add-on store**, then **Repositories** in the menu at the top right, and install Nightlight from the store. It is not part of Home Assistant's own add-on store. *(The repository address will be added here.)*
-- **The same image as every other install,** pulled from `ghcr.io/sauso/nightlight` ([Registries](operations.md#registries)) and pinned to a release version. Updates arrive with Nightlight releases, so the [weekly base-image refresh](operations.md#the-weekly-rebuild) reaches the `:latest` tag before it reaches the add-on.
+- **The same image as every other install,** planned to be pulled from `ghcr.io/sauso/nightlight` ([Registries](operations.md#registries)) and pinned to a release version. Earlier release tags, including `0.49.0`, need a backfill before they are available there. Updates would arrive with Nightlight releases, so the [weekly base-image refresh](operations.md#the-weekly-rebuild) reaches the `:latest` tag before it reaches the add-on.
 - **Home Assistant OS** on `amd64` or `aarch64` (64-bit Arm).
 - **Host networking,** as in the Docker quick start, so finding cameras and low-latency viewing work. Nightlight opens in its own browser tab on port 4000 (`http://<home-assistant-address>:4000`), not inside the Home Assistant sidebar.
 - **Experimental at first.** To see it in the store, turn on **Advanced mode** in your Home Assistant user profile. It stays experimental until it has been installed and tested on a real Home Assistant system.

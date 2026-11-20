@@ -80,6 +80,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ matrix.ref }}
+          # This job's token can write packages (the ghcr.io mirror), so it is not left in .git/config for the
+          # whole build and smoke. Nothing here needs it: `git rev-parse` is local, the e2e harness runs no git,
+          # and the race check's `git ls-remote origin` reads a PUBLIC repository anonymously. If the repository
+          # ever becomes private, that ls-remote fails (and nothing is promoted) until this line goes.
+          persist-credentials: false
 
       - name: Set up QEMU (for building arm64 on an amd64 runner)
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
@@ -430,11 +435,13 @@ jobs:
               echo
               echo "\`docker buildx imagetools create -t sauso/nightlight:$TAG sauso/nightlight@$PREV_AT_PROMOTE\`"
             fi
-            # The ghcr.io line goes through ghcr-copy.yml, never a hand push (docs/operations.md, "Registries").
+            # The ghcr.io line is a copy dispatch of docker-publish.yml (registered, so dev's copy-tags job runs), never
+            # a hand push (docs/operations.md, "Registries"). No --repo: the owner's name prints as *** in a run, so
+            # it would not paste; gh takes the repository from the checkout it runs in.
             if [ "$RESULT" = "promoted" ]; then
               echo
-              echo "To copy :$TAG to ghcr.io (again, or after the rollback above; it copies whatever Docker Hub's :$TAG serves then):"
+              echo "To copy :$TAG to ghcr.io (again, or after the rollback above; it copies whatever Docker Hub's :$TAG serves then, and waits for this run to finish):"
               echo
-              echo "\`gh workflow run ghcr-copy.yml --repo $GITHUB_REPOSITORY --ref dev -f tags=$TAG\`"
+              echo "\`gh workflow run docker-publish.yml --ref dev -f copy_tags=$TAG\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

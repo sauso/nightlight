@@ -79,8 +79,9 @@ a trusted device.
   assembled from its buffer as the app stops, and being killed part-way loses it.
   Stopping normally takes a few seconds; the container exits as soon as it's done, so
   the generous timeout costs nothing.
-- The same image is also published as `ghcr.io/sauso/nightlight`, under the same tags,
-  copied by digest after each publish. Docker Hub stays the primary.
+- The same image is also published as `ghcr.io/sauso/nightlight`, under the same tags
+  from the first mirrored publish (older tags need a backfill), copied by digest after
+  each publish. Docker Hub stays the primary.
   Details: [Registries](https://github.com/sauso/nightlight/blob/main/docs/operations.md#registries).
 - An Unraid template is available - see the GitHub repo below for setup.
 - A random session secret is generated and stored in your data directory (in its
