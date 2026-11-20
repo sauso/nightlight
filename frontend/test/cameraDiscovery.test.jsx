@@ -86,3 +86,19 @@ test('unmount clears a scheduled poll timer', async () => {
   await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
   expect(api.get).toHaveBeenCalledTimes(1);
 });
+
+test('a Nightlight Camera shows Nightlight and ONVIF chips and never Thingino; a Thingino camera shows only its own chip', async () => {
+  const nightlight = { id: 'nl', ip: '192.168.3.20', name: 'Bedroom', rtspPort: 554, sources: ['onvif', 'nightlight'], product: 'Nightlight Camera' };
+  const thingino = { id: 'th', ip: '192.168.1.2', name: 'Hallway', rtspPort: 554, sources: ['mdns'], product: 'Cam One' };
+  api.get.mockResolvedValue({ done: true, candidates: [thingino, nightlight], sourceErrors: [], endsAt: Date.now() });
+  const view = renderAsAdmin(<CameraDiscovery onPick={vi.fn()} />);
+  await view.user.click(screen.getByRole('button', { name: 'Find cameras on my network' }));
+  const results = await screen.findByRole('list', { name: 'Cameras found' });
+  const ours = within(results).getByRole('button', { name: /Bedroom/ });
+  expect(ours).toHaveTextContent('Nightlight');
+  expect(ours).toHaveTextContent('ONVIF');
+  expect(ours).not.toHaveTextContent('Thingino');
+  const theirs = within(results).getByRole('button', { name: /Hallway/ });
+  expect(theirs).toHaveTextContent('Thingino');
+  expect(theirs).not.toHaveTextContent('Nightlight');
+});

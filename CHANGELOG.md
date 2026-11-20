@@ -11,6 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- Find cameras now also finds Nightlight Cameras (the nightlight-cam project) from their `_nightlight-cam._tcp` mDNS announcement and badges them **Nightlight**, next to the existing ONVIF badge. Across VLANs it needs the router to relay mDNS; add by IP otherwise.
 - Offline alert-clip analysis adds Crying, Coughing or Talking badges to sound alerts (including those listed under a night's wake-ups) and clips, with a switch in Recording settings (default on, 0 or 1). Older alerts have no badge. The image grows by about 35 MB (a 16 MB model plus about 15 MB of runtime) and the server uses about 250-315 MB more memory while a clip is analysed, released a minute later; the new runtime is not measured on arm64; coughing and talking labels are best-effort (#1159).
 
 ### Changed

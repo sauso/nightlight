@@ -62,7 +62,10 @@ export async function discoverCameras({
   if (signal?.aborted) abort();
   const timer = setTimeout(abort, timeoutMs);
   const alive = () => !controller.signal.aborted;
-  const add = (ip, source, name, txt = {}) => {
+  // `port` is the RTSP port a record states about itself (a Nightlight Camera's own `_nightlight-cam._tcp` record),
+  // already validated by the caller. It is applied to a candidate another source found first, too: the same camera
+  // answers WS-Discovery and mDNS, and which one arrives first is a race.
+  const add = (ip, source, name, txt = {}, port = undefined) => {
     if (!alive()) return;
     if (!isPrivateLanIPv4(ip)) { dropped++; return; }
     let candidate = candidates.get(ip);
@@ -75,13 +78,17 @@ export async function discoverCameras({
       candidates.set(ip, candidate);
     }
     if (!candidate.sources.includes(source)) candidate.sources.push(source);
-    if (source === 'mdns') {
+    // 'nightlight' is a Nightlight Camera's own announcement. Like Thingino's, its name and TXT fields are what the
+    // owner chose or the firmware wrote, so they win over a WS-Discovery name. It keeps its own source word: the
+    // screen reads 'mdns' as "Thingino".
+    if (source === 'mdns' || source === 'nightlight') {
       candidate.name = cleanName(name, ip);
       const product = cleanTxt(txt?.product);
       const streamer = cleanTxt(txt?.streamer);
       if (product) candidate.product = product;
       if (streamer) candidate.streamer = streamer;
     }
+    if (port) { ports.set(ip, port); candidate.rtspPort = port; }
     onCandidate({ ...candidate, sources: [...candidate.sources] });
   };
   const mdns = async () => {
@@ -107,6 +114,14 @@ export async function discoverCameras({
         for (const ip of record?.addresses || []) add(ip, 'mdns', record.name, record.txt);
       });
       browsers.push(main);
+      // A Nightlight Camera (the nightlight-cam project) announces `_nightlight-cam._tcp` with its RTSP port as the
+      // record's port, so unlike Thingino it needs no separate `_rtsp._tcp` record. A port outside 1-65535 is ignored
+      // (the camera is still listed, on the default 554); TXT goes through cleanTxt in add() like every LAN string.
+      const nightlight = bonjour.find({ type: 'nightlight-cam', protocol: 'tcp' }, (record) => {
+        const port = validPort(record?.port) ? record.port : undefined;
+        for (const ip of record?.addresses || []) add(ip, 'nightlight', record.name, record.txt, port);
+      });
+      browsers.push(nightlight);
       const rtsp = bonjour.find({ type: 'rtsp', protocol: 'tcp' }, (record) => {
         if (!validPort(record?.port)) return;
         for (const ip of record?.addresses || []) {
