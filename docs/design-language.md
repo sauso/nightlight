@@ -707,9 +707,11 @@ avatar (`:focus-visible` only); a click or tap draws nothing, since a second box
 - A protected clip uses a quiet lock badge with the accessible name **Protected** in list metadata.
   The player’s admin-only lock button uses **Protect this clip** / **Unprotect this clip** and a pressed state; disable Delete while protected.
 - `.status-badge` — filled pill, 3px 10px, 12px/600, white text; `--ok` `--live`, `--bad`
-  `--offline`, `--off` `--text-secondary`. `--sm` = 2px 8px / 11px.
-- `.cam-badge` — **outlined** pill (colour + border, transparent fill), 11px/600. Filled = state,
-  outlined = attribute.
+  `--offline`, `--off` `--text-secondary`. `--sm` = 2px 8px / 11px. **Drift (#1189):** the white text is right by day
+  but sits on a pale fill at night (1.64:1 on `--live`), so the night theme should use `--on-accent`.
+- An **outlined** pill is an attribute, not a state: transparent fill, 1px `--accent-line` border, `--accent-text`,
+  11px/600, 2px 8px (the camera card's capability chips, `.camera-device__chips span`, with a check icon). Filled = state,
+  outlined = attribute. (The `.cam-badge` class this bullet used to name no longer exists.)
 - A badge that follows a label as **inline text** (the Protected lock and the audio Crying / Coughing / Talking badge in a
   night's wake-ups list) needs `margin-left: 6px`, or it touches the word before it (seen on a phone, 2026-11-19). A badge
   inside a flex row takes the row's `gap` instead (the alert lists).
