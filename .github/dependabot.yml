@@ -33,6 +33,13 @@ updates:
     target-branch: "dev"
     schedule:
       interval: "weekly"
+    ignore:
+      # WHY: onvif 1.0 is a rewrite (unwrapped responses, renamed active-profile properties, explicit close()), not a bump.
+      # lib/onvif.js is built on the 0.x Cam class and works around cameras with minimal ONVIF servers (Thingino, Sonoff)
+      # and drives PTZ, and no test talks to a real camera. The migration is a planned T2 change tested against a real
+      # camera. Minor and patch updates of 0.x still come through.
+      - dependency-name: "onvif"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/frontend"
