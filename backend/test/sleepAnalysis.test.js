@@ -2400,10 +2400,13 @@ test('the pre-window nap guard reads cleared sound in the anchored view', () => 
 });
 
 test('the no-bridge retry reads cleared sound after its first settle fails', () => {
-  layGuardRetryNight({ noise: true });
-  for (let m = 18; m < 23; m++) setOnsetMinute(at(19, m), 0, STILL_OCCUPIED, 12);
-  setOnsetMinute(at(19, 20), 0.001, 0.05, 12);
-  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:23');
+  layGuardRetryNight();
+  // The first bridged settle fails the later awakening guard. The next blip
+  // ends at 19:18, leaving sound at 19:19-20 beside only that blip. This run
+  // is too short to be a wake, so the no-bridge retry must read the cleared view.
+  setOnsetMinute(at(19, 18), 0.001, 0.05);
+  for (let m = 19; m < 21; m++) setOnsetMinute(at(19, m), 0, STILL_OCCUPIED, 12);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:19');
 });
 
 test('a murmuring child with recurring faint movement keeps the late settle', () => {
@@ -2480,6 +2483,20 @@ test('exact peak and mean caps are inclusive; one step above either keeps sound 
   for (const [level, peak, expected] of [[ONSET_BLIP_MAX_LEVEL, ONSET_BLIP_MAX_PEAK, '20:09'],
     [ONSET_BLIP_MAX_LEVEL + 0.000001, ONSET_BLIP_MAX_PEAK, '20:20'],
     [ONSET_BLIP_MAX_LEVEL, ONSET_BLIP_MAX_PEAK + 0.000001, '20:20']]) {
+    layWitnessCase({ level, peak });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected, `${level}/${peak}`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('measured onset blip caps stay at 0.002 mean and 0.1 peak', () => {
+  // 0.002 is the smallest measured cap that also improves the owner-reviewed night
+  // (see the source constant); changing either calibrated cap needs a new whole-night A/B.
+  for (const [level, peak, expected] of [
+    [0.002, 0.05, '20:09'], [0.0021, 0.05, '20:20'],
+    [0.001, 0.1, '20:09'], [0.001, 0.1001, '20:20'],
+  ]) {
     layWitnessCase({ level, peak });
     assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected, `${level}/${peak}`);
     db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
