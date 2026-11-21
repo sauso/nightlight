@@ -26,7 +26,7 @@
     "http-proxy-middleware": "^4.2.2",
     "jsonwebtoken": "^9.0.2",
     "mqtt": "^5.16.1",
-    "onnxruntime-web": "1.22.0",
+    "onnxruntime-web": "1.31.1",
     "onvif": "^0.8.5",
     "otplib": "^13.6.0",
     "qrcode": "^1.5.4",
