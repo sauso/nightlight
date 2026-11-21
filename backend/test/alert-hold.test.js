@@ -29,7 +29,8 @@ test('a persistent live onset releases the hold before its unchanged 45-minute c
   flag('a', 1);
   const base = Math.floor(Date.now() / 60_000) * 60_000;
   const send = (ms) => handleMinute({ cameraId: 'ca', bucketStart: new Date(ms).toISOString().slice(0, 19).replace('T', ' '), motionPeak: 1, soundPeak: 0 });
-  _setLiveNightProviderForTest(() => ({ in_progress: true, analysis_camera_id: 'ca', onset_at: new Date(base).toISOString() }));
+  _setLiveNightProviderForTest((_id, _date, at) => ({ in_progress: true, analysis_camera_id: 'ca',
+    onset_at: new Date(base).toISOString(), as_of: new Date(at).toISOString() }));
   try {
     assert.equal(shouldHold({ id: 'ca' }, 1000), true);
     send(base - 120_000);
