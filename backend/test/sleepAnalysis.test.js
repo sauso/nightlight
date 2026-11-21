@@ -14,11 +14,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
 process.env.DATA_DIR = TMP;
 
-const { computeNight, computeAndStoreNight, runNightlySleepJob, detectMidnightEpisodes, quietStretchBeforeExit, SCORING_ALGO } = await import('../src/lib/sleepAnalysis.js');
+const { computeNight, computeAndStoreNight, runNightlySleepJob, detectMidnightEpisodes, quietStretchBeforeExit, SCORING_ALGO,
+  ONSET_BLIP_MAX_LEVEL, ONSET_BLIP_MAX_PEAK } = await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
 const CHILD = 'test-child';
@@ -2319,6 +2321,249 @@ test('a cry-labelled stir is never bridged', () => {
   const minute = layBridgeNight([[8, 9]]);
   cryAlert(minute(8));
   assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:18');
+});
+
+// #1186 follow-up: only sound's onset witness changes. The moving minute itself
+// remains active and consumes the existing bridge budget.
+const setOnsetMinute = (time, level, peak, sound = 0.5, outside = 0.0004) =>
+  db.prepare(`UPDATE activity_samples SET motion_level = ?, motion_peak = ?, sound_peak = ?, motion_out_peak = ?
+    WHERE camera_id = ? AND bucket_start = ?`).run(level, peak, sound, outside, CAM, sqlTime(time));
+
+function layBlipOnsetNight() {
+  layNight(at(19, 30), at(7, 0, 1), {
+    move: [[at(20, 3), at(20, 6)], [at(20, 14), at(20, 25)]],
+    still: 0,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(20, 3)));
+  insertTransition.run(CAM, 'out_of_bed', 0.5, sqlTime(at(20, 20)));
+  for (let m = 14; m <= 24; m++) {
+    setOnsetMinute(at(20, m), 0.05, 0.26, 0.5, m >= 19 && m <= 21 ? 0.085 : 0.0004);
+  }
+  setOnsetMinute(at(20, 33), 0, 0.001, 0.5, 0.035);
+  setOnsetMinute(at(20, 35), 0.002, 0.069);
+  setOnsetMinute(at(20, 44), 0, 0.05, 6.2);
+  setOnsetMinute(at(20, 45), 0, 0, 6.1);
+  setOnsetMinute(at(20, 46), 0, 0, 7.5);
+  setOnsetMinute(at(20, 53), 0.001, 0.076, 5.8);
+  setOnsetMinute(at(21, 0), 0, 0, 8.2);
+  setOnsetMinute(at(21, 2), 0.001, 0.057);
+  for (const [m, peak] of [[9, 8.9], [10, 6.1], [11, 2.8], [12, 8.8]]) {
+    setOnsetMinute(at(21, m), 0, m === 11 ? 0.014 : 0, peak);
+  }
+}
+
+test('faint bed peaks beside sound allow the 20:34 onset after a real visit', () => {
+  layBlipOnsetNight();
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.onset_at), '20:34');
+  assert.equal(night.status, 'ok');
+  assert.ok(!night.timeline.some((row) => hhmm(row.t) >= '20:34' && hhmm(row.t) < '21:13' && row.inWake));
+});
+
+test('a fourth blip in the first window exceeds the shared bridge budget', () => {
+  // No sound: four bridged blips test the cap without forming a wake that the
+  // separate overlap veto would reject first.
+  const minute = layBridgeNight([]);
+  for (const offset of [2, 5, 8, 12]) setOnsetMinute(minute(offset), 0.001, 0.05);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:12');
+});
+
+test('cleared sound with a wake start vetoes the first onset window', () => {
+  const minute = layBridgeNight([]);
+  for (let offset = 8; offset < 20; offset++) {
+    setOnsetMinute(minute(offset), 0, STILL_OCCUPIED, 12);
+  }
+  for (const offset of [9, 13, 17]) setOnsetMinute(minute(offset), 0.001, 0.05, 12);
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.onset_at), '20:29');
+});
+
+test('a wake run beginning before a cleared-sound window vetoes its overlap', () => {
+  const minute = layBridgeNight([]);
+  for (let offset = -4; offset < 11; offset++) {
+    setOnsetMinute(minute(offset), 0, STILL_OCCUPIED, 12);
+  }
+  for (const offset of [-2, 2, 6, 10]) setOnsetMinute(minute(offset), 0.001, 0.05, 12);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+});
+
+test('the pre-window nap guard reads cleared sound in the anchored view', () => {
+  layNight(at(17, 30), at(7, 0, 1), {
+    move: [[at(17, 30), at(18, 15)]], still: STILL_OCCUPIED,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 10)));
+  // Keep the noise beyond the first 15 quiet minutes: the overlap veto should
+  // leave this fixture to exercise hasAwakening's later pre-window scan.
+  for (let m = 31; m < 54; m++) setOnsetMinute(at(18, m), 0, STILL_OCCUPIED, 12);
+  for (const m of [33, 41, 49]) setOnsetMinute(at(18, m), 0.001, 0.05, 12);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:15');
+});
+
+test('the no-bridge retry reads cleared sound after its first settle fails', () => {
+  layGuardRetryNight();
+  // The first bridged settle fails the later awakening guard. The next blip
+  // ends at 19:18, leaving sound at 19:19-20 beside only that blip. This run
+  // is too short to be a wake, so the no-bridge retry must read the cleared view.
+  setOnsetMinute(at(19, 18), 0.001, 0.05);
+  for (let m = 19; m < 21; m++) setOnsetMinute(at(19, m), 0, STILL_OCCUPIED, 12);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:19');
+});
+
+test('a murmuring child with recurring faint movement keeps the late settle', () => {
+  for (const interval of [4, 5, 8]) {
+    layNight(at(19, 30), at(7, 0, 1), {
+      move: [[at(19, 30), at(20, 9)]], still: STILL_OCCUPIED,
+    });
+    insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(20, 0)));
+    for (let minute = 9; minute < 90; minute++) {
+      setOnsetMinute(at(20, minute), 0, STILL_OCCUPIED, 12);
+    }
+    for (let minute = 13; minute < 90; minute += interval) {
+      setOnsetMinute(at(20, minute), 0.001, 0.05, 12);
+    }
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '21:30', `${interval}-minute blips`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('sustained sound beside blips still contributes to a wake', () => {
+  layBridgeNight([]);
+  for (let m = 0; m < 20; m++) setOnsetMinute(at(22, m), 0, STILL_OCCUPIED, 12);
+  for (const m of [2, 7]) setOnsetMinute(at(22, m), 0.001, 0.05, 12);
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.wake_count, 1);
+  assert.equal(night.timeline.find((row) => row.t === sqlTime(at(22, 0))).state, 'active');
+  assert.equal(night.timeline.find((row) => row.t === sqlTime(at(22, 19))).state, 'quiet');
+});
+
+test('a real duplicate before a blip keeps the minute as a sound witness', () => {
+  layWitnessCase({ level: 0.02, peak: 0.2, duplicate: { level: 0.001, peak: 0.05 } });
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+});
+
+test('an outside reading beside a blip blocks the onset through its sound witness', () => {
+  const minute = layBridgeNight([]);
+  db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(minute(0)));
+  setOnsetMinute(minute(-1), 0.001, 0.05, 0.5, 0.2);
+  setOnsetMinute(minute(1), 0, STILL_OCCUPIED, 12);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:11');
+});
+
+test('a cry just beyond the window still witnesses its last sound minute', () => {
+  layNight(at(19, 30), at(7, 0, 1), {
+    move: [[at(19, 30), at(6, 45, 1)]], still: STILL_OCCUPIED,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(6, 45, 1)));
+  setOnsetMinute(at(6, 59, 1), 0, STILL_OCCUPIED, 12);
+  cryAlert(at(7, 1, 1));
+  assert.notEqual(hhmm(computeNight(CHILD, DATE).onset_at), '06:45');
+});
+
+test('three minutes of real movement still block the put-down window', () => {
+  const minute = layBridgeNight([]);
+  for (const offset of [8, 9, 10]) setOnsetMinute(minute(offset), 0.02, 0.05);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+});
+
+function layWitnessCase({ level = 0.001, peak = 0.05, outside = 0.0004,
+  duplicate = null, cry = false, soundOffset = 9, soundCount = 2 } = {}) {
+  const minute = layBridgeNight([]);
+  setOnsetMinute(minute(8), level, peak, 0.5, outside);
+  setOnsetMinute(minute(soundOffset), 0, STILL_OCCUPIED, 12);
+  if (soundCount === 2) setOnsetMinute(minute(soundOffset + 1), 0, STILL_OCCUPIED, 12);
+  if (duplicate) insertFull.run(CAM, sqlTime(minute(8)), duplicate.level,
+    duplicate.peak, 0.5, duplicate.outside ?? 0.0004);
+  if (cry) cryAlert(minute(soundOffset));
+  return minute;
+}
+
+test('exact peak and mean caps are inclusive; one step above either keeps sound active', () => {
+  for (const [level, peak, expected] of [[ONSET_BLIP_MAX_LEVEL, ONSET_BLIP_MAX_PEAK, '20:09'],
+    [ONSET_BLIP_MAX_LEVEL + 0.000001, ONSET_BLIP_MAX_PEAK, '20:20'],
+    [ONSET_BLIP_MAX_LEVEL, ONSET_BLIP_MAX_PEAK + 0.000001, '20:20']]) {
+    layWitnessCase({ level, peak });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected, `${level}/${peak}`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('measured onset blip caps stay at 0.002 mean and 0.1 peak', () => {
+  // 0.002 is the smallest measured cap that also improves the owner-reviewed night
+  // (see the source constant); changing either calibrated cap needs a new whole-night A/B.
+  for (const [level, peak, expected] of [
+    [0.002, 0.05, '20:09'], [0.0021, 0.05, '20:20'],
+    [0.001, 0.1, '20:09'], [0.001, 0.1001, '20:20'],
+  ]) {
+    layWitnessCase({ level, peak });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected, `${level}/${peak}`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('outside movement and null mean are never blips', () => {
+  for (const options of [{ outside: 0.2 }, { level: null }]) {
+    layWitnessCase(options);
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('a real duplicate overrides a blip; a quiet duplicate does not', () => {
+  for (const [duplicate, expected] of [
+    [{ level: 0.02, peak: 0.2 }, '20:20'],
+    [{ level: 0, peak: STILL_OCCUPIED }, '20:09'],
+  ]) {
+    layWitnessCase({ duplicate });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('cry near a blip stays active and cannot bridge', () => {
+  layWitnessCase({ cry: true });
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+});
+
+test('real movement witnesses sound two minutes away, not three; a blip witnesses neither', () => {
+  for (const [level, soundOffset, expected] of [
+    [0.02, 6, '20:16'], [0.02, 5, '20:09'],
+    [0.001, 6, '20:09'], [0.001, 5, '20:09'],
+  ]) {
+    layWitnessCase({ level, soundOffset, soundCount: 1 });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected, `${level}/${soundOffset}`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('a mid-night blip with five sound minutes remains a wake on the timeline', () => {
+  layBridgeNight([]);
+  for (let m = 0; m < 5; m++) setOnsetMinute(at(22, m), 0, STILL_OCCUPIED, 12);
+  setOnsetMinute(at(22, 2), 0.001, 0.05, 12);
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.onset_at), '20:09');
+  assert.equal(night.wake_count, 1);
+  for (let m = 0; m < 5; m++) {
+    assert.equal(night.timeline.find((row) => row.t === sqlTime(at(22, m))).state, 'active');
+  }
+});
+
+test('an unchanged onset keeps the entire night object with a mid-night blip', () => {
+  layBridgeNight([]);
+  for (let m = 0; m < 5; m++) setOnsetMinute(at(22, m), 0, STILL_OCCUPIED, 12);
+  setOnsetMinute(at(22, 2), 0.001, 0.05, 12);
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  // The complete returned object, including wake and timeline arrays, is pinned;
+  // the same hash was checked against the old source for this unchanged-onset case.
+  assert.equal(createHash('sha256').update(JSON.stringify(night)).digest('hex'),
+    '9ed1709068583ae93b6212ac5a04fb459b57ae69200b178b59ee701f819995f3',
+    'To regenerate, hash JSON.stringify(night) here; compare the full old/new night objects, especially onset_at, in_bed_at, wake_count and timeline, before replacing the hash.');
 });
 
 test('the unanchored onset search is unchanged with the same stirs', () => {

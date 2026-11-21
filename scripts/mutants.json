@@ -26771,8 +26771,8 @@
   {
     "label": "#1159 witness window widened to three minutes",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "i - ONSET_SOUND_MOTION_WITHIN_MIN);",
-    "replace": "i - (ONSET_SOUND_MOTION_WITHIN_MIN + 1));",
+    "find": "const nearEvidence = (i) => {\n    for (let j = Math.max(0, i - ONSET_SOUND_MOTION_WITHIN_MIN);",
+    "replace": "const nearEvidence = (i) => {\n    for (let j = Math.max(0, i - (ONSET_SOUND_MOTION_WITHIN_MIN + 1));",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#1159: a cry (three minutes away|exactly three minutes)"
@@ -26825,7 +26825,7 @@
   {
     "label": "#1159 onset uses sustained sound exception",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "activeForOnset[i] = nearEvidence(i);",
+    "find": "activeForOnset[i] = nearNonBlipEvidence(i);",
     "replace": "activeForOnset[i] = soundWitnessed(i);",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],

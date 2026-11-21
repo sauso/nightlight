@@ -318,16 +318,40 @@ sound can be part of the same stir and uses the same limits. Bridged minutes do 
 as watched quiet minutes. The asleep time is the first watched quiet minute in the stretch.
 This applies only after a recorded put-down; the search without one is unchanged.
 
-These limits were set from one child's camera in one house and have not been measured
+For this put-down search, faint in-bed blips with a low mean level no longer make
+the sound around them count as movement for onset, unless that sound is part of a wake.
+Here faint means a bed movement peak above 0.01 and at most 0.1, with a mean level at
+most 0.002 and no outside-bed movement. The bed movement itself still uses one of the
+3 bridge minutes; sound cleared this way counts as watched quiet. Real movement or a
+crying label within 2 minutes still witnesses sound, and an outside-bed reading is
+never a faint blip. A candidate stretch containing cleared sound is rejected if it
+overlaps any part of a qualifying wake, so settling is not relabelled as a wake.
+These measured values come from two cameras in one house, without a natural dividing line:
+movement levels are fractions of the painted zone, so zone size and camera distance
+affect them. They have not been measured elsewhere.
+
+For this sound-and-blip change, the whole-night comparison moved onset earlier on
+3 of 196 staging nights and 3 of 194 production nights. In staging, the moves were
+20:19 to 19:56 on 12 November, 20:09 to 20:01 on 20 November, and 21:13 to 20:34
+on 21 November 2026. The reviewed 20 November night moved from 9 minutes late to
+1 minute late. None moved later, changed status, or gained a wake; every unmoved
+night had an identical result. Other differences can start from the new onset on,
+including after the old onset.
+
+The earlier short-stir bridge limits were set from one child's camera in one house and have not been measured
 elsewhere. A child lying awake and still, moving in the bed only briefly while the room
 is otherwise quiet, can be shown as asleep too early. On the two databases' changed
-nights, onset moved 2 to 142 minutes earlier; the two owner-reviewed nights moved
+nights for that earlier bridge, onset moved 2 to 142 minutes earlier; the two owner-reviewed nights moved
 124 and 151 minutes closer to the reported time. Another night changed from a broken
-06:16 onset to 20:49. The put-down is the only bound. A noisy room can stretch stirs past 2 minutes, making the
-bridge less likely. A bed zone over periodic movement from a fan, mobile, curtain or pet,
+06:16 onset to 20:49. The put-down is the only bound. A noisy room whose only movement is faint
+bed readings can still bridge. A bed zone over periodic movement from a fan, mobile, curtain or pet,
 or a parent patting the child without enough movement outside the bed, can make it apply
 too often. In one probe, movement about once every 5 minutes all night changed
 `no_sleep` to an onset 2 minutes after the put-down and 673 minutes asleep.
+In a separate murmuring-child probe, sound from 20:09 to 21:30 with faint movement
+every 4, 5 or 8 minutes kept onset at 21:30 with the wake-overlap check. A fan,
+mobile or pet with a low mean movement level that does not form a wake can still
+make onset read too early.
 [Correct a wrong asleep time in the morning review](#correcting-a-night).
 If a cry label is added after the alert clip is analysed, a stir bridged live can
 be withdrawn a minute or two later when that label arrives.
