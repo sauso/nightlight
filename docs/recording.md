@@ -152,12 +152,23 @@ that gap without making alerts noisier.
 **What is and isn't recorded**
 
 - Only for children with **Track sleep** on (per child, under the child's settings).
-- Only **once your child is actually asleep** — settling at bedtime is never recorded. "Asleep" here
-  means **15 quiet minutes in a row that the camera actually reported**; a minute the camera reported
-  nothing for starts the count again, and so does a minute with sound but no video when the camera's video
-  has stalled (such a minute is not counted as seen, as on the sleep timeline). That is stricter than the
-  sleep timeline's own rule, so after an outage in the evening recording can start later than the
-  timeline's bedtime (a camera that drops a minute more often than about every 15 minutes never starts).
+- Only once the watcher has detected sleep. The child's sleep camera can start from the current night's
+  onset after it persists on two consecutive minute calculations; every camera can also start after
+  **15 quiet minutes in a row that the camera actually reported**. A missing minute or a video stall
+  breaks that quiet count. The live-onset path can cover wakes during a restless settle; in a replay
+  with the real watcher code over stored minute rows from 60 staging and 62 production
+  child-nights, wakes with a clip rose from 330 to 385 and 341 to 390. Clips not near a wake
+  rose by 53 and 47. All 60 and 62 nights armed (previously 51 and 53); the arm was 16 minutes
+  after today's onset at the median (previously 36), 24 minutes at the 90th percentile
+  (previously 333 and 173). Four nights in each database took over 30 minutes (previously
+  28 and 29): three onsets predated the window, and one was visible only in hindsight.
+  No live-onset arm preceded the owner's onset. Wakes beginning before an arm or on an unarmed
+  night fell from 171 to 9 and 159 to 9; 3 and 4 counted wakes were already underway at the
+  arm, missing their opening. The replay used today's window and camera settings for every
+  night, one camera per child, minute-end clip anchors (live clips can start about 57 seconds
+  earlier), no simulated restarts and contained one cry event. A live-night calculation took
+  2 ms median, 8 ms at the 95th percentile and up to about 250 ms on a development PC;
+  server hardware was not measured. Results have not been measured on other installations.
   Once started, a gap does not stop it. If the server restarts during that sleep window, the saved
   asleep result lets wake-clip recording resume at once, which may mean more wake clips after a restart.
 - Only for a real wake-up: a brief **stir is ignored**, using the same threshold the sleep timeline
@@ -169,7 +180,7 @@ that gap without making alerts noisier.
   exactly as on the timeline. This applies to a camera that has delivered video since the server started; a
   camera with no video at all keeps using its sound. The numbers (3 minutes, 5 active minutes, 15 quiet
   minutes) are fixed, not settings, are the sleep timeline's own, and were tuned on nights from two cameras in
-  one house (not validated elsewhere). See "A wake recording does not bridge a gap in the readings" in
+  one house (not validated elsewhere). See "A wake recording does not bridge a long gap in the readings" in
   [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 - The clip starts at the **beginning** of the wake-up, not when it was confirmed — the opening is the
   part that explains why. Precisely: it starts about 2 to 3 seconds before the first frame that showed movement or
@@ -192,7 +203,9 @@ have no clip and a clip can sit where the timeline shows no wake. The two apply 
 not the same rules: the nightly analysis also counts movement **outside the bed** as activity (the live
 watcher sees only bed motion and sound), scores **one camera** (the child's primary), and applies the
 put-down and onset rules (including how it treats sound around bedtime and just after falling asleep)
-that the live watcher does not have. The live watcher tracks **every camera assigned to the child**.
+that the live watcher does not have. The live watcher tracks **every camera assigned to the child**,
+but only the sleep camera can arm from the night's onset. Once armed, a withdrawn onset does
+not stop recording for that window.
 
 **Settings → Camera and recording → Recording → Wake clips**
 

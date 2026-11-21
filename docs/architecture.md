@@ -231,7 +231,7 @@ condition, manual recording availability, mirrors `can_record` in `routes/camera
 schedule and cooldown checks. With Track sleep and Hold alerts until asleep on, alerts are dropped outside
 the sleep window because the watcher cannot detect sleep there; no cap clock starts. Inside the window,
 the first held alert starts a per-child, per-window 45-minute clock, after which alerts may pass even
-without detected sleep. Detected sleep allows alerts immediately, including after a restart in the same window: the watcher saves each camera's asleep result with its child and window start. A restart before sleep is detected starts a fresh cap. The hold does not affect the
+without detected sleep. The child's sleep camera can detect sleep from two consecutive live onset results at least a minute apart, while every camera can use 15 observed quiet minutes. Detected sleep allows alerts immediately, including after a restart in the same window: the watcher saves each camera's asleep result with its child and window start. A restart before sleep is detected starts a fresh cap. A withdrawn onset does not restore the hold. The hold does not affect the
 `alerting_now` readiness field or camera-offline, long-silence and sleep-report alerts.
 
 ## Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)

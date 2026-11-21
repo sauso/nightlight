@@ -521,7 +521,7 @@ the motion alert, which uses the same helper.
   that keeps stalling: its quiet period assumes an exit confirms 6 s after it opens, which a restart now
   lengthens. Suspected, not measured; refusing the switch while a candidate is pending is a follow-up.
 - **The wake watcher (#448) had the same "active, outage, active" shape; it is fixed separately.** See "A wake
-  recording does not bridge a gap in the readings" below.
+  recording does not bridge a long gap in the readings" below.
 - A backward clock step of S seconds still suppresses a bed exit or entry (their 2-minute pause) and an ONVIF
   or MQTT motion alert for up to S plus the cooldown (pre-existing, filed separately, #582). The **frame-diff**
   motion alert is different since #454: after a one-way backward step its cooldown is clamped to the new time,
@@ -743,7 +743,7 @@ closing sentence.
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.
 
-## A wake recording does not bridge a gap in the readings, and settling needs 15 unbroken minutes
+## A wake recording does not bridge a long gap in the readings
 
 **What you see:** wake clips (docs/recording.md, "Wake clips") are recorded by the live wake watcher, which only
 records and never alerts. Three things about when it decides:
@@ -757,9 +757,9 @@ records and never alerts. Three things about when it decides:
   Before issue #448 the watcher counted readings, not minutes, so five active minutes spread over about forty
   minutes of mostly missing readings could be recorded as one wake,
   while the sleep timeline (which has always counted minutes) showed no wake at all.
-- **The watcher starts watching only after 15 consecutive quiet minutes that were actually read.** A hole
-  restarts that count. So after an outage in the evening the watcher can start watching later than the
-  sleep timeline's bedtime, and a wake in between has no clip.
+- **The child's sleep camera starts watching when the current night's onset appears on two consecutive
+  minute computes, or after 15 observed quiet minutes.** Other cameras assigned to the child still
+  need 15 observed quiet minutes. A hole restarts the quiet count and breaks the onset streak.
 - **A video stall is a hole even while the sound keeps arriving (issue #588).** Before #588 the watcher read
   such a minute as watched: a quiet one counted toward the 15 minutes, so the watcher could start watching a
   child nobody could see, and a loud one counted as activity, so a noise during a stall could complete a wake
@@ -781,18 +781,29 @@ progress toward arming restarts, so a wake that follows a camera reconnect is st
 |---|---|---|
 | A minute with no reading in a wake | Not active; bridged up to 3 in a row | The same |
 | A minute with sound but no video (a video stall) | Unknown: not active, its sound not used even when loud; bridged up to 3 in a row | The same since issue #588 (a hole; before #588 it was read as watched). Only on a camera that has delivered video since the server started |
-| Deciding the child has settled | 15-minute window with no active minute and at least 8 minutes actually read quiet | **15 consecutive minutes read quiet**; one missing minute, or one minute of a video stall, starts the count again |
+| Deciding the child has settled | 15-minute window with no active minute and at least 8 minutes actually read quiet | Sleep camera: two consecutive live onset results, at least a minute apart, or 15 observed quiet minutes. Other cameras: 15 observed quiet minutes. A missing minute or video stall breaks progress |
 | Settled, then a hole | n/a | Stays watching |
 
-The live rule is stricter on purpose: its only job is to keep bedtime settling out of the recorder, so the
-safe mistake is to start late (a missed clip, never an alert). The cost, stated: **a camera that drops a
-minute more often than about every 15 minutes never starts watching and records no wake clips.** Any hole
-restarts the count, even a single missing minute. On the saved 30 days of the two cameras of one house there
-were roughly 20-25 holes per camera per month on one database and 45-50 on the other, most of them single
-missing minutes. What shows a night is rarely delayed is replaying those 30 days with the old and the new
-rule: the start of watching differed on exactly one night in four camera-months (8 minutes later). The rate
-on another install is unknown. The nightly job uses the looser rule because requiring a fully read window made
-flaky cameras lose whole nights (issue #442).
+The quiet fallback remains useful when the live onset is absent or its compute fails. The watcher
+stays armed for the rest of the window even if an onset is withdrawn. With **Hold alerts until asleep**
+on, that leaves the hold released, allowing alerts through. A wrong live onset can arm early: the
+live calculation's occupancy check (`bedOccupiedAfter`, #669) fails open while its 150-minute
+horizon runs past now. Its microphone discount (#904) does not apply until 480 timeline minutes
+have accumulated. A child with more than one camera was not measured.
+
+Replaying the real watcher code over stored minute rows from 60 staging and 62 production
+child-nights, the sleep camera armed on all 60 and all 62 (previously 51 and 53). The arm was
+16 minutes after today's onset at the median (previously 36), and 24 minutes at the 90th
+percentile (previously 333 staging and 173 production). Four nights per database took over
+30 minutes (previously 28 and 29): three onsets predated the window, and one was visible
+only in hindsight. No live-onset arm preceded the owner's onset. Wakes with a clip rose from
+330 to 385 staging and 341 to 390 production; clips not near a wake rose by 53 and 47.
+Wakes starting before the arm or on a never-armed night fell from 171 to 9 and 159 to 9;
+3 and 4 counted wakes were already underway when the watcher armed, so their opening was missed.
+The replay used today's settings for every night, one camera per child, minute-end clip
+anchors and no simulated restarts. Live clips can start about 57 seconds earlier. The data
+contained one cry event. A compute took 2 ms median, 8 ms at the 95th percentile and about
+250 ms at worst on a development PC; server hardware was not measured.
 
 **The numbers were tuned on two cameras in one house and not validated anywhere else.** 3, 5 and 15 are the
 nightly job's own constants (`sleepAnalysis.js`), shared by reference with the live watcher, so a retune of
@@ -862,10 +873,10 @@ one moves both. They are constants, not settings, so there is no default to chan
 
 **What to do:** nothing. In the log, `[wake] "<camera>" settled — watching for wakes` marks the start of
 watching. After a restart in the same sleep window, `[wake] resumed asleep latch` means the camera was already
-settled; it need not wait another 15 quiet minutes. No `settled` line all night can mean the camera never had
-15 unbroken minutes, that it resumed a saved asleep result, or that the watcher was still armed from the previous
+settled; it need not meet either arming rule again. No `settled` line all night can mean the camera never met
+an arming rule, that it resumed a saved asleep result, or that the watcher was still armed from the previous
 night (it settles only once, so it logs nothing the second time).
-To narrow it down, look for the line a hole writes while the watcher is still settling:
+To narrow down a quiet-rule delay, look for the line a hole writes while the watcher is still settling:
 `[wake] "<camera>" settling restarted: readings N min apart after M quiet minute(s)`. N is the distance in minutes
 between the two OBSERVED readings around the hole (a minute with sound but no video is not an observed reading, so
 the minutes of a video stall are part of N) and M is how many quiet minutes it threw away (a forward jump of the
@@ -881,10 +892,13 @@ back by that limit are counted onto the next line (`; K more since the last such
 quiet minute(s)`), but a count still pending when the camera starts watching, or when its sleep window closes, is
 never printed. How to read a night: restart lines repeating about every 15 minutes with no `settled` line
 after them mean holes keep sending that camera's count back to zero. Read the M values, not only whether lines
-appear: M close to 15 means one missing minute each time was all that stood between the camera and watching
-(the strict rule is what is in the way), while small M values say little on their own, because a restless
+appear: M close to 15 means one missing minute each time was all that stood between the camera and the
+quiet fallback; the sleep camera may still arm from a persistent live onset. A camera that drops
+about one minute in every 15 may never start watching under the quiet rule, including a
+secondary camera. Small M values say little
+on their own, because a restless
 child with active minutes in between would not have settled with every hole filled either. No restart line
-and no `settled` line means the child never had 15 quiet minutes, the watcher resumed a saved asleep result,
+and no `settled` line means the child never met either arming rule, the watcher resumed a saved asleep result,
 the watcher was still armed from the night before, or only the silent cases above applied. A
 run dropped at a gap logs `run ended (readings N min apart)` when that run had taken a ring hold (N is the
 distance between the two readings, which is also what a forward jump of the server's clock looks like); a run
@@ -1672,11 +1686,11 @@ In bed 18:55; markers actually began 18:47), and on prod 2026-11-19 and
 stir bridged while the night is live can be withdrawn a minute or two later when
 the label arrives, changing the displayed onset.
 
-**Still open:** the live wake watcher has its own rule requiring 15 consecutive quiet
-minutes before it records a wake clip. It may latch about 2 hours after the new onset,
-so the card can say asleep while a wake counted by the nightly calculation has no
-clip. Aligning the watcher is a planned follow-up. The alert hold is off by default
-and its inside-window limit is 45 minutes, so this gap has little effect on alerts.
+**The wake-watcher gap is closed for the sleep camera:** it can now arm from two
+consecutive live onset results instead of waiting for 15 quiet minutes. Other cameras
+still use the quiet rule. A withdrawn onset does not disarm a watcher, and live onset
+can still be wrong; see the wake-recording limits above. The alert hold is off by default
+and its inside-window limit remains 45 minutes.
 For up to 28 days, "usual" can also mix nights saved under the earlier and newer
 onset rules; a comparison can change because of the rule alone.
 

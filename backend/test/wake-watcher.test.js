@@ -5,7 +5,7 @@
 // failure modes are both silent: record every stir and you quietly fill a disk that is already 98%
 // full, or record nothing and the morning timeline still has no evidence behind it. Neither shows up
 // in a log you'd read. So the state machine is tested directly, one synthetic minute at a time.
-import { test, before, after, beforeEach, describe } from 'node:test';
+import { test, before, after, beforeEach, describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,14 +29,14 @@ const emptyBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-nobin-'));
 process.env.PATH = emptyBinDir;
 
 const { default: db } = await import('../src/db.js');
-const { SLEEP_THRESHOLDS, childWindowActiveNow, childWindowKeyNow } = await import('../src/lib/sleepAnalysis.js');
+const { SLEEP_THRESHOLDS, childWindowActiveNow, childWindowKeyNow, currentNightDate, lastCompletedNightDate } = await import('../src/lib/sleepAnalysis.js');
 const { startSegmenter, stopAllSegmenters, isSegmenterRunning, ringDepthMs, setRingDepth, extractClip, clipCoverStartMs, ringOldestStartMs } =
   await import('../src/lib/clipRecorder.js');
 const { holdOwners, effectiveHold, RING_OWNER } = await import('../src/lib/ringHolds.js');
 const activity = await import('../src/lib/activityTracker.js');
 const { logger } = await import('../src/lib/logger.js');
 const { WAKE_CLIP_LEAD_SEC, getWakeClipSettings } = await import('../src/lib/recordings.js');
-const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, firstActiveFrameMs, wakeClipAnchor, isChildAsleep, _state, _latchWritesForTest } =
+const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, firstActiveFrameMs, wakeClipAnchor, isChildAsleep, _state, _latchWritesForTest, _setLiveNightProviderForTest, failNextLiveNightForTest } =
   await import('../src/lib/wakeWatcher.js');
 const { shouldHold, _reset: resetHold } = await import('../src/lib/alertHold.js');
 
@@ -179,6 +179,388 @@ describe('the onset gate — bedtime settling is never recorded', () => {
     assert.equal(_state().get(CAM).asleep, false, 'still one minute short');
     quiet();
     assert.equal(_state().get(CAM).asleep, true);
+  });
+});
+
+describe('the current night can arm its analysis camera', () => {
+  const live = (onset_at, extra = {}) => ({ in_progress: true, analysis_camera_id: CAM, onset_at,
+    as_of: new Date(endMs(clock - 1)).toISOString(), ...extra });
+
+  test('two consecutive onsets arm, save the latch and release the alert hold', () => {
+    db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run(CHILD);
+    const writes = _latchWritesForTest().set;
+    _setLiveNightProviderForTest(() => live('2026-11-20T20:00:00Z'));
+    assert.equal(shouldHold({ id: CAM }), true);
+    moving();
+    assert.equal(stateOf().asleep, false);
+    assert.equal(stateOf().run, null);
+    assert.equal(shouldHold({ id: CAM }), true);
+    moving();
+    assert.equal(stateOf().asleep, true);
+    assert.equal(stateOf().run, null, 'arming minute cannot start a wake');
+    assert.equal(stateOf().quietRun, 0);
+    assert.equal(_latchWritesForTest().set, writes + 1);
+    assert.equal(latchRow().window_start_ms, childWindowKeyNow(CHILD));
+    assert.equal(isChildAsleep(CHILD), true);
+    assert.equal(shouldHold({ id: CAM }), false);
+  });
+
+  test('one-minute onset is rejected; a withdrawn onset cannot undo an armed latch', () => {
+    db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run(CHILD);
+    let onset = true;
+    _setLiveNightProviderForTest(() => live(onset ? '2026-11-20T20:00:00Z' : null));
+    moving();
+    assert.equal(isChildAsleep(CHILD), false);
+    assert.equal(shouldHold({ id: CAM }), true);
+    onset = false;
+    moving();
+    assert.equal(isChildAsleep(CHILD), false);
+    onset = true;
+    moving();
+    assert.equal(isChildAsleep(CHILD), false, 'the withdrawn minute broke the streak');
+    moving();
+    assert.equal(isChildAsleep(CHILD), true);
+    onset = false;
+    moving();
+    assert.equal(isChildAsleep(CHILD), true, 'the latch is sticky for this window');
+    assert.equal(shouldHold({ id: CAM }), false);
+  });
+
+  test('null onset, an in-bed time, a completed previous night, and a non-live result cannot arm', () => {
+    let dates = [];
+    const previousDate = lastCompletedNightDate(CHILD);
+    _setLiveNightProviderForTest((id, date) => {
+      dates.push(date);
+      if (date === previousDate) return live('2026-11-19T20:00:00Z');
+      return live(null, { in_bed_at: '2026-11-20T19:40:00Z' });
+    });
+    moving(); moving();
+    assert.equal(stateOf().asleep, false);
+    assert.notEqual(currentNightDate(CHILD), previousDate);
+    assert.equal(dates.every((date) => date === currentNightDate(CHILD)), true);
+    _setLiveNightProviderForTest(() => live('2026-11-20T20:00:00Z', { in_progress: false }));
+    moving(); moving();
+    assert.equal(stateOf().asleep, false);
+  });
+
+  test('a throwing live compute logs once per window and falls back to quiet minutes', () => {
+    _setLiveNightProviderForTest(() => { throw new Error('private detail'); });
+    const beforeLogs = logger.getRecent().filter((line) => line.includes('live night unavailable')).length;
+    for (let i = 0; i < ONSET_QUIET_MIN; i++) quiet();
+    assert.equal(stateOf().asleep, true);
+    const errors = logger.getRecent().filter((line) => line.includes('live night unavailable'));
+    assert.equal(errors.length - beforeLogs, 1);
+    assert.equal(errors.at(-1).includes('private detail'), false);
+  });
+
+  test('failNextLiveNightForTest faults one compute only', () => {
+    let calls = 0;
+    _setLiveNightProviderForTest(() => { calls++; return live('2026-11-20T20:00:00Z'); });
+    failNextLiveNightForTest();
+    moving();
+    assert.equal(calls, 0);
+    moving();
+    assert.equal(calls, 1);
+    assert.equal(stateOf().asleep, false);
+    moving();
+    assert.equal(calls, 2);
+    assert.equal(stateOf().asleep, true);
+  });
+
+  test('two cameras share one compute per minute; only the analysis camera uses its onset', () => {
+    makeCamera(db, { id: 'cam-secondary', childId: CHILD });
+    try {
+      let calls = 0;
+      _setLiveNightProviderForTest(() => { calls++; return live('2026-11-20T20:00:00Z'); });
+      for (let i = 0; i < 2; i++) {
+        handleMinute({ cameraId: 'cam-secondary', bucketStart: labelFor(clock), motionPeak: MOTION_ACTIVE + 1, soundPeak: 0 });
+        moving();
+      }
+      assert.equal(calls, 2);
+      assert.equal(stateOf().asleep, true);
+      assert.equal(_state().get('cam-secondary').asleep, false);
+      assert.equal(isChildAsleep(CHILD), true);
+      handleMinute({ cameraId: 'cam-secondary', bucketStart: labelFor(clock), motionPeak: MOTION_ACTIVE + 1, soundPeak: 0 });
+      assert.equal(calls, 2, 'the unarmed secondary never computes the child night');
+      moving();
+      assert.equal(calls, 2, 'the armed analysis camera stops computing');
+    } finally {
+      _state().delete('cam-secondary');
+      db.prepare('DELETE FROM cameras WHERE id = ?').run('cam-secondary');
+    }
+  });
+
+  test('queued out-of-order minutes on two cameras compute only for the sleep camera', () => {
+    makeCamera(db, { id: 'cam-secondary', childId: CHILD });
+    try {
+      let calls = 0;
+      _setLiveNightProviderForTest(() => { calls++; return live(null); });
+      const send = (cameraId, index) => handleMinute({ cameraId, bucketStart: labelFor(index), motionPeak: MOTION_ACTIVE + 1, soundPeak: 0 });
+      send(CAM, 10);
+      send('cam-secondary', 9);
+      send('cam-secondary', 10);
+      send(CAM, 10);
+      assert.equal(calls, 1, 'the repeated minute is cached; secondary delivery never computes');
+      assert.equal(_state().get('cam-secondary').asleep, false);
+      for (let i = 11; i < 26; i++) send('cam-secondary', i);
+      assert.equal(_state().get('cam-secondary').asleep, false, 'active secondary cannot arm from onset');
+      assert.equal(calls, 1);
+    } finally {
+      _state().delete('cam-secondary');
+      db.prepare('DELETE FROM cameras WHERE id = ?').run('cam-secondary');
+    }
+  });
+
+  test('quiet secondary still arms after fifteen observed minutes', () => {
+    makeCamera(db, { id: 'cam-secondary', childId: CHILD });
+    try {
+      let calls = 0;
+      _setLiveNightProviderForTest(() => { calls++; return live('2026-11-20T20:00:00Z'); });
+      for (let i = 0; i < ONSET_QUIET_MIN; i++) handleMinute({ cameraId: 'cam-secondary', bucketStart: labelFor(i), motionPeak: 0, soundPeak: 0 });
+      assert.equal(calls, 0);
+      assert.equal(_state().get('cam-secondary').asleep, true);
+    } finally {
+      _state().delete('cam-secondary');
+      db.prepare('DELETE FROM cameras WHERE id = ?').run('cam-secondary');
+    }
+  });
+
+  test('two consecutive labels delivered in one clock tick do not arm', () => {
+    mock.timers.enable({ apis: ['Date'], now: new Date() });
+    try {
+      _setLiveNightProviderForTest(() => live('2026-11-20T19:59:00Z', { as_of: new Date(Date.now()).toISOString() }));
+      moving(); moving();
+      assert.equal(stateOf().asleep, false);
+      mock.timers.setTime(Date.now() + 60_000);
+      moving();
+      assert.equal(stateOf().asleep, true);
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  test('restart reloads a live-onset latch after the onset disappears, then can re-arm live', () => {
+    _setLiveNightProviderForTest(() => live('2026-11-20T20:00:00Z'));
+    moving(); moving();
+    assert.ok(latchRow());
+    stopWakeWatcher();
+    _setLiveNightProviderForTest(() => live(null));
+    startWakeWatcher();
+    assert.equal(isChildAsleep(CHILD), true, 'hydration precedes another minute');
+    stopWakeWatcher();
+    db.prepare('DELETE FROM wake_asleep_latch').run();
+    _setLiveNightProviderForTest(() => live('2026-11-20T20:00:00Z'));
+    moving(); moving();
+    assert.equal(isChildAsleep(CHILD), true);
+  });
+
+  test('a gap and a backward clock step break the onset streak', () => {
+    _setLiveNightProviderForTest((_id, _date, at) => live('2026-11-20T20:00:00Z', { as_of: new Date(at).toISOString() }));
+    moving();
+    skip(1);
+    moving();
+    assert.equal(stateOf().asleep, false);
+    moving();
+    assert.equal(stateOf().asleep, true);
+    _state().clear();
+    db.prepare('DELETE FROM wake_asleep_latch').run();
+    deliver(labelFor(50), MOTION_ACTIVE + 1);
+    deliver(labelFor(49), MOTION_ACTIVE + 1);
+    assert.equal(stateOf().asleep, false);
+    deliver(labelFor(50), MOTION_ACTIVE + 1);
+    assert.equal(stateOf().asleep, true);
+  });
+
+  test('live onset is ignored in both margins and a 00:02 lead; the key spans midnight', () => {
+    const w = windowAroundNow();
+    // The real tracker delivers a bucket when it ends; its label is the preceding minute start.
+    const send = (iso) => handleMinute({ cameraId: CAM,
+      bucketStart: new Date(Date.parse(iso) - 60_000).toISOString().slice(0, 19).replace('T', ' '),
+      motionPeak: MOTION_ACTIVE + 1, soundPeak: 0 });
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '07:00', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T00:00:00Z') });
+      let calls = 0;
+      _setLiveNightProviderForTest((_id, _date, at) => { calls++; return live('2026-10-31T23:40:00Z', { as_of: new Date(at).toISOString() }); });
+      send('2026-11-01T00:00:00Z');
+      mock.timers.setTime(Date.parse('2026-11-01T00:01:00Z'));
+      send('2026-11-01T00:01:00Z');
+      assert.equal(stateOf().asleep, false);
+      assert.equal(calls, 0, 'lead margin has no current night');
+      const key = childWindowKeyNow(CHILD);
+      mock.timers.setTime(Date.parse('2026-11-01T00:02:00Z'));
+      send('2026-11-01T00:02:00Z');
+      assert.equal(childWindowKeyNow(CHILD), key);
+      assert.equal(stateOf().asleep, false);
+      mock.timers.setTime(Date.parse('2026-11-01T00:03:00Z'));
+      send('2026-11-01T00:03:00Z');
+      assert.equal(stateOf().asleep, true);
+      assert.equal(calls, 2);
+      _state().clear();
+      db.prepare('DELETE FROM wake_asleep_latch').run();
+      mock.timers.setTime(Date.parse('2026-11-01T07:01:00Z'));
+      send('2026-11-01T07:01:00Z');
+      mock.timers.setTime(Date.parse('2026-11-01T07:02:00Z'));
+      send('2026-11-01T07:02:00Z');
+      assert.equal(stateOf().asleep, false);
+      assert.equal(calls, 2, 'tail margin has no live compute');
+    } finally {
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('#922 a nearly continuous gate carries an already armed latch into the next window', () => {
+    const w = windowAroundNow();
+    const send = (iso) => handleMinute({ cameraId: CAM, bucketStart: iso.slice(0, 19).replace('T', ' '), motionPeak: MOTION_ACTIVE + 1, soundPeak: 0 });
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:56', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:54:00Z') });
+      _setLiveNightProviderForTest((_id, _date, at) => live('2026-11-01T20:00:00Z', { as_of: new Date(at).toISOString() }));
+      const firstKey = childWindowKeyNow(CHILD);
+      send('2026-11-01T23:54:00Z');
+      mock.timers.setTime(Date.parse('2026-11-01T23:55:00Z'));
+      send('2026-11-01T23:55:00Z');
+      assert.equal(stateOf().asleep, true);
+      assert.equal(latchRow().window_start_ms, firstKey);
+      mock.timers.setTime(Date.parse('2026-11-02T00:00:00Z'));
+      assert.notEqual(childWindowKeyNow(CHILD), firstKey);
+      send('2026-11-02T00:00:00Z');
+      assert.equal(stateOf().asleep, true, 'the existing #922 gate never closed to reset memory');
+      assert.equal(latchRow().window_start_ms, firstKey, 'the persisted latch retains its actual window');
+    } finally {
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('an unarmed onset streak and cache cannot cross consecutive window keys', () => {
+    const w = windowAroundNow();
+    const send = (iso) => handleMinute({ cameraId: CAM, bucketStart: iso.slice(0, 19).replace('T', ' '), motionPeak: MOTION_ACTIVE + 1, soundPeak: 0 });
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('19:00', '07:00', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T19:01:00Z') });
+      let calls = 0;
+      _setLiveNightProviderForTest((_id, _date, at) => { calls++; return live('2026-11-01T19:00:00Z', { as_of: new Date(at).toISOString() }); });
+      const firstKey = childWindowKeyNow(CHILD);
+      send('2026-11-01T19:00:00Z');
+      assert.equal(stateOf().asleep, false);
+      db.prepare('UPDATE children SET sleep_window_start = ? WHERE id = ?').run('18:00', CHILD);
+      assert.notEqual(childWindowKeyNow(CHILD), firstKey);
+      send('2026-11-01T19:01:00Z'); // elapsedMin = 1; only the window reset prevents an arm
+      assert.equal(stateOf().asleep, false, 'the previous window cannot supply the first onset');
+      db.prepare('UPDATE children SET sleep_window_start = ? WHERE id = ?').run('17:00', CHILD);
+      // A fresh camera slot can revisit the same label while the child cache survives.
+      _state().delete(CAM);
+      send('2026-11-01T19:01:00Z'); // same label, new window cache key
+      assert.equal(calls, 3, 'a new window cannot reuse a result for the same minute label');
+      assert.equal(stateOf().asleep, false);
+      send('2026-11-01T19:02:00Z');
+      assert.equal(stateOf().asleep, true);
+      assert.equal(latchRow().window_start_ms, childWindowKeyNow(CHILD));
+    } finally {
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('a throwing compute logs again in a new window without exposing its error', () => {
+    const w = windowAroundNow();
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('19:00', '07:00', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T19:01:00Z') });
+      const marker = 'private-detail-marker';
+      _setLiveNightProviderForTest(() => { throw new Error(marker); });
+      const send = (iso) => handleMinute({ cameraId: CAM, bucketStart: iso.slice(0, 19).replace('T', ' '), motionPeak: MOTION_ACTIVE + 1, soundPeak: 0 });
+      const before = logger.getRecent().filter((line) => line.includes('live night unavailable')).length;
+      send('2026-11-01T19:00:00Z');
+      send('2026-11-01T19:01:00Z');
+      db.prepare('UPDATE children SET sleep_window_start = ? WHERE id = ?').run('18:00', CHILD);
+      send('2026-11-01T19:01:00Z');
+      send('2026-11-01T19:02:00Z');
+      const errors = logger.getRecent().filter((line) => line.includes('live night unavailable')).slice(before);
+      assert.equal(errors.length, 2, 'one error per child and window');
+      assert.equal(errors.some((line) => line.includes(marker)), false);
+    } finally {
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('the spring DST jump keeps one window key and two real consecutive minutes', () => {
+    const w = windowAroundNow();
+    const send = (iso) => handleMinute({ cameraId: CAM, bucketStart: iso.slice(0, 19).replace('T', ' '), motionPeak: MOTION_ACTIVE + 1, soundPeak: 0 });
+    try {
+      db.prepare("UPDATE settings SET timezone = 'Australia/Sydney' WHERE id = 'app'").run();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('21:00', '07:00', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-03T15:59:00Z') });
+      _setLiveNightProviderForTest((_id, _date, at) => live('2026-10-03T12:00:00Z', { as_of: new Date(at).toISOString() }));
+      const key = childWindowKeyNow(CHILD);
+      const nightDate = currentNightDate(CHILD);
+      assert.notEqual(nightDate, null);
+      send('2026-10-03T15:58:00Z');
+      mock.timers.setTime(Date.parse('2026-10-03T16:00:00Z'));
+      assert.equal(childWindowKeyNow(CHILD), key);
+      assert.equal(currentNightDate(CHILD), nightDate, 'the DST jump stays in the same live night');
+      send('2026-10-03T15:59:00Z');
+      assert.equal(stateOf().asleep, true);
+      assert.equal(latchRow().window_start_ms, key);
+    } finally {
+      mock.timers.reset();
+      db.prepare("UPDATE settings SET timezone = 'UTC' WHERE id = 'app'").run();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('a restless settle arms from the real live night before the quiet fallback', () => {
+    const w = windowAroundNow();
+    const start = Date.parse('2026-11-20T19:30:00Z');
+    const stamp = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+    const sample = db.prepare(`INSERT INTO activity_samples
+      (camera_id, bucket_start, motion_level, motion_peak, sound_level, sound_peak, sound_p75, motion_frames, sound_windows)
+      VALUES (?, ?, ?, ?, 0, ?, 0, 1, 1)`);
+    const transition = db.prepare(`INSERT INTO bed_transitions (camera_id, type, peak, created_at) VALUES (?, 'into_bed', 0.5, ?)`);
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('19:30', '07:00', CHILD);
+      const putDowns = ['19:39', '19:42', '19:44', '19:46', '19:48', '19:51', '19:54', '19:57', '20:00']
+        .map((hm) => `2026-11-20 ${hm}:00`);
+      let nextPutDown = 0;
+      mock.timers.enable({ apis: ['Date'], now: start + 60_000 });
+      let armAt = null;
+      let beforeWake = false;
+      let afterWake = false;
+      for (let i = 0; i < 180; i++) {
+        const minuteStart = start + i * 60_000;
+        mock.timers.setTime(minuteStart + 60_000);
+        // An in-progress compute reads transitions up to the window end. Insert each only
+        // after its time; the earlier all-up-front fixture happened to have active minutes
+        // throughout the pre-20:00 span, but future data may not.
+        while (nextPutDown < putDowns.length && Date.parse(`${putDowns[nextPutDown].replace(' ', 'T')}Z`) <= minuteStart + 60_000) {
+          transition.run(CAM, putDowns[nextPutDown++]);
+        }
+        const bedStir = i < 30 || (i >= 30 && minuteStart < Date.parse('2026-11-20T22:12:00Z') && (i - 30) % 10 < 2);
+        const earlyWake = minuteStart >= Date.parse('2026-11-20T19:50:00Z') && minuteStart < Date.parse('2026-11-20T19:55:00Z');
+        const lateWake = minuteStart >= Date.parse('2026-11-20T20:40:00Z') && minuteStart < Date.parse('2026-11-20T20:45:00Z');
+        const spike = i === 47 || (i >= 55 && minuteStart < Date.parse('2026-11-20T22:12:00Z') && i % 9 === 0);
+        const motion = bedStir || earlyWake || lateWake ? MOTION_ACTIVE + 0.1 : 0.004;
+        const sound = spike ? SOUND_ACTIVE + 1 : 0;
+        const result = handleMinute({ cameraId: CAM, bucketStart: stamp(minuteStart), motionPeak: motion, soundPeak: sound });
+        if (result?.captured && earlyWake) beforeWake = true;
+        if (result?.captured && lateWake) afterWake = true;
+        if (armAt === null && stateOf().asleep) armAt = minuteStart + 60_000;
+        // activityTracker calls the watcher before writing this row. The next compute sees it.
+        sample.run(CAM, stamp(minuteStart), motion, motion, sound);
+      }
+      assert.equal(beforeWake, false);
+      assert.ok(armAt >= Date.parse('2026-11-20T20:15:00Z') && armAt <= Date.parse('2026-11-20T20:30:00Z'),
+        `expected the live onset to arm near 20:24, got ${armAt && new Date(armAt).toISOString()}`);
+      assert.equal(afterWake, true, 'a wake after arming reaches the capture threshold');
+    } finally {
+      mock.timers.reset();
+      db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+      db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
   });
 });
 

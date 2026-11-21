@@ -5,7 +5,7 @@ import { useTempDataDir, cleanupTempDataDirs, makeChild, makeCamera } from './he
 useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { shouldHold, HOLD_CAP_MS, _reset, _state: holdState } = await import('../src/lib/alertHold.js');
-const { _state } = await import('../src/lib/wakeWatcher.js');
+const { _state, handleMinute, stopWakeWatcher, _setLiveNightProviderForTest } = await import('../src/lib/wakeWatcher.js');
 const { childWindowKeyNow, currentNightDate } = await import('../src/lib/sleepAnalysis.js');
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -24,6 +24,23 @@ before(() => {
 });
 beforeEach(() => { _reset(); _state().clear(); flag('a', 0); flag('b', 0); track('a', 1); track('b', 1); });
 after(() => { mock.timers.reset(); db.close(); cleanupTempDataDirs(); });
+
+test('a persistent live onset releases the hold before its unchanged 45-minute cap', () => {
+  flag('a', 1);
+  const base = Math.floor(Date.now() / 60_000) * 60_000;
+  const send = (ms) => handleMinute({ cameraId: 'ca', bucketStart: new Date(ms).toISOString().slice(0, 19).replace('T', ' '), motionPeak: 1, soundPeak: 0 });
+  _setLiveNightProviderForTest((_id, _date, at) => ({ in_progress: true, analysis_camera_id: 'ca',
+    onset_at: new Date(base).toISOString(), as_of: new Date(at).toISOString() }));
+  try {
+    assert.equal(shouldHold({ id: 'ca' }, 1000), true);
+    send(base - 120_000);
+    assert.equal(shouldHold({ id: 'ca' }, 2000), true);
+    send(base - 60_000);
+    assert.equal(shouldHold({ id: 'ca' }, 3000), false);
+    assert.equal(_state().get('ca').asleep, true);
+    assert.equal(HOLD_CAP_MS, 45 * 60_000);
+  } finally { stopWakeWatcher(); }
+});
 
 test('#919 off by default, missing child and deleted child allow alerts', () => {
   assert.equal(shouldHold({ id: 'ca' }), false);

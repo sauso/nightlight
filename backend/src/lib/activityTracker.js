@@ -102,9 +102,10 @@ const firstFrameMs = new Map();
 // re-querying activity_samples every minute would be the same data a second time. Kept as a subscription
 // rather than a direct import so activityTracker has no dependency on its consumers.
 // ⚠️ #447 CHANGED THE ORDER: listeners are now called at the minute's END and its row is written GRACE_MS
-// LATER, where before the row was written first. Nothing depends on the old order: the only subscriber,
-// wakeWatcher.handleMinute, reads the payload and the cameras/children tables, never activity_samples
-// (checked when this changed; a new subscriber must not assume the row exists yet).
+// LATER, where before the row was written first. wakeWatcher.handleMinute reads the payload, but its
+// live sleep-night compute now reads activity_samples, so the just-closed minute is absent from that
+// compute. A one-minute provisional onset caused by that absence must persist through the next
+// compute before the watcher arms. A new subscriber must not assume the row exists yet.
 const minuteListeners = new Set();
 
 /**
