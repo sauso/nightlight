@@ -1646,6 +1646,40 @@ progress, when the exit is earlier than the start of the activity, or on a night
   is looked for up to 3 hours past it, so the same night can read differently under a 07:00 and a 07:30
   window.
 
+## Short in-bed stirs after a put-down, and missing wake clips
+
+The 2026-11-06 and 2026-11-20 pattern, where a child was put down and then briefly stirred
+in the bed but Nightlight said they had not fallen asleep for hours, is fixed for that
+shape. The nightly sleep calculation now accepts short, bed-only stirs inside its
+15-minute onset search. It can still mistake a quiet child lying awake for sleep;
+the put-down is the only bound, and the morning review can correct the time. The
+pre-window guards only inspect the span from onset to the window start. After the
+window starts, only the 45-minute settle limit and the occupied-bed check protect it.
+On the two databases' changed nights, onset moved 2 to 142 minutes earlier; the two
+owner-reviewed nights moved 124 and 151 minutes closer to the reported time. A
+separate night changed from a broken 06:16 onset to 20:49. A bed zone that moves
+about every 5 minutes all night (a fan, mobile, curtain or pet) can now read as
+asleep from the put-down: one probe changed from `no_sleep` to onset 2 minutes
+after put-down and 673 asleep minutes. Morning review can correct it.
+
+**Still open:** **In bed** can be exactly 45 minutes before onset when a put-down
+episode started earlier. The 45-minute filter checks each marker before the code
+walks back to the episode's first marker. Seen on 2026-11-08 (onset 19:40,
+In bed 18:55; markers actually began 18:47), and on prod 2026-11-19 and
+2026-10-31. Morning review can correct the in-bed time.
+
+**Still open:** a cry label is written after the alert clip is classified. A
+stir bridged while the night is live can be withdrawn a minute or two later when
+the label arrives, changing the displayed onset.
+
+**Still open:** the live wake watcher has its own rule requiring 15 consecutive quiet
+minutes before it records a wake clip. It may latch about 2 hours after the new onset,
+so the card can say asleep while a wake counted by the nightly calculation has no
+clip. Aligning the watcher is a planned follow-up. The alert hold is off by default
+and its inside-window limit is 45 minutes, so this gap has little effect on alerts.
+For up to 28 days, "usual" can also mix nights saved under the earlier and newer
+onset rules; a comparison can change because of the rule alone.
+
 ## A bedtime around a second put-down: a false early one discarded, a real one sometimes lost (#669)
 
 **What you see:** after the update, some nights' **In bed** and **asleep** times are later than they were.
