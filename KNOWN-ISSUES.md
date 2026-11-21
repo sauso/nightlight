@@ -1665,16 +1665,41 @@ progress, when the exit is earlier than the start of the activity, or on a night
 The 2026-11-06 and 2026-11-20 pattern, where a child was put down and then briefly stirred
 in the bed but Nightlight said they had not fallen asleep for hours, is fixed for that
 shape. The nightly sleep calculation now accepts short, bed-only stirs inside its
-15-minute onset search. It can still mistake a quiet child lying awake for sleep;
-the put-down is the only bound, and the morning review can correct the time. The
-pre-window guards only inspect the span from onset to the window start. After the
+15-minute onset search. Faint in-bed blips with a low mean level no longer make the
+sound around them count as movement for onset, unless that sound is part of a wake.
+The bed movement still uses the bridge allowance, while cleared sound counts as
+watched quiet. A child lying awake and murmuring with small movements can still
+read as asleep earlier; the put-down is the only bound, and the morning review can
+correct the time. The onset search rejects a stretch with cleared sound if it
+overlaps any part of a wake. In a murmuring-child probe, sound from 20:09 to 21:30
+and faint movement every 4, 5 or 8 minutes kept onset at 21:30. A fan, mobile or
+pet with a low mean movement level that does not form a wake can still make onset
+read early. The new sound-and-blip rule moved onset earlier on 3/196 staging nights:
+20:19 to 19:56 on 12 November, 20:09 to 20:01 on 20 November, and 21:13 to 20:34
+on 21 November 2026. It moved 3/194 production nights. None moved later, changed
+status, or gained a wake; every unmoved night was identical. The reviewed 20 November
+night improved from 9 minutes late to 1 minute late.
+
+For the earlier short-stir bridge, the pre-window guards only inspect the span from onset to the window start. After the
 window starts, only the 45-minute settle limit and the occupied-bed check protect it.
-On the two databases' changed nights, onset moved 2 to 142 minutes earlier; the two
+On its two databases' changed nights, onset moved 2 to 142 minutes earlier; the two
 owner-reviewed nights moved 124 and 151 minutes closer to the reported time. A
 separate night changed from a broken 06:16 onset to 20:49. A bed zone that moves
 about every 5 minutes all night (a fan, mobile, curtain or pet) can now read as
 asleep from the put-down: one probe changed from `no_sleep` to onset 2 minutes
 after put-down and 673 asleep minutes. Morning review can correct it.
+
+**Still open:** a one-minute outside-bed reading just above the movement threshold
+can appear as an out-of-bed marker without an alert or image. A bed exit needs sustained
+movement, so the marker alone does not create an exit. A measured production night on
+2026-10-30 had a lone 0.033 reading at the owner's onset; such readings can be real.
+The outside-bed rule is left unchanged, and the morning review can correct the time.
+
+**Still open:** **In bed** can land on a visitor's `into_bed` even when the real
+put-down was earlier. On the measured sound-and-blip night it changed from blank
+to the time a pet or visitor climbed in, 16 minutes after the put-down. The put-down episode
+walk stops at a 16-minute gap, leaving that visitor marker as its start. Morning
+review can correct it.
 
 **Still open:** **In bed** can be exactly 45 minutes before onset when a put-down
 episode started earlier. The 45-minute filter checks each marker before the code
