@@ -29,6 +29,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- A child who settles restlessly can now get wake clips sooner, and held alerts resume sooner (#1186 follow-up). On the measured nights, 51 more counted wakes had a clip, alongside 58 extra clips not near a counted wake. A withdrawn asleep time does not disarm the watcher for that window.
 - A child put down and then stirring briefly in bed no longer shows as "not asleep yet" for hours; the asleep time can follow the put-down within about 10 minutes. If an earlier bridged settle fails a sleep check, a later ordinary settle is still tried. A child lying quietly awake can still appear asleep early, so check the morning review.
 - A camera on Wi-Fi was restarted every few seconds as "corrupt timestamp", so its live view never settled: FFmpeg prints a timestamp-jump line while it probes a new connection, and packets arriving in a clump at that moment set it off. The restart now needs a large jump (more than 480000 ticks of the stream clock, 10 seconds for 48 kHz audio); small start-up jitter is only logged.
 - Find cameras now asks for cameras again during the 30-second search (at about 1, 3, 7, 15 and 25 seconds) instead of once, so a camera whose first mDNS answer was lost, such as a Nightlight Camera on Wi-Fi, no longer waits for the next search to appear.
