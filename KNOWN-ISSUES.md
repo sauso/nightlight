@@ -1646,6 +1646,24 @@ progress, when the exit is earlier than the start of the activity, or on a night
   is looked for up to 3 hours past it, so the same night can read differently under a 07:00 and a 07:30
   window.
 
+## Short in-bed stirs after a put-down, and missing wake clips
+
+The 2026-11-06 and 2026-11-20 pattern, where a child was put down and then briefly stirred
+in the bed but Nightlight said they had not fallen asleep for hours, is fixed for that
+shape. The nightly sleep calculation now accepts short, bed-only stirs inside its
+15-minute onset search. It can still mistake a quiet child lying awake for sleep;
+the put-down is the only bound, and the morning review can correct the time. The
+pre-window guards only inspect the span from onset to the window start. After the
+window starts, only the 45-minute settle limit and the occupied-bed check protect it.
+
+**Still open:** the live wake watcher has its own rule requiring 15 consecutive quiet
+minutes before it records a wake clip. It may latch about 2 hours after the new onset,
+so the card can say asleep while a wake counted by the nightly calculation has no
+clip. Aligning the watcher is a planned follow-up. The alert hold is off by default
+and its inside-window limit is 45 minutes, so this gap has little effect on alerts.
+For up to 28 days, "usual" can also mix nights saved under the earlier and newer
+onset rules; a comparison can change because of the rule alone.
+
 ## A bedtime around a second put-down: a false early one discarded, a real one sometimes lost (#669)
 
 **What you see:** after the update, some nights' **In bed** and **asleep** times are later than they were.

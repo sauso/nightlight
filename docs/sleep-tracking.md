@@ -310,6 +310,31 @@ never perfectly still for hours — they move a little, repeatedly — so a bed 
 then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
 is still found if it comes after the configured wake time.
 
+After a put-down, a brief stir in the bed no longer restarts the 15-minute search for sleep.
+Nightlight can bridge a stir of up to 2 minutes, with at most 3 bridged minutes in one
+15-minute stretch. There must be a watched quiet minute on both sides of each stir, some
+movement in the bed, and no crying label or movement outside the bed during it. A nearby
+sound can be part of the same stir and uses the same limits. Bridged minutes do not count
+as watched quiet minutes. The asleep time is the first watched quiet minute in the stretch.
+This applies only after a recorded put-down; the search without one is unchanged.
+
+These limits were set from one child's camera in one house and have not been measured
+elsewhere. A child lying awake and still, moving in the bed only briefly while the room
+is otherwise quiet, can be shown as asleep too early. Measured shifts were 83-151 minutes;
+the put-down is the only bound. A noisy room can stretch stirs past 2 minutes, making the
+bridge less likely. A bed zone over periodic movement from a fan, mobile, curtain or pet,
+or a parent patting the child without enough movement outside the bed, can make it apply
+too often. [Correct a wrong asleep time in the morning review](#correcting-a-night).
+The pre-window guards only examine the time between the proposed onset and the window
+start; when onset is after the window start, the 45-minute settle limit and the occupied-bed
+check are the remaining protections. That occupied-bed check may initially accept a live
+onset because its 150-minute observation period is unfinished, then withdraw it later.
+
+Nights worked out before this change keep their saved figures until recomputed. The sleep
+detail page works a night out afresh, so it can differ from its saved card. For up to 28
+days, the child's "usual" can mix nights worked out under both rules. A comparison may
+then say "more sleep" or "more wakes" because of the rule change alone.
+
 Only movement **before the next put-down** counts towards that occupied-bed check: a later bedtime
 never vouches for an earlier one. So a *put-down* the camera got wrong an hour or two before the
 real one, with the bed empty in between, is discarded rather than reported as the bedtime (it used

@@ -70,7 +70,9 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // '7' (#1159): brief sound-only runs need nearby movement or a cry-labelled alert, while sustained
 // sound still counts as awake after onset. The 30-night comparison kept a confirmed morning wake
 // that would otherwise have moved 79 minutes later. Other homes may differ because clips are optional.
-export const SCORING_ALGO = '7';
+// '8': a put-down-anchored onset can bridge short in-bed stirs, moving the onset and the score
+// computed from it. Old stored rows are not rewritten; their saved context keeps its old label.
+export const SCORING_ALGO = '8';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
 // Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
@@ -91,7 +93,17 @@ const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = re
 // now only sets the motion alert). They answer different questions and are not kept in step.
 const MOTION_OUT_ACTIVE = 0.03;
 const SOUND_ACTIVE = 6; // dB over ambient above this = a clear noise/cry
-const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
+const ONSET_QUIET_MIN = 15; // sustained quiet window to call it "asleep"; anchored search may bridge brief stirs
+// 2026-11-06 (stored 22:06, owner about 19:35) and 2026-11-20 (stored 22:04,
+// owner 20:00) set these limits. A 1/2-minute bridge without the outside-bed check
+// made a reviewed night 3-10 minutes early; an uncapped bridge accepted 7 of 15
+// active minutes. Tuned on one camera in one house; not measured elsewhere. A child
+// lying awake and still with occasional bed movement in an otherwise quiet room can
+// read as asleep: measured shifts were 83-151 minutes, and the put-down itself is
+// the only bound. Morning review corrects this. Noise that stretches a stir past
+// 2 minutes means this bridge rarely applies.
+const ONSET_BRIDGE_MAX_STIR_MIN = 2;
+const ONSET_BRIDGE_MAX_PER_WINDOW = 3;
 const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awakening (vs a brief stir)
 const WAKE_GAP_MIN = 3; // bridge quiet gaps up to this long inside one awakening (intermittent noise/movement)
 // Exported so the LIVE wake watcher (lib/wakeWatcher.js) decides "active minute", "asleep" and
@@ -1762,11 +1774,27 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // Child A's room had someone in it until ~20:00 (outside-motion peaks up to 0.98), but the ten minutes
   // before he was carried in were still and merely noisy, so discounting there declared him asleep at
   // 19:00, an hour and a half early. Anchored on the put-down, the same data gives the right answer.
+  // Only a complete, bed-witnessed stir can interrupt an anchored quiet window.
+  // Test the whole active run: sound beside bed motion shares its length, while a
+  // cry, outside-bed motion, or an unknown flank leaves the run active.
+  const bridgedStirLength = (view, start, windowStart, windowEnd) => {
+    let end = start;
+    while (end < windowEnd && view[end] === true) end++;
+    const length = end - start;
+    if (length > ONSET_BRIDGE_MAX_STIR_MIN || start <= windowStart || end >= windowEnd ||
+        view[start - 1] !== false || view[end] !== false) return 0;
+    let bedWitness = false;
+    for (let minute = start; minute < end; minute++) {
+      if (outAt[minute] || cryAt[minute]) return 0;
+      if (bedPeakAt[minute] > MOTION_ACTIVE) bedWitness = true;
+    }
+    return bedWitness ? length : 0;
+  };
   const firstQuietRunFrom = (from, afterPutDown = false) => {
     // Tri-state view (issue #442): `state` directly for the unanchored search, `activeForOnset` for
     // the put-down-anchored one — both null-aware. Any ACTIVE minute still disqualifies a candidate
-    // run outright, same as always. Unknown minutes do NOT: requiring the whole window to be 100%
-    // sampled sounded right but regressed a merely flaky camera's entire night to `status: 'no_sleep'`
+    // run unless it is a limited stir after a put-down. Unknown minutes do NOT: requiring every
+    // minute to be sampled sounded right but regressed a merely flaky camera's entire night to `status: 'no_sleep'`
     // — scattered single-minute gaps meant no ONSET_QUIET_MIN window anywhere in the night was ever
     // fully observed, even on an otherwise ordinary night (found by adversarial review of this fix's
     // first draft). Instead, a window qualifies once at least MIN_COVERAGE_FRAC of it is CONFIRMED
@@ -1781,9 +1809,14 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     const view = afterPutDown ? activeForOnset : state;
     const minConfirmed = ONSET_QUIET_MIN * MIN_COVERAGE_FRAC;
     for (let i = Math.max(0, from); i + ONSET_QUIET_MIN <= totalMin; i++) {
-      let confirmed = 0, firstConfirmed = -1, active = false;
+      let confirmed = 0, firstConfirmed = -1, active = false, bridged = 0;
       for (let j = i; j < i + ONSET_QUIET_MIN; j++) {
-        if (view[j] === true) { active = true; break; }
+        if (view[j] === true) {
+          const length = afterPutDown ? bridgedStirLength(view, j, i, i + ONSET_QUIET_MIN) : 0;
+          if (!length || (bridged += length) > ONSET_BRIDGE_MAX_PER_WINDOW) { active = true; break; }
+          j += length - 1; // bridged minutes are not confirmed-quiet coverage
+          continue;
+        }
         if (view[j] === false) { confirmed++; if (firstConfirmed < 0) firstConfirmed = j; }
       }
       if (!active && confirmed >= minConfirmed) return firstConfirmed;
