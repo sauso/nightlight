@@ -18,7 +18,7 @@ import path from 'node:path';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
 process.env.DATA_DIR = TMP;
 
-const { computeNight, runNightlySleepJob, detectMidnightEpisodes, quietStretchBeforeExit } = await import('../src/lib/sleepAnalysis.js');
+const { computeNight, computeAndStoreNight, runNightlySleepJob, detectMidnightEpisodes, quietStretchBeforeExit, SCORING_ALGO } = await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
 const CHILD = 'test-child';
@@ -2088,7 +2088,67 @@ test('short in-bed stirs after a put-down keep the first quiet minute as onset',
   assert.equal(hhmm(night.onset_at), '20:09');
   assert.equal(hhmm(night.in_bed_at), '20:00');
   assert.equal(night.status, 'ok');
+  // The golden fixture pins the literal label; this verifies a saved worked-out row uses the exported one.
+  computeAndStoreNight(CHILD, DATE);
+  const saved = db.prepare('SELECT scoring_context FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(CHILD, DATE);
+  assert.equal(JSON.parse(saved.scoring_context).algo, SCORING_ALGO);
   assert.equal(sqlTime(minute(8)), sqlTime(at(20, 17)));
+});
+
+function layGuardRetryNight({ noise = false, sparse = false } = {}) {
+  if (sparse) {
+    layNight(at(18, 30), at(7, 0, 1), {
+      move: [[at(18, 30), at(18, 31)], [at(18, 44), at(18, 45)],
+        [at(20, 0), at(20, 1)], [at(20, 30), at(20, 31)], [at(21, 0), at(21, 1)],
+        [at(22, 0), at(5, 0, 1)]], still: 0.0001,
+    });
+    insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 30)));
+    return;
+  }
+  const noises = noise ? Array.from({ length: 70 }, (_, i) => {
+    const from = at(19, 15 + i * 10);
+    return [from, new Date(from.getTime() + 60000)];
+  }) : [];
+  layNight(at(18, 50), at(7, 0, 1), {
+    move: [[at(18, 50), at(18, 51)], [at(18, 58), at(18, 59)],
+      [at(19, 8), at(19, 14)], [at(2, 0, 1), at(2, 3, 1)]],
+    noise: noises,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 50)));
+}
+
+test('a bridged settle rejected by an awakening retries the plain settle', () => {
+  layGuardRetryNight();
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:14');
+});
+
+test('a rejected bridge still permits the later plain settle amid household noise', () => {
+  layGuardRetryNight({ noise: true });
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.onset_at), '19:16');
+});
+
+test('a bridged far-early settle rejected for missing bed evidence retries the plain settle', () => {
+  layGuardRetryNight({ sparse: true });
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.onset_at), '18:45');
+  assert.equal(hhmm(night.in_bed_at), '18:30');
+});
+
+test('a bridge that passes the guards remains the chosen settle', () => {
+  const minute = layBridgeNight([[8, 9]]);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:09');
+  assert.equal(sqlTime(minute(8)), sqlTime(at(20, 17)));
+});
+
+test('when bridged and plain settles both fail the put-down keeps the baseline onset', () => {
+  layNight(at(18, 50), at(7, 0, 1), {
+    move: [[at(18, 50), at(18, 51)], [at(18, 58), at(18, 59)],
+      [at(19, 8), at(19, 41)]],
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 50)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:41');
 });
 
 test('a put-down episode with repeated bed stirs stays at 20:09 across live clocks', (t) => {
@@ -2103,8 +2163,6 @@ test('a put-down episode with repeated bed stirs stays at 20:09 across live cloc
   // The witnessed sound minute at 20:17 belongs to the 20:18 bed stir.
   db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
     .run(CAM, sqlTime(minute(8)));
-  // Steady lower house noise is below the clear-noise threshold.
-  db.prepare('UPDATE activity_samples SET sound_level = 1.7 WHERE camera_id = ?').run(CAM);
   for (const [hour, min] of [[19, 39], [19, 42], [19, 44], [19, 46], [19, 48],
     [19, 51], [19, 54], [19, 57], [20, 0]]) {
     insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(hour, min)));
@@ -2156,13 +2214,46 @@ test('a stir needs confirmed quiet on both sides inside its window', () => {
   assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:10', 'right flank beyond first window');
   db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
   db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
-  layBridgeNight([[0, 1]]);
-  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:10', 'left flank beyond first window');
+  layNight(at(19, 58), at(7, 0, 1), {
+    move: [[at(20, 0), at(20, 1)], [at(20, 15), at(20, 18)]],
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(20, 0)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:18', 'left flank lies just outside the first window');
   db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
   db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
   minute = layBridgeNight([[4, 5]]);
   db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start = ?').run(CAM, sqlTime(minute(3)));
   assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:14', 'unknown left flank');
+});
+
+test('an unknown right flank cannot complete a bridged stir', () => {
+  const minute = layBridgeNight([[8, 9]]);
+  db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start = ?').run(CAM, sqlTime(minute(9)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:19');
+});
+
+test('a bed minute followed by witnessed sound forms one bridged stir', () => {
+  const minute = layBridgeNight([[8, 9]]);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(9)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:09');
+});
+
+test('a cry on the sound minute after bed movement blocks the bridge', () => {
+  const minute = layBridgeNight([[8, 9]]);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(9)));
+  cryAlert(minute(9));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:19');
+});
+
+test('a sound-active minute with bed peak exactly at the motion threshold is not a bed stir', () => {
+  const minute = layBridgeNight([[6, 7]]);
+  // Motion at 20:15 witnesses the sound two minutes later; the 0.01 bed peak
+  // itself remains quiet under motionAt's strict > convention.
+  db.prepare('UPDATE activity_samples SET motion_peak = 0.01, motion_level = 0.01, sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(8)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:18');
 });
 
 test('three bridged minutes fit; a fourth moves the returned onset to a later window', () => {
@@ -2230,7 +2321,7 @@ test('a cry-labelled stir is never bridged', () => {
   assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:18');
 });
 
-test('the unanchored search keeps its old onset with the same stirs', () => {
+test('the unanchored onset search is unchanged with the same stirs', () => {
   layBridgeNight([[8, 9], [16, 18]], { putDown: false });
   assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:27');
 });

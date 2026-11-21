@@ -99,9 +99,13 @@ const ONSET_QUIET_MIN = 15; // sustained quiet window to call it "asleep"; ancho
 // made a reviewed night 3-10 minutes early; an uncapped bridge accepted 7 of 15
 // active minutes. Tuned on one camera in one house; not measured elsewhere. A child
 // lying awake and still with occasional bed movement in an otherwise quiet room can
-// read as asleep: measured shifts were 83-151 minutes, and the put-down itself is
-// the only bound. Morning review corrects this. Noise that stretches a stir past
-// 2 minutes means this bridge rarely applies.
+// read as asleep. On the two databases' changed nights, onset moved 2-142 minutes
+// earlier; the two reviewed nights moved 124 and 151 minutes closer to the owner's
+// time. Another prod night changed from a broken 06:16 onset to 20:49. A bed zone
+// moving about every 5 minutes all night (fan, mobile, curtain or pet) can change
+// no_sleep to onset 2 minutes after put-down and 673 asleep minutes in a probe.
+// The put-down itself is the only bound; morning review corrects this. Noise that
+// stretches a stir past 2 minutes means this bridge rarely applies.
 const ONSET_BRIDGE_MAX_STIR_MIN = 2;
 const ONSET_BRIDGE_MAX_PER_WINDOW = 3;
 const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awakening (vs a brief stir)
@@ -1790,7 +1794,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     }
     return bedWitness ? length : 0;
   };
-  const firstQuietRunFrom = (from, afterPutDown = false) => {
+  const firstQuietRunFrom = (from, afterPutDown = false, bridge = true) => {
     // Tri-state view (issue #442): `state` directly for the unanchored search, `activeForOnset` for
     // the put-down-anchored one — both null-aware. Any ACTIVE minute still disqualifies a candidate
     // run unless it is a limited stir after a put-down. Unknown minutes do NOT: requiring every
@@ -1812,7 +1816,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
       let confirmed = 0, firstConfirmed = -1, active = false, bridged = 0;
       for (let j = i; j < i + ONSET_QUIET_MIN; j++) {
         if (view[j] === true) {
-          const length = afterPutDown ? bridgedStirLength(view, j, i, i + ONSET_QUIET_MIN) : 0;
+          const length = afterPutDown && bridge ? bridgedStirLength(view, j, i, i + ONSET_QUIET_MIN) : 0;
           if (!length || (bridged += length) > ONSET_BRIDGE_MAX_PER_WINDOW) { active = true; break; }
           j += length - 1; // bridged minutes are not confirmed-quiet coverage
           continue;
@@ -1981,24 +1985,23 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // second into_bed's own settle (README, KNOWN-ISSUES; pinned by the #669 T8 and T8b tests).
   const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;
   const rejectedPrewindowPutDowns = new Set();
-  for (const { idx: putDown } of earlyPutDowns) {
-    const q = firstQuietRunFrom(putDown, true);
-    if (q == null) continue; // never settled after this put-down
+  const qualifiesPutDownSettle = (q, putDown, failedPrewindow) => {
+    if (q == null) return false; // never settled after this put-down
     // Only ever EARLIER than the plain search. The put-down anchor exists to recover sleep the plain
     // search loses to household noise; it must never push onset later. It is also what stops a 3am
     // re-settle — whose own following quiet run qualifies just as well — from being adopted as the
     // night's bedtime on a night where every evening put-down failed its guards.
-    if (onset != null && q >= onset) continue;
-    if (q - putDown > maxSettleMin) continue; // settled far too long after this put-down to be its result
+    if (onset != null && q >= onset) return false;
+    if (q - putDown > maxSettleMin) return false; // settled far too long after this put-down to be its result
     // Don't claim sleep we didn't actually observe: the settle minute must have a sample, and the
     // stretch from there to the window must be mostly covered.
-    if (state[q] === null) continue;
+    if (state[q] === null) return false;
     let seen = 0;
     for (let i = q; i < preMin; i++) if (state[i] !== null) seen++;
-    if (seen < (preMin - q) * MIN_COVERAGE_FRAC) continue;
+    if (seen < (preMin - q) * MIN_COVERAGE_FRAC) return false;
     // Guard 2: it has to still be the same sleep when the window opens. A nap the child got up from has
     // an awakening between it and bedtime, so it can never be adopted as the night's onset.
-    if (hasAwakening(q, preMin)) continue;
+    if (hasAwakening(q, preMin)) return false;
     // Guard 3: the bed has to look OCCUPIED afterwards. Guards 1 and 2 both rest on the put-down being
     // real, and a put-down the detector got wrong satisfies them trivially — an empty room never wakes,
     // so guard 2 in particular passes vacuously. This is the only guard that asks for positive evidence
@@ -2040,7 +2043,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // (cutting at the start of the occupied run before the next into_bed zeroes a child still stirring:
     // staging 2026-09-30 child A, 14 -> 0).
     const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));
-    if (!bedOccupiedAfter(q, nextPutDown?.idx)) continue;
+    if (!bedOccupiedAfter(q, nextPutDown?.idx)) return false;
     if (preMin - q > PREWINDOW_ONSET_FREE_MIN) {
       // A later non-isolated put-down cannot vouch for this one. Size the requirement over
       // every watched minute through the window start, but count evidence only before the cut.
@@ -2056,12 +2059,22 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
         if (i < end && bedPeakAt[i] >= OCCUPANCY_MIN_PEAK) occupied++;
       }
       if (occupied < Math.ceil(watched / PREWINDOW_EVIDENCE_PER_MIN)) {
-        rejectedPrewindowPutDowns.add(putDown);
-        continue;
+        failedPrewindow.value = true;
+        return false;
       }
     }
     onset = q;
-    break; // earliest qualifying put-down wins
+    return true;
+  };
+  for (const { idx: putDown } of earlyPutDowns) {
+    const qB = firstQuietRunFrom(putDown, true);
+    const failedPrewindow = { value: false };
+    if (qualifiesPutDownSettle(qB, putDown, failedPrewindow)) break;
+    // Review M-1: bridging can move the first window into a span a guard rejects. Keep the
+    // later plain settle available to the same put-down before advancing to another one.
+    const qP = qB == null ? null : firstQuietRunFrom(putDown, true, false);
+    if (qP != null && qP !== qB && qualifiesPutDownSettle(qP, putDown, failedPrewindow)) break;
+    if (failedPrewindow.value) rejectedPrewindowPutDowns.add(putDown);
   }
   if (onset == null) return { ...result, status: 'no_sleep' };
   const algoOnset = onset;
@@ -2070,6 +2083,9 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // the metrics are measured over - promoting only the displayed times would leave the durations
   // describing a different night from the times printed above them. ---
 
+  // This pass takes the first into_bed with any non-null settle and clamps it to the guarded
+  // algoOnset. It has no guard rejection to retry: the plain-settle fallback belongs only
+  // in the put-down loop above (review M-1), where a bridged answer can fail a guard.
   // Onset: an into_bed only ever DELAYS onset - before the child was actually placed in the bed the
   // quiet is an empty bed, not sleep. Onset is a once-per-night event: the FIRST put-down that leads to
   // sustained sleep. Take the EARLIEST into_bed whose following quiet run qualifies (firstQuietRunFrom

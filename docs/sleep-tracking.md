@@ -320,11 +320,17 @@ This applies only after a recorded put-down; the search without one is unchanged
 
 These limits were set from one child's camera in one house and have not been measured
 elsewhere. A child lying awake and still, moving in the bed only briefly while the room
-is otherwise quiet, can be shown as asleep too early. Measured shifts were 83-151 minutes;
-the put-down is the only bound. A noisy room can stretch stirs past 2 minutes, making the
+is otherwise quiet, can be shown as asleep too early. On the two databases' changed
+nights, onset moved 2 to 142 minutes earlier; the two owner-reviewed nights moved
+124 and 151 minutes closer to the reported time. Another night changed from a broken
+06:16 onset to 20:49. The put-down is the only bound. A noisy room can stretch stirs past 2 minutes, making the
 bridge less likely. A bed zone over periodic movement from a fan, mobile, curtain or pet,
 or a parent patting the child without enough movement outside the bed, can make it apply
-too often. [Correct a wrong asleep time in the morning review](#correcting-a-night).
+too often. In one probe, movement about once every 5 minutes all night changed
+`no_sleep` to an onset 2 minutes after the put-down and 673 minutes asleep.
+[Correct a wrong asleep time in the morning review](#correcting-a-night).
+If a cry label is added after the alert clip is analysed, a stir bridged live can
+be withdrawn a minute or two later when that label arrives.
 The pre-window guards only examine the time between the proposed onset and the window
 start; when onset is after the window start, the 45-minute settle limit and the occupied-bed
 check are the remaining protections. That occupied-bed check may initially accept a live

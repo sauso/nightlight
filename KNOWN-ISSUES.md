@@ -1655,6 +1655,22 @@ shape. The nightly sleep calculation now accepts short, bed-only stirs inside it
 the put-down is the only bound, and the morning review can correct the time. The
 pre-window guards only inspect the span from onset to the window start. After the
 window starts, only the 45-minute settle limit and the occupied-bed check protect it.
+On the two databases' changed nights, onset moved 2 to 142 minutes earlier; the two
+owner-reviewed nights moved 124 and 151 minutes closer to the reported time. A
+separate night changed from a broken 06:16 onset to 20:49. A bed zone that moves
+about every 5 minutes all night (a fan, mobile, curtain or pet) can now read as
+asleep from the put-down: one probe changed from `no_sleep` to onset 2 minutes
+after put-down and 673 asleep minutes. Morning review can correct it.
+
+**Still open:** **In bed** can be exactly 45 minutes before onset when a put-down
+episode started earlier. The 45-minute filter checks each marker before the code
+walks back to the episode's first marker. Seen on 2026-11-08 (onset 19:40,
+In bed 18:55; markers actually began 18:47), and on prod 2026-11-19 and
+2026-10-31. Morning review can correct the in-bed time.
+
+**Still open:** a cry label is written after the alert clip is classified. A
+stir bridged while the night is live can be withdrawn a minute or two later when
+the label arrives, changing the displayed onset.
 
 **Still open:** the live wake watcher has its own rule requiring 15 consecutive quiet
 minutes before it records a wake clip. It may latch about 2 hours after the new onset,
