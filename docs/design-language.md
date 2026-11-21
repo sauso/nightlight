@@ -96,7 +96,7 @@ manifest's `theme_color` and `background_color` and the app icons' ground are th
 
 ### Search card and item cards (#1074, #1076)
 
-ESPHome and Cameras use one `.night.find-card` search surface: **Find devices** or **Find cameras**. The search button is its main action; the card's error line uses `--night-error` (`#F4A3AD`) on the lightest gradient stop (`#2C2F63`) to stay above 4.5:1 contrast. Results are 56px rows with wrapping names and full-opacity unavailable states labelled **Added** or **Not added**. The manual action appears inside the card after an empty search. It reads **Add by IP address** for ESPHome and **Add a camera manually** for cameras. The camera's manual disclosure row remains below the card.
+ESPHome and Cameras use one `.night.find-card` search surface: **Find devices** or **Find cameras**. The search button is its main action; the card's error line uses `--night-error` (`#F4A3AD`) on the lightest gradient stop (`#2C2F63`) to stay above 4.5:1 contrast. Results are 56px rows with wrapping names and full-opacity unavailable states labelled **Added** or **Not added**. A row reaches 10px past the card's content on each side (a -10px margin cancels the 10px padding, so an unselected row's text stays where it was) so the selected ring, drawn inside the row, keeps a gap to the tile icon and the chip (#1172). The manual action appears inside the card after an empty search. It reads **Add by IP address** for ESPHome and **Add a camera manually** for cameras. The camera's manual disclosure row remains below the card.
 
 Saved ESPHome devices and cameras share `.dev-card`: a status dot and word, wrapping name, muted address, optional detail lines, and a 44px **⋯** action menu. ESPHome keeps Edit, Test connection, Download CSV and Delete device, plus a separate **Sensors** disclosure. Camera cards show only supported capability chips, a Motion/Sound line when available, and a visible **Assigned to** foot row. The camera menu holds Edit camera, Enable/Disable camera and Remove camera. A disabled camera has a neutral dot; an unknown status uses the same dot as Connecting (the `--accent` violet), never red. The camera list's Remove dialog gives the full permanent-deletion warning.
 
@@ -256,6 +256,12 @@ only 2.10:1 on a card, so where the colour is **text** (a duration, a badge, an 
 (7.37:1 on a card, 6.17:1 on its tag; `#279189` itself would be 3.46:1 on the tag); the dots and legend swatch keep
 `#279189`. The design also has a dashed "still to come" / "not counted" edge (`#8C86AE` at night, 4.62:1 on the card);
 there is no token for it yet because nothing draws it.
+
+**The night's measured lines** (the sleep page's tracks, `--sleep-temp`, `--sleep-hr`, `--sleep-rr`): temperature `#CF5B39`
+by day and `#EF8A5E` at night, heart rate `#B8305A` and `#F08AA8`, breathing `#25689F` and `#7FB6EE`. The heart-rate and
+breathing colours also write their track label and the hover-bubble rows, so each must clear the **text** ratio (4.5:1, which
+clears a line's 3:1) on both the card and the inset; `test/paletteTokens.test.jsx` recomputes that and checks the labels use
+the token, not a literal. A gap in the readings is `--sleep-gap` (`#C7C7C7` by day, `#5A5C6E` at night).
 
 **The states are told apart by shape and gaps, not by colour alone (design v3.1, 2026-11-13).** Several neighbouring colours
 are close in lightness (the table below), so each state also has its own silhouette:
@@ -704,6 +710,17 @@ avatar (`:focus-visible` only); a click or tap draws nothing, since a second box
   `--offline`, `--off` `--text-secondary`. `--sm` = 2px 8px / 11px.
 - `.cam-badge` — **outlined** pill (colour + border, transparent fill), 11px/600. Filled = state,
   outlined = attribute.
+- A badge that follows a label as **inline text** (the Protected lock and the audio Crying / Coughing / Talking badge in a
+  night's wake-ups list) needs `margin-left: 6px`, or it touches the word before it (seen on a phone, 2026-11-19). A badge
+  inside a flex row takes the row's `gap` instead (the alert lists).
+- **Nightlight Camera sensors** (`NightlightCameraSettings.jsx`): the add card's offer is a 12px-radius box with a 1px
+  `--accent-line` border (`.camera-connect__nightlight`). The Sensors screen prints a status line (`.nlcam-status`:
+  `--live` when ok, `--offline` when offline, login failed or the wrong device, `--text-secondary` otherwise) and a list of
+  readings, one row each (`.nlcam-readings__row`: label in `--text-secondary`, value 700 with `tabular-nums`, a 1px
+  `--border` line between rows).
+- **A heart-rate or breathing gap is bridged by a dashed line** (`.sleep-climate__bridge`, 3 3 dashes, owner 2026-11-19),
+  and a legend (`.sleep-vitals__legend`, 11.5px `--text-secondary`) says it is an estimate. The dashes are the statement
+  that nothing was measured there: the solid line stays real readings only.
 
 ### Breathing dot — the live indicator
 14px box, 8px core + expanding ring. `--live` breathing at **3.6s** (calm, steady), `--accent`
@@ -952,8 +969,10 @@ a 38 × 4 grabber, uppercase 12px section labels, `--bg-elevated-2` grouped sect
 `--accent` + weight 600 for the active choice, supports a submenu (`--submenu` row with a `--value` on
 the right, plus a `--back` item). Backdrop `rgba(0,0,0,0.45)`, `sheet-fade` 0.16s in.
 Connection mode and Quality use `.seg-track` with 44px buttons and `aria-pressed`; the shared
-track on Account and General uses the same style. Stop/Start and Camera settings are separate
-56px rows. Camera settings remains admin-only.
+track on Account and General uses the same style. Stop/Start and Camera settings sit on **one line as two equal
+outlined buttons** (48px, 1px `--border`, radius 10px, centred label), like the Restart pair under them (owner, 2026-11-20:
+two full-width text rows looked bad); Stop or Start alone, when a caregiver has no Camera settings, takes the whole line.
+Camera settings remains admin-only.
 
 ### Camera tile
 The signature component. `--bg-elevated`, 1px `--border`, **radius 10px**, `overflow: hidden`.
@@ -966,7 +985,13 @@ button (`.camera-tile__video-dot`, with `--after-mic` when the mic is there). It
 footage, and stays put while the mic is live; fullscreen keeps it beside the mic, and Picture-in-Picture hides it with
 the other overlay controls. Identity (name, child, drag handle) sits in the strip below. The strip is at least 56px
 tall and shows the wrapping name with the child under it (both start at the left edge), optional temperature and
-humidity chips, and the drag handle. **The status word is not printed in the strip**: it follows the name as visually
+humidity chips, and the drag handle. **Every camera's chips stack in the same right-hand column**, a Nightlight Camera's
+too (owner, 2026-11-20: its side-by-side chips did not match the others). A Nightlight Camera whose own sensors are on shows
+its own temperature and humidity there, each only while the reading is fresh and ok. Its radar presence, heart rate and
+breathing rate are deliberately **not** on the tile (five chips made a tall stack, and a heart-rate number on a glance-at-it
+tile is an unvalidated estimate): they live on the camera's Sensors screen and, for a night, on the sleep card and timeline.
+The tile carries no "Simulated" tag either; the **Simulated sensors** badge (`.simulated-badge`: `--bg-elevated-2` pill,
+`--text-secondary`, 11px/600) appears on the Sensors screen and wherever those readings show. **The status word is not printed in the strip**: it follows the name as visually
 hidden text (`.camera-tile__sr`, so a screen reader reads "Name, Online"; the dot is `aria-hidden`), and the camera's
 sheet prints the same dot and word under the name (`.tile-menu__state`), so colour is never the only signal. It uses
 `cameraState`, including **Status unknown** when a status check times out (it shows the same dot as Connecting, never red). (The Cameras tab cards still print
@@ -1185,7 +1210,11 @@ Other rules:
 ## 10. Before shipping a UI change
 
 1. **Both themes** — light and dark, not just the one you built in.
-2. **A non-default palette** — switch to Dusk lavender; nothing gold should remain hardcoded.
+2. **Tints are guarded** — a background or shadow that mixes a token with `color-mix()` needs a plain fallback first and the
+   tint inside `@supports (background: color-mix(in srgb, red 12%, transparent))`. A `background` holding `color-mix()` and
+   `var()` parses on every engine and only fails when computed, so on an older WebView (iOS 15 to 16.1, Android WebView
+   before Chromium 111) it would drop the whole paint (#1093; `.nav-row__chip`, `.clip-row--sel`, `.logo-tile--glow` are the models).
+   Nothing gold hardcoded either: the complement is a token.
 3. **Fonts** — confirm Inter and Nunito load from local assets, including when offline.
 4. **Phone width and ≥1200px** — the nav becomes a sidebar; confirm nothing collides.
 5. **Safe areas** — anything fixed to an edge needs the `env()` inset.
