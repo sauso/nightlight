@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
 process.env.DATA_DIR = TMP;
 
-const { computeNight, computeAndStoreNight, runNightlySleepJob, detectMidnightEpisodes, quietStretchBeforeExit, SCORING_ALGO,
+const { computeNight, computeAndStoreNight, runNightlySleepJob, detectMidnightEpisodes, quietStretchBeforeExit, settlingQuietWitness, SCORING_ALGO,
   ONSET_BLIP_MAX_LEVEL, ONSET_BLIP_MAX_PEAK } = await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
@@ -1517,9 +1517,10 @@ test('★★ the return is indexed with txIdx, consistently, on both sides of th
   // the regression test for #260 on this call site: the wake path sits on the same txIdx seam as onset,
   // and this proves it moved when #260 did rather than quietly keeping its own rounding.
   //
-  // The witness is exactly SETTLING_WITNESS_MIN_QUIET (6) quiet occupied minutes, 05:49-05:54 — it was
+  // The witness is exactly SETTLING_WITNESS_MIN_QUIET (6) counted quiet occupied minutes, 05:49 and
+  // 05:52-05:56; 05:50-05:51 are active, and the climb-out exclusion also covers 05:50. It was
   // OCCUPANCY_MIN_MINUTES (3) occupied ones until issue #598 gave this guard its own, quiet-only witness.
-  // Both :29 and :31 now floor into 05:49, so both see all 6 and the guard fires in both cases. The
+  // Both :29 and :31 now floor into 05:49, so both see all 6 counted minutes and the guard fires. The
   // count sits ON the threshold, so an index one minute late (a hand-rolled ROUND, the #260 defect
   // coming back by hand) loses 05:49, sees 5, and gives a different night: that is the mutant this kills.
   // A LATER real exit is what makes the seam observable at all: without one the fallback below hands
@@ -1527,11 +1528,11 @@ test('★★ the return is indexed with txIdx, consistently, on both sides of th
   // passed for the wrong reason (both `null`).
   const layWitnessOnTheBoundary = (second) => {
     laySamples(at(19, 30), at(5, 49, 1), [[at(19, 30), at(19, 40)], [at(5, 48, 1), at(5, 49, 1)]], STILL_OCCUPIED);
-    laySamples(at(5, 49, 1), at(5, 55, 1), [], STILL_OCCUPIED); // exactly SETTLING_WITNESS_MIN_QUIET quiet
+    laySamples(at(5, 49, 1), at(5, 57, 1), [[at(5, 50, 1), at(5, 52, 1)]], STILL_OCCUPIED); // six counted minutes
     // ⚠️ The later exit's own active minute has to sit OUTSIDE the 150-minute witness window. It could
     // not count as a quiet minute anyway (it is active), but keeping it out keeps this test about the
     // index and nothing else. 08:30 is 161 min after 05:49.
-    laySamples(at(5, 55, 1), at(9, 0, 1), [[at(8, 30, 1), at(8, 31, 1)]], STILL_EMPTY);
+    laySamples(at(5, 57, 1), at(9, 0, 1), [[at(8, 30, 1), at(8, 31, 1)]], STILL_EMPTY);
     insertTransition.run(CAM, 'into_bed', 0.02, sqlTime(at(5, 49, 1, second)));
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(5, 49, 1, second + 10)));
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(8, 30, 1, 5))); // the later, real departure
@@ -1772,16 +1773,17 @@ describe('★★★ #598: the settling-tail guard believes a still sleeper, not 
 
   test('#598 C12: the window starts at the return\'s own minute: a quiet minute just before it does not count', () => {
     // The early end of the window, pinned (C5 pins the far end). The return lands at 05:49:29 in a minute
-    // that is itself ACTIVE (so not a quiet one), 5 quiet minutes follow (05:50-05:54, one under the
+    // that is itself ACTIVE (so not a quiet one), 5 counted quiet minutes follow (05:51-05:55, one under the
     // threshold), and the minute just BEFORE the return (05:48) is quiet too, between two active ones.
-    // Counted, 05:48 would make the sixth and skip the exit; it is outside the window, so the exit stands.
+    // 05:50 is skipped after the return. Counting 05:48 would make the sixth and skip the exit;
+    // it is before the window, so the exit stands.
     // The later real exit (08:30) is 161 minutes after 05:49, outside the window as well.
     laySamples(at(19, 30), at(5, 46, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
-    laySamples(at(5, 46, 1), at(5, 55, 1), [
+    laySamples(at(5, 46, 1), at(5, 56, 1), [
       [at(5, 46, 1), at(5, 48, 1)], // awake and moving
       [at(5, 49, 1), at(5, 50, 1)], // the return's own minute: ACTIVE
-    ], STILL_OCCUPIED); // so 05:48 is quiet, and 05:50-05:54 are the five quiet minutes
-    laySamples(at(5, 55, 1), at(9, 0, 1), [[at(8, 30, 1), at(8, 31, 1)]], STILL_EMPTY);
+    ], STILL_OCCUPIED); // so 05:48 is quiet, and 05:51-05:55 are the five counted minutes
+    laySamples(at(5, 56, 1), at(9, 0, 1), [[at(8, 30, 1), at(8, 31, 1)]], STILL_EMPTY);
     insertTransition.run(CAM, 'into_bed', 0.02, sqlTime(at(5, 49, 1, 29)));
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(5, 49, 1, 39))); // the tail, 10 s later
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(8, 30, 1, 5))); // a later exit
@@ -1808,6 +1810,113 @@ describe('★★★ #598: the settling-tail guard believes a still sleeper, not 
   });
 });
 
+// #914 excludes the later departure's own minute. The start-side climb-out exclusion uses
+// the same witness, with a 06:22 pair and a 09:03 exit after the 07:00 window.
+function layClimboutWitness({ quietAt = [23, 24, 45, 48, 58, 117], activeAt = [], pair = true,
+  laterActive = true, laterOffset = 183 } = {}) {
+  const minute = (k) => new Date(at(6, 0, 1).getTime() + k * 60000);
+  laySamples(at(19, 30), minute(23), [[at(19, 30), at(19, 40)], [minute(20), minute(23)]], STILL_OCCUPIED);
+  for (let k = 23; k < 240; k++) {
+    const motion = activeAt.includes(k) || (laterActive && k >= laterOffset && k < laterOffset + 3) ? 0.4
+      : quietAt.includes(k) ? STILL_OCCUPIED : STILL_EMPTY;
+    insertSample.run(CAM, sqlTime(minute(k)), motion, motion);
+  }
+  if (pair) insertTransition.run(CAM, 'into_bed', 0.142, sqlTime(new Date(minute(22).getTime() + 19000)));
+  insertTransition.run(CAM, 'out_of_bed', 0.102, sqlTime(new Date(minute(22).getTime() + 31000)));
+  insertTransition.run(CAM, 'out_of_bed', 0.028, sqlTime(new Date(minute(laterOffset).getTime() + 4000)));
+}
+
+describe('settling witness excludes the exit climb-out', () => {
+  test('2026-11-20 shape: six old witness minutes include the first climb-out minute', (t) => {
+    layClimboutWitness();
+    for (const [h, m] of [[9, 25], [10, 0]]) {
+      t.mock.timers.enable({ apis: ['Date'], now: at(h, m, 1).getTime() });
+      try { assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22'); }
+      finally { t.mock.timers.reset(); }
+    }
+  });
+
+  test('prod shape: five old witness minutes already keep the real exit (guard)', () => {
+    layClimboutWitness({ quietAt: [23, 24, 45, 48, 58] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('still sleeper: six later occupied quiet minutes still set aside a tail (guard)', () => {
+    layClimboutWitness({ quietAt: [23, 35, 45, 48, 58, 70, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:03');
+  });
+
+  test('five later witness minutes do not meet the six-minute boundary (guard)', () => {
+    layClimboutWitness({ quietAt: [35, 45, 48, 58, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('documented cost: one quiet minute at +1 and five others takes the exit; the rule cannot tell this from the measured night', () => {
+    layClimboutWitness({ quietAt: [23, 35, 45, 48, 58, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('the second minute after into_bed still counts: it makes six with five later minutes (guard)', () => {
+    layClimboutWitness({ quietAt: [24, 35, 45, 48, 58, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:03');
+  });
+
+  test('uncut witness skips from +1 even when the exit lands at +1, then counts a quiet +3', () => {
+    // No later departure cuts this window. The into_bed is minute 22, the exit minute 23;
+    // +1 is quiet occupied, +2 is empty, +3 and five later minutes are quiet occupied.
+    // Correct count is six if +3 and all five later minutes are present, and five without one.
+    const occupied = new Array(150).fill(false);
+    const active = new Array(150).fill(false);
+    for (const minute of [23, 25, 35, 45, 48, 58, 117]) occupied[minute] = true;
+    assert.equal(settlingQuietWitness(22, Infinity, occupied.length, occupied, active), true,
+      'the quiet +3 minute counts despite the next-minute exit');
+    occupied[117] = false;
+    assert.equal(settlingQuietWitness(22, Infinity, occupied.length, occupied, active), false,
+      'the +1 minute follows into_bed and cannot make the sixth');
+  });
+
+  test('#914: a sixth minute on the later departure itself cannot vouch (guard)', () => {
+    layClimboutWitness({ quietAt: [35, 45, 48, 58, 117, 150], activeAt: [151, 152], laterActive: false, laterOffset: 150 });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('a real return with eleven later quiet minutes and small stirs stays protected (guard)', () => {
+    layClimboutWitness({ quietAt: [23, 35, 40, 45, 48, 53, 58, 70, 80, 90, 100, 117], activeAt: [43, 63] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:03');
+  });
+
+  test('without a settling pair the real exit remains the wake (guard)', () => {
+    layClimboutWitness({ pair: false, quietAt: [23, 24, 35, 45, 48, 58, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('radar shadow uses the same witness; sensor evidence can still reject the early exit', (t) => {
+    layClimboutWitness();
+    const dev = db.prepare("INSERT INTO esphome_devices (name, host, child_id) VALUES ('climbout', '192.0.2.14', ?)").run(CHILD).lastInsertRowid;
+    const hr = db.prepare(`INSERT INTO esphome_entities (device_id, object_id, child_id, kind, name, unit)
+      VALUES (?, 'heart_rate', ?, 'sensor', 'Heart Rate', 'bpm')`).run(dev, CHILD).lastInsertRowid;
+    const put = db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n, nzero, nmiss) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)');
+    try {
+      for (let tt = at(6, 0, 1); tt < at(10, 0, 1); tt = new Date(tt.getTime() + 60000)) {
+        const nearExit = tt >= at(6, 23, 1) && tt < at(6, 33, 1);
+        put.run(hr, Math.floor(tt.getTime() / 60000), nearExit ? 80 : 0,
+          nearExit ? 80 : null, nearExit ? 80 : null, nearExit ? 80 : null,
+          nearExit ? 10 : 0, nearExit ? 0 : 10);
+      }
+      t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+      const night = computeNight(CHILD, DATE);
+      assert.equal(hhmm(night.wake_at), '06:22');
+      assert.equal(hhmm(night.wake_at_sensor), '09:03');
+      assert.equal(night.sensor_rejects, 1);
+    } finally {
+      t.mock.timers.reset();
+      db.prepare('DELETE FROM esphome_readings').run();
+      db.prepare('DELETE FROM esphome_entities').run();
+      db.prepare('DELETE FROM esphome_devices').run();
+    }
+  });
+});
+
 // --- #914: the settling-tail witness stops at the next real departure ------------------------------------------------
 //
 // ★★★ The night of 2026-10-30 (staging, one child): a stray `into_bed` at 06:29:05, the REAL exit 51 s later at 06:29:56
@@ -1825,8 +1934,8 @@ describe('★★★ #598: the settling-tail guard believes a still sleeper, not 
 //   marks    — more bed transitions: [type, minute offset, second]
 // No sound anywhere: the #509 veto needs an awake run reaching the window end, so it never runs and the wake is the
 // departure scan's own choice: 06:29 when the exit stands, a later exit when it is set aside. The witness window runs
-// from the return's minute (06:29, offset 29) for 150 minutes: offsets 29-178. The evidence ends at 10:00 (window end +
-// 3 h, offset 240), so a later exit needs its 20 quiet minutes before then.
+// from the return's minute (06:29, offset 29) for 150 minutes: offsets 29-178. The evidence ends at 10:00 (window end
+// + 3 h, offset 240), so a later exit needs its 20 quiet minutes before then.
 const om914 = (k, s = 0) => new Date(at(6, 0, 1).getTime() + k * 60000 + s * 1000);
 function layWitnessMorning({ quietAt = [], activeAt = [], marks = [] } = {}) {
   laySamples(at(19, 30), om914(30), [[at(19, 30), at(19, 40)], [om914(22), om914(30)]], STILL_OCCUPIED);
@@ -4369,6 +4478,8 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       // choice of "the last recorded" passes it. Here the `into_bed` is 06:30:05 and the exits 06:30:10 and 06:31:00,
       // the gap opens at 06:30 and the nearer exit (10 s) is the first one; "the last" would read 06:31 from the
       // moment the later exit qualifies, a clock drift the scan's own fallback does not have (06:30 at 07:08).
+      // With one climb-out minute skipped, the 06:32 witness still counts and both exits are set aside;
+      // removing the nearest-skip choice makes the 07:38 wake read 06:31.
       const { clock } = layHandBack({ strayAt: [30, 5], exitAt: [30, 10], extraExits: [[31, 0]] });
       for (const [h, m] of [[7, 8], [7, 38], [10, 0]]) {
         assert.equal(hhmm(nightAt(t, clock(h, m)).wake_at), '06:30', `clock ${h}:${m}`);

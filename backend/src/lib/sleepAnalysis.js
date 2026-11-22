@@ -75,7 +75,10 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // '9': faint in-bed movement with a low mean level no longer witnesses adjacent sound during
 // put-down-anchored onset. This can move onset and derived sleep figures. Baseline sameContext
 // deliberately ignores this label, so comparison baselines can mix detection rules for 28 days.
-export const SCORING_ALGO = '9';
+// '10': the settling-tail witness no longer counts the minute after the into_bed of a settling pair as proof
+// the child stayed. A real exit previously set aside can become the wake, moving stored and reported
+// sleep figures; old stored rows are not rewritten and comparison baselines can mix rules for 28 days.
+export const SCORING_ALGO = '10';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
 // Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
@@ -456,7 +459,21 @@ const JITTER_REENTRY_MS = 60 * 1000;
 // discarded it and the wake fell to the movement-only 06:13, which #618's hand-back undid. Since #914 the skip is not
 // made: only 4 of the noisy minutes come before 06:57:12. Production read that morning's wake for that child right
 // only because its `into_bed` was logged 124 s before the exit, outside JITTER_REENTRY_MS.
+// Six is the calibrated still-sleeper count from the nights above. On 2026-11-20 it was exactly met
+// only because the first minute after the settling pair was counted; excluding it leaves five.
 const SETTLING_WITNESS_MIN_QUIET = 6;
+// #914 excludes the later departure's own minute because a climb-out is not proof of staying.
+// Apply that principle at the start too: skip only the minute after the into_bed of a settling pair.
+// The exit can land in the same or next minute (the pair is at most 60 seconds apart). In the latter
+// case the skipped minute is the exit's own; a later climb-out minute can still count. On 2026-11-20
+// the skipped 06:23 minute was the strongest of six quiet occupied readings; the witness falls from
+// six to five, just one occupied quiet minute from setting the real exit aside again. Replay over
+// every night with minute readings, 62 on each database, changed only that measured night. Of 23
+// settling pairs with a quiet occupied minute at +1 or +2, 22 were real mid-night stays. Skipping
+// one costs at most one such witness minute for a still sleeper; later quiet occupied minutes still
+// count. Calibrated on two cameras in one house, not measured elsewhere: levels are fractions of
+// the painted zone, so a noisier room or larger zone can change what reads as quiet occupancy.
+const SETTLING_WITNESS_CLIMBOUT_MIN = 1;
 // A bedtime is never a rigid clock time — a tired child can be asleep well before the window opens, and
 // clipping onset to window_start silently loses that sleep (and misreports the night's length). So the
 // timeline is built from this far BEFORE window_start; symmetric with WAKE_LOOKAHEAD_MS at the other
@@ -571,6 +588,18 @@ const EMPTY_BED_MAX_PEAK = 0.1;
 // child's night ended at 20:06 on a parent leaving the room. So the window is now also cut at the next
 // put-down after the settle (see bedOccupiedAfter and guard 3); these three numbers did not change.
 const OCCUPANCY_WITNESS_MIN = 150;
+
+// The departure scan passes its minute arrays here; keeping this count callable also pins the
+// uncut (no later departure) boundary where the scan would otherwise hand its only exit back.
+export function settlingQuietWitness(from, until = Infinity, totalMinExt, cribOccExt, cribActExt) {
+  const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);
+  let still = 0;
+  for (let i = Math.max(from, 0); i < witnessEnd; i++) {
+    if (i > from && i <= from + SETTLING_WITNESS_CLIMBOUT_MIN) continue;
+    if (cribOccExt[i] === true && cribActExt[i] === false && ++still >= SETTLING_WITNESS_MIN_QUIET) return true;
+  }
+  return false;
+}
 const OCCUPANCY_MIN_PEAK = 0.0005;
 const OCCUPANCY_MIN_MINUTES = 3;
 // Use bed-transition-derived onset/wake as the AUTHORITATIVE times rather than merely showing them
@@ -2350,8 +2379,10 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // MEASURE first, not to copy across on the strength of this one.
     //
     // `until` (issue #914): the count stops BEFORE minute `until` (exclusive), so it runs over
-    // [from, min(from + OCCUPANCY_WITNESS_MIN, end of the evidence, until)). The only caller passes the minute of the
-    // next later departure (departureCutIdx below): a quiet minute after the child has really left again cannot say
+    // [from, min(from + OCCUPANCY_WITNESS_MIN, end of the evidence, until)), excluding the minute
+    // after `from` (the into_bed minute; #914's climb-out principle). The only caller
+    // passes the minute of the next later departure (departureCutIdx below): a quiet minute after the
+    // child has really left again cannot say
     // "he came back and stayed" (see SETTLING_WITNESS_MIN_QUIET for the nights). Exclusive because that minute is the
     // departure's own (the climb out, or an empty bed's noise as it empties), not the stay. The cap still applies: a
     // later departure past the 150 minutes does not lengthen the window.
@@ -2359,14 +2390,8 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // runs, and every return would be disbelieved (the same trap as bedOccupiedAfter's `until`).
     // Monotone by construction: every `true` the cut count returns, the uncut one returned too, so the cut can only
     // take back a skip the old count made, never skip an exit the old count kept.
-    const bedQuietlyOccupiedFrom = (from, until = Infinity) => {
-      const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);
-      let still = 0;
-      for (let i = Math.max(from, 0); i < witnessEnd; i++) {
-        if (cribOccExt[i] === true && cribActExt[i] === false && ++still >= SETTLING_WITNESS_MIN_QUIET) return true;
-      }
-      return false;
-    };
+    const bedQuietlyOccupiedFrom = (from, until = Infinity) =>
+      settlingQuietWitness(from, until, totalMinExt, cribOccExt, cribActExt);
     // Is exit `t` logged within JITTER_REENTRY_MS after the `into_bed` `back` (a tie at the same second included)?
     // The TIME half of the settling-tail guard, shared by the guard itself and by departureCutIdx, so the two cannot
     // disagree about what a tail is. The guard adds its witness on top; the cut does not (see there for why).

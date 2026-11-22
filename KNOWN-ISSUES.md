@@ -1449,6 +1449,18 @@ Since #914 those minutes are counted only **until the child leaves the bed again
 out of bed* that is not logged within a minute after a *got into bed* (judged by the times alone, whatever
 the bed shows afterwards) and not followed within 20 minutes by a *got into bed* the bed backs up. A minute
 after that cannot show the child came back and stayed: by then the bed is empty or someone else is at it.
+The minute after the *got into bed* is now excluded too: on 20 November 2026, the first of six
+quiet, occupied witness minutes was the child's climb out after the real 06:22 exit. Counting it set that exit
+aside and let a later 09:03 exit become the wake on a fresh detail page. The night card still said 06:22
+because its stored row was written before that later exit existed. This change covers that shape; stored
+nights are not recomputed. A still sleeper's later quiet, occupied minutes still count, but a still
+sleeper can lose one quiet, occupied witness minute. The skip is anchored to the *got into bed* minute,
+not the exit: the pair is at most 60 seconds apart, so an exit in the next minute has its own minute
+skipped and a later climb-out minute can still count. The measured night's witness falls from six to five,
+one quiet, occupied minute short of setting the exit aside again. Of 23 settling pairs with a quiet
+minute at +1 or +2 in the replay, 22 were real mid-night stays; the excluded minute is a known cost
+for such stays. Replayed over every night with minute readings, 62 on each database: only the measured
+night changed.
 
 **What it changes, stated rather than guessed:**
 - **6 is measured on two cameras in one house.** Over every stored night of both children there (two
@@ -1456,7 +1468,9 @@ after that cannot show the child came back and stayed: by then the bed is empty 
   2½ hours and the ones a review confirmed were not had 10 or more. Any threshold from 4 to 10 gave identical
   results there; 6 sits in the middle. Scaling every reading by a third to three times (a tighter or looser
   detection zone) kept those groups at 5 or fewer and 7 or more, so the zone's size matters only a little.
-  Nothing checks the number against your camera. **That split did not hold** (#914): on 2026-10-30 (one child,
+  Nothing checks the number against your camera. The one-minute exclusion was measured on two cameras
+  in one house, not elsewhere. Levels are fractions of the painted zone: a noisier room or a larger zone
+  can change which minutes read as quiet and occupied. **That split did not hold** (#914): on 2026-10-30 (one child,
   staging, the day after that bed's camera was replaced) the *got out of bed* that was set aside was the real
   wake, and the bed showed 5 such minutes just after the window, 8 an hour later and 10 by nearly two hours,
   every one after the child had left: an empty bed reading faint noise (see "The opposite camera" below). The
@@ -1499,7 +1513,8 @@ after that cannot show the child came back and stayed: by then the bed is empty 
   4.0% over its 20 nights before (a median night 0%: a few noisy nights). Whether the new camera is noisier is
   **not proven** (two nights), and the other child's camera, not replaced, shows the same thing, before that
   date too. Since #914 only the noise before the child's next *got out of bed* counts, which was 4 minutes that
-  morning, so that night's real exit is found. **What #914 does not fix:** noise that reaches 6 minutes before
+  morning, so that night's real exit is found. The minute after a return no longer counts either.
+  **What remains:** noise that reaches 6 minutes after that exclusion and before
   the next *got out of bed*, or a morning with no later *got out of bed* in the 2½ hours, still sets a real exit
   aside, exactly as before #914. So does a later real *got out of bed* followed within 20 minutes by a stray
   *got into bed*: the noise also supplies the 3 minutes of movement that make that return look real, the later
@@ -1646,7 +1661,8 @@ progress, when the exit is earlier than the start of the activity, or on a night
     It only limits what that costs when this rule runs. A night with no later exit, or one this rule leaves
     alone, is unchanged. (#914 has since changed that check: on that night only 4 of the noisy minutes came
     before the 06:57 *got out of bed*, so the 06:29 exit is no longer set aside and this exception is not
-    needed there. It still applies where the empty bed reaches 6 such minutes before the later exit.)
+    needed there. It still applies where the empty bed reaches 6 such minutes after the first
+    post-return minute and before the later exit.)
 - **Where it shows:** the "Woke <earlier time> <later time>" comparison on a night's detail page appears
   only when the two differ, so it disappears on a night where the exit was set aside; the "got out of bed"
   marker is not drawn for it; the child counts as out of the bed from the start of the activity, so a parent
