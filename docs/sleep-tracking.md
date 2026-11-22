@@ -546,6 +546,10 @@ minutes of the slight movement a sleeping child makes (too small to count as the
 2½ hours after the return. Bigger movement at the bed does not count, because after a child has
 really got up that is a parent stripping the bed, tidying or reaching in: counting it once turned a
 real early-morning wake into one more than two hours later.
+The minute after that *got into bed* does not count as proof the child stayed:
+it can be the child's climb out after a real exit. The skip follows the *got into bed* minute,
+so if the exit lands in the next minute, that is the skipped minute. Later quiet, occupied minutes still count,
+so a child who did return and settle can still have that short exit set aside.
 Those minutes are only counted **until the child leaves the bed again**: up to the next *got out of
 bed* that is not logged within a minute after a *got into bed* (judged by the times alone) and that
 the child does not come straight back from (a *got into bed* within 20 minutes, with the bed then
