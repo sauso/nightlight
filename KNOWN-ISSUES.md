@@ -715,10 +715,14 @@ closing sentence.
   (2026-09-30): 0 such rows, but only about 14 hours of data exist since #493's clone correction reached it, so
   this is "not seen yet", not "cannot happen". If it ever shows up, a minute with any non-zero motion peak
   should count as watched (a repeat's change is exactly 0, so a non-zero peak proves a real frame).
-- **Applied to the live wake watcher since issue #588, not yet to the bed-transition rules.** The live
-  watcher that records wake clips now treats a minute with sound but no video, on a camera that had delivered
-  video, as a minute it did not see (next section). The bed in/out rules still read the movement peak alone, so
-  during a stall they can still read the bed as still: a follow-up issue. The live watcher decides each minute
+- **Applied to the live wake watcher since issue #588. The bed in/out detector needs no change (#613).** The
+  live watcher that records wake clips now treats a minute with sound but no video, on a camera that had
+  delivered video, as a minute it did not see (next section). The bed in/out detector reads frames, not minutes:
+  during a stall it gets nothing, so it can neither record nor confirm a move, and a move pending before the
+  stall needs 6 seconds of frames received after it (#452). Its limit: movement during the stall cannot cancel
+  that pending move (#452's deliberate "reset, not cancel"). Checked on 2026-11-22 over about ten weeks of both
+  databases: no stored move sat inside a stalled minute and none was confirmed across one. The nightly rules
+  that read these moves already treat a stalled minute as unknown (#508). The live watcher decides each minute
   when it ends, from the frames the motion detector *received*, so it differs from this rule in two shapes. A
   minute whose every frame is later proven a repeat (stored with 0 frames, so unwatched here) still counts as
   watched live: measured on 2026-10-05 over every stored minute of two cameras in one house, there is no such
@@ -847,8 +851,9 @@ one moves both. They are constants, not settings, so there is no default to chan
 - **A child crying through a video stall is not recorded as a wake**, the same as on the sleep timeline: a
   bedroom microphone hears the whole house, so a noise nobody saw is not taken as the child. Sound **alerts** are
   a separate path and still fire.
-- **The bed in/out rules are not changed by #588** and still read a stalled minute's movement as before (a
-  separate follow-up).
+- **The bed in/out detector is not changed by #588 and needs no change**: it reads frames, not minutes, so a
+  stall gives it nothing to read (#613; the measurement is in the entry under "Applied to the live wake watcher
+  since issue #588").
 - **A backward clock step of more than about 2 minutes ends the run in progress.** Smaller steps (every
   ordinary clock correction) are absorbed before they reach the watcher and change nothing. A watcher still
   settling also restarts its count; one that is already armed stays armed. The sleep timeline merges the
