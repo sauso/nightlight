@@ -28,6 +28,10 @@
   --accent-line: #5663d6;
   --complement: #f2c14e;
   --on-complement: #14142a;
+  /* Text ON a status-badge fill (--live, --offline, --text-secondary): white by day, navy at night, because those three fills
+     are pale at night (#8bdbad, #f4a3ad, #bcb3d5) and white on them was 1.64 / 1.96 / 1.99:1 (#1189). Day 5.77 / 5.92 / 6.26,
+     night 11.03 / 9.19 / 9.07; test/paletteTokens.test.jsx recomputes all six. */
+  --on-status: #ffffff;
   /* The header is the one navy #14142a in BOTH themes (the original; the warm #1f1a1e of 2026-11-12 is gone). Its text is
      #e8e2f7 (14.32:1) and its back link --accent-soft/#d3d8ff (12.93:1). index.html's theme-color meta repeats --bar so the
      phone's status bar matches. */
@@ -129,6 +133,7 @@
   --text-secondary: #bcb3d5;
   --accent: #8995ff;
   --on-accent: #14142a;
+  --on-status: #14142a;
   --accent-text: #a7b1ff;
   --accent-soft: #c5cbff;
   --accent-line: #8995ff;
@@ -1437,7 +1442,7 @@ body.in-pip .tile-menu-backdrop {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-  color: #fff;
+  color: var(--on-status);
 }
 .status-badge--ok { background: var(--live); }
 /* "Recommended" (the Tailscale card): the complement colour, as a small highlight rather than a status (owner, 2026-11-05).

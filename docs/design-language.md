@@ -67,6 +67,7 @@ These are the owner's approximate day/night palette, grouped at the top of
 | `--accent-soft` | `#D3D8FF` | `#C5CBFF` | Header controls and subtle accents |
 | `--complement` | `#F2C14E` | `#F6D365` | Small highlights only (see section 1) |
 | `--on-complement` | `#14142A` | `#14142A` | Text on a `--complement` fill |
+| `--on-status` | `#FFFFFF` | `#14142A` | Text on a status badge fill (`--live`, `--offline`, `--text-secondary`) |
 | `--bar` | `#14142A` | `#14142A` | Header |
 | `--bar-text` | `#E8E2F7` | `#E8E2F7` | Header title |
 | `--live` | `#23734F` | `#8BDBAD` | Live status |
@@ -706,9 +707,10 @@ avatar (`:focus-visible` only); a click or tap draws nothing, since a second box
 
 - A protected clip uses a quiet lock badge with the accessible name **Protected** in list metadata.
   The player’s admin-only lock button uses **Protect this clip** / **Unprotect this clip** and a pressed state; disable Delete while protected.
-- `.status-badge` — filled pill, 3px 10px, 12px/600, white text; `--ok` `--live`, `--bad`
-  `--offline`, `--off` `--text-secondary`. `--sm` = 2px 8px / 11px. **Drift (#1189):** the white text is right by day
-  but sits on a pale fill at night (1.64:1 on `--live`), so the night theme should use `--on-accent`.
+- `.status-badge` — filled pill, 3px 10px, 12px/600, text `--on-status` (white by day, navy at night); `--ok` `--live`,
+  `--bad` `--offline`, `--off` `--text-secondary`. `--sm` = 2px 8px / 11px. The night fills are pale, so the text is navy
+  there: 11.03:1 on `--live`, 9.19:1 on `--offline`, 9.07:1 on `--text-secondary` (day, white: 5.77, 5.92, 6.26). It was
+  white at night, 1.64 to 1.99:1, until #1189; `test/paletteTokens.test.jsx` recomputes all six pairs.
 - An **outlined** pill is an attribute, not a state: transparent fill, 1px `--accent-line` border, `--accent-text`,
   11px/600, 2px 8px (the camera card's capability chips, `.camera-device__chips span`, with a check icon). Filled = state,
   outlined = attribute. (The `.cam-badge` class this bullet used to name no longer exists.)
