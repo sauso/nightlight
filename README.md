@@ -102,6 +102,33 @@ The app uses host networking, so Nightlight is served on port 4000 of the Home A
 
 **Mobile access.** Use the installable web app or the [Android and iOS companion apps](https://github.com/sauso/nightlight-mobile), including supported background audio features. The apps are installed from GitHub rather than an app store (the iOS app is sideloaded).
 
+## Sleep scoring and night analysis
+
+Nightlight turns what your cameras already see and hear into a clear picture of each child's night. There is nothing to wear and no extra hardware to buy.
+
+<table>
+  <tr>
+    <th width="33%" align="center">The night at a glance</th>
+    <th width="33%" align="center">Why this score?</th>
+    <th width="33%" align="center">Wake-ups and timelapse</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/framed/sleep-mobile.png" alt="A night's score, a plain-English summary and the timeline on a phone" width="230"></td>
+    <td align="center"><img src="docs/screenshots/framed/sleep-score-mobile.png" alt="The five parts of a sleep score, each shown next to the child's usual, on a phone" width="230"></td>
+    <td align="center"><img src="docs/screenshots/framed/sleep-wakeups-mobile.png" alt="A night's timeline, its timelapse and its wake-ups on a phone" width="230"></td>
+  </tr>
+</table>
+
+- **A score measured against the child, not a chart.** Each finished night gets a score from 0 to 100, compared with that child's own recent nights. It reads Great, Good or Fair. Until Nightlight has seven nights to compare with, it is an early estimate.
+- **It shows its working.** Tap **Why this score?** to see the five parts (how long they slept, how unbroken the night was, how long they took to settle, how restless they were and how regular their times are), each next to the child's usual.
+- **The night in plain sentences.** For example: "The longest unbroken stretch was 5h 53m, a larger share of the night than usual." The sentences come from a fixed set of phrases filled in with the night's own figures. They describe and compare; they never give advice.
+- **A timeline you can read.** A to-scale bar of asleep, stirring and awake stretches, with each wake-up, when they got into bed and when they got up. Minutes the camera could not watch show as **No data** instead of being guessed.
+- **Check it, correct it.** The morning after, Nightlight asks whether the wake-up time was right. Your answer corrects that night and is kept.
+- **A month at a glance.** A strip of seven nights with a calendar behind it, so you can see how this week compares.
+- **Optional extras.** A timelapse of each night, clips of wake-ups if you turn recording on, the room temperature, and heart and breathing rate from a compatible [ESPHome](docs/esphome.md) radar sensor, shown beside the night.
+
+These are estimates from movement and sound, not a medical measurement. Nightlight does not measure sleep stages, and a score is no reason to worry on its own. [How sleep tracking works](docs/sleep-tracking.md) explains each part, what "usual" means and the known limits.
+
 ## Privacy and safety
 
 Nightlight doesn't require a Nightlight cloud account or send your video to a Nightlight-hosted service. That doesn't mean every optional connection stays on your network:

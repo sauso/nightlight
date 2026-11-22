@@ -75,6 +75,16 @@ Tap the summary card to open the night. The strip at the top moves between night
 
 ![A night's detail on a phone](screenshots/sleep-mobile.png)
 
+**Why this score?** opens the five parts of the score, each shown next to the child's usual. Under the timeline are that night's timelapse and the wake-ups.
+
+![The five parts of a sleep score on a phone](screenshots/sleep-score-mobile.png)
+
+![A night's wake-ups and timelapse on a phone](screenshots/sleep-wakeups-mobile.png)
+
+On a computer the same page keeps the strip of nights, the score and the timeline in one column beside the sidebar.
+
+![A night's detail on desktop](screenshots/sleep-desktop.png)
+
 ### 5. Check the estimate
 
 The morning check asks one question: is the wake time right? Choose **That's right**, or **Not quite** and enter the right time. Changing the bedtime, or saying no one was in the bed, is below it.
