@@ -25,6 +25,7 @@ const { startOnvifMotion, stopAllOnvifMotion, _setOnvifAlertStampForTests, _onvi
   await import('../src/lib/onvifMotion.js');
 const { shouldHold, HOLD_CAP_MS, _reset } = await import('../src/lib/alertHold.js');
 const { _state } = await import('../src/lib/wakeWatcher.js');
+const { childWindowKeyNow } = await import('../src/lib/sleepAnalysis.js');
 
 after(async () => {
   await stopAllOnvifMotion();
@@ -72,7 +73,7 @@ test('#919 ONVIF cooldown cannot start a hold, held motion keeps its stamp, rele
   onMotion();
   assert.equal(alerts.length, before);
   assert.equal(_onvifAlertStampForTests(id), now - 61_000, 'held edge stamped cooldown');
-  _state().set(id, { asleep: true });
+  _state().set(id, { asleep: true, window: childWindowKeyNow(childId) }); // #922: a pre-armed slot carries its window key
   onMotion();
   assert.equal(alerts.length, before + 1);
   _state().delete(id);

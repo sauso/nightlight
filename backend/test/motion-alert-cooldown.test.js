@@ -71,6 +71,8 @@ mock.module('node:child_process', {
 const { default: db } = await import('../src/db.js');
 const { _reset: resetAlertHold, _state: holdState } = await import('../src/lib/alertHold.js');
 const { _state: wakeState } = await import('../src/lib/wakeWatcher.js');
+const { childWindowKeyNow } = await import('../src/lib/sleepAnalysis.js');
+// #922: a pre-armed slot carries the window key it belongs to; a slot without one no longer reads as asleep.
 const { logger } = await import('../src/lib/logger.js');
 const { _resetActivityTrackerForTests } = await import('../src/lib/activityTracker.js');
 const motion = await import('../src/lib/motionDetector.js');
@@ -524,7 +526,7 @@ describe('#454 the frame-diff alert cooldown across a detector relaunch', { conc
     g.burst(T0 + 3200);
     assert.equal(await g.alerts(), 0);
     assert.equal(stampOf(cam.id), undefined, 'held motion stamped the alert cooldown');
-    wakeState().set(cam.id, { asleep: true });
+    wakeState().set(cam.id, { asleep: true, window: childWindowKeyNow(childId) });
     await g.relaunch();
     g.burst(T0 + 10_200);
     assert.equal(await g.alerts(), 1);
