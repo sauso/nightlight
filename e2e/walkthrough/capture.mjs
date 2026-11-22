@@ -106,6 +106,12 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
   await go(`/children/${AVERY}`);
   await page.getByText('Last night').first().waitFor();
   await shot(`child-${suffix}`);
+  if (suffix === 'desktop') {
+    // The night analysis on a wide screen (the website's sleep section): score, the night's own words, the timeline.
+    await go(`/children/${AVERY}/sleep`);
+    await page.getByText('Timeline', { exact: true }).waitFor();
+    await shot('sleep-desktop');
+  }
   await context.close();
 }
 
@@ -119,6 +125,18 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
   // longer text containing the word (a night summary phrase, say) can satisfy it early.
   await page.getByText('Timeline', { exact: true }).waitFor();
   await shot('sleep-mobile');
+
+  // The website and the README showcase the score and the night analysis: the sheet that explains the score, and the
+  // wake-ups list under the timeline. Both are the sleep page's own screens, captured the way a person reaches them.
+  await page.getByRole('button', { name: /Why this score/ }).click();
+  await page.getByRole('heading', { name: 'Why this score?' }).waitFor();
+  await shot('sleep-score-mobile');
+  await page.keyboard.press('Escape');
+  await page.getByRole('heading', { name: 'Why this score?' }).waitFor({ state: 'detached' });
+  const wakeTab = page.getByRole('tab', { name: /^Wake-ups/ });
+  await wakeTab.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await page.evaluate(() => window.scrollBy(0, -100)); // keep the tabs below the header bar, not behind it
+  await shot('sleep-wakeups-mobile');
 
   // The morning review: opened the way a person gets there, from the prompt on the child page.
   await go(`/children/${AVERY}`);
