@@ -20,6 +20,7 @@ const { default: db } = await import('../src/db.js');
 const { isMotionPayload, refreshMqttConnection, stopMqtt, forgetMqttMotionAlert, _mqttMotionStampForTests, _setMqttMotionStampForTests } = await import('../src/lib/mqttClient.js');
 const { shouldHold, HOLD_CAP_MS, _reset } = await import('../src/lib/alertHold.js');
 const { _state } = await import('../src/lib/wakeWatcher.js');
+const { childWindowKeyNow } = await import('../src/lib/sleepAnalysis.js');
 
 after(() => {
   stopMqtt();
@@ -58,7 +59,7 @@ test('#919 MQTT cooldown cannot start a hold, held motion keeps its stamp, relea
   publish();
   assert.equal(alerts.length, before);
   assert.equal(_mqttMotionStampForTests(id), now - 61_000, 'held message stamped cooldown');
-  _state().set(id, { asleep: true });
+  _state().set(id, { asleep: true, window: childWindowKeyNow(childId) }); // #922: a pre-armed slot carries its window key
   publish();
   assert.equal(alerts.length, before + 1);
   _state().delete(id);

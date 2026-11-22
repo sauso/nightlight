@@ -1201,7 +1201,7 @@ alert cannot fire sooner than **Motion cooldown** after it, whatever happened to
   longer re-arms an alert (it did, before).
 - **An alert that was silenced** (outside the alert schedule, or by snoozing the camera) does not start a
   cooldown, so one can fire as soon as the schedule opens or the snooze ends (unchanged).
-- **Hold alerts until asleep (#919, #1037):** held live motion and sound alerts are dropped, not queued, and the hold does not stamp their cooldown. Outside the sleep window the watcher cannot detect sleep, so the hold has no time limit: an evening crying spell or daytime nap can be silent. After sleep is detected, a restart in the same window resumes the saved asleep result; before detection, a restart resets the quiet count and inside-window 45-minute clock, allowing up to another 45 minutes of holding. A saved result for a camera reassigned to another child is discarded at restart. A window open for almost 24 hours can change its start while staying open, so a restart can lose the saved result. `alerting_now` still reports true during a hold because it only reads snooze and the Alert schedule. The 45-minute cap is a design choice, not measured; inside the window, a child who cries without settling can be alerted only after it. This is not a safety device. Demo sample events bypass the live alert path.
+- **Hold alerts until asleep (#919, #1037, #922):** held live motion and sound alerts are dropped, not queued, and the hold does not stamp their cooldown. Outside the sleep window the watcher cannot detect sleep, so the hold has no time limit: an evening crying spell or daytime nap can be silent. After sleep is detected, a restart in the same window resumes the saved asleep result; before detection, a restart resets the quiet count and inside-window 45-minute clock, allowing up to another 45 minutes of holding. A saved result for a camera reassigned to another child is discarded at restart. Each night starts unarmed even when the window remains open between nights. Changing the window's start time or the timezone also resets the watcher at once, so held alerts are dropped until it re-arms or the cap expires; changing only its end does not (the key is the start time). `alerting_now` still reports true during a hold because it only reads snooze and the Alert schedule. The 45-minute cap is a design choice, not measured; inside the window, a child who cries without settling can be alerted only after it. This is not a safety device. Demo sample events bypass the live alert path.
 - **A backward step of the server's clock** (a time-sync correction) silences the frame-diff alert for at most
   one cooldown, counted from the first video frame analysed after the step (at 5 frames a second that is
   immediate; if frames stop for ten minutes after the step it starts at the next frame). The ONVIF and MQTT
@@ -1425,8 +1425,8 @@ chosen for this: the morning departure is searched for, and the night's saved su
   inside the sleep window itself; the live wake watcher (which also decides wake clips) uses the window plus
   5 minutes either side (also for a window that opens between 00:00 and 00:04: its 5-minute lead before
   midnight was missing until #602). A sleep window that leaves under 10 minutes between its end and the next
-  start (nearly 24 hours long) never lets that gate close, so the watcher's asleep state is not cleared
-  between nights, as with a true 24-hour window (#922).
+  start (nearly 24 hours long) never lets that gate close. The watcher still starts each night unarmed
+  when the window key changes, including with a true 24-hour window (#922).
 
 **What to do:** nothing. There is no setting for this span. The only ways to avoid the extra decode are to
 switch the child's sleep tracking off or to unassign the camera from the child. Turning motion alerts on
