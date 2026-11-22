@@ -678,9 +678,9 @@ const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 // only fill in an instant that used to be closed. With +1 first, a window of nearly 24 hours (say 00:02-23:56)
 // would switch from today's key to tomorrow's at 23:57 while today's window is still open, and a hold in
 // progress would restart its 45-minute clock (pinned in sleep-sampling-horizon.test.js, "#602").
-// Known limit (#922): with +1 in, a window leaving under 10 minutes between its end and the next start never
-// lets the gate close, so the wake watcher's asleep latch (cleared only when the gate closes) carries across
-// nights, as it already did for a true 24-hour window.
+// #922: under 10 minutes between windows keeps this gate open, including a true 24-hour window.
+// The wake watcher resets on a key change even when the gate stays open. The 0, -1, +1 order means
+// the key changes when the selected night changes, which can be local midnight rather than the next lead edge.
 //
 // `leadMs` and `trailMs` are ABSOLUTE milliseconds added to real instants from windowBoundsUtc, exactly
 // as computeNight adds ONSET_LOOKBEHIND_MS and WAKE_LOOKAHEAD_MS, so on a DST night the lead and tail

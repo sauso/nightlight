@@ -54,12 +54,13 @@ test('#919 isChildAsleep requires an armed child and any enabled camera asleep',
   makeCamera(db, { id: 'hold-cam-3', childId: 'hold-child' });
   try {
     assert.equal(isChildAsleep('hold-child'), false);
-    _state().set('hold-cam-2', { asleep: true });
+    const key = childWindowKeyNow('hold-child');
+    _state().set('hold-cam-2', { asleep: true, window: key });
     assert.equal(isChildAsleep('hold-child'), false);
-    _state().set('hold-cam-1', { asleep: true });
+    _state().set('hold-cam-1', { asleep: true, window: key });
     assert.equal(isChildAsleep('hold-child'), true);
     _state().delete('hold-cam-1');
-    _state().set('hold-cam-3', { asleep: true });
+    _state().set('hold-cam-3', { asleep: true, window: key });
     assert.equal(isChildAsleep('hold-child'), true);
     const pad = (n) => String(n).padStart(2, '0');
     const hm = (ms) => { const d = new Date(ms); return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; };
@@ -184,6 +185,7 @@ describe('the onset gate — bedtime settling is never recorded', () => {
 
 describe('the current night can arm its analysis camera', () => {
   const live = (onset_at, extra = {}) => ({ in_progress: true, analysis_camera_id: CAM, onset_at,
+    window_start: new Date(childWindowKeyNow(CHILD)).toISOString(),
     as_of: new Date(endMs(clock - 1)).toISOString(), ...extra });
 
   test('two consecutive onsets arm, save the latch and release the alert hold', () => {
@@ -410,13 +412,15 @@ describe('the current night can arm its analysis camera', () => {
     }
   });
 
-  test('#922 a nearly continuous gate carries an already armed latch into the next window', () => {
+  test('#922 a nearly continuous gate starts the next window unarmed', () => {
     const w = windowAroundNow();
     const send = (iso) => handleMinute({ cameraId: CAM, bucketStart: iso.slice(0, 19).replace('T', ' '), motionPeak: MOTION_ACTIVE + 1, soundPeak: 0 });
     try {
       db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:56', CHILD);
       mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:54:00Z') });
-      _setLiveNightProviderForTest((_id, _date, at) => live('2026-11-01T20:00:00Z', { as_of: new Date(at).toISOString() }));
+      _setLiveNightProviderForTest((_id, _date, at) => ({ in_progress: true, analysis_camera_id: CAM,
+        onset_at: '2026-11-01T20:00:00Z', as_of: new Date(at).toISOString(),
+        window_start: new Date(childWindowKeyNow(CHILD)).toISOString() }));
       const firstKey = childWindowKeyNow(CHILD);
       send('2026-11-01T23:54:00Z');
       mock.timers.setTime(Date.parse('2026-11-01T23:55:00Z'));
@@ -426,8 +430,158 @@ describe('the current night can arm its analysis camera', () => {
       mock.timers.setTime(Date.parse('2026-11-02T00:00:00Z'));
       assert.notEqual(childWindowKeyNow(CHILD), firstKey);
       send('2026-11-02T00:00:00Z');
-      assert.equal(stateOf().asleep, true, 'the existing #922 gate never closed to reset memory');
-      assert.equal(latchRow().window_start_ms, firstKey, 'the persisted latch retains its actual window');
+      assert.equal(stateOf().asleep, false, 'the new key resets memory while the gate stays open');
+      assert.equal(latchRow(), undefined, 'the old key is deleted');
+    } finally {
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  const sendAt = (iso, cameraId = CAM, motionPeak = MOTION_ACTIVE + 1) => handleMinute({
+    cameraId, bucketStart: new Date(Date.parse(iso) - 60_000).toISOString().slice(0, 19).replace('T', ' '),
+    motionPeak, soundPeak: 0,
+  });
+
+  test('#922 the key rejects a silent latch before the sweep resets it', () => {
+    const w = windowAroundNow();
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:52', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:50:00Z') });
+      _state().set(CAM, { window: childWindowKeyNow(CHILD), asleep: true, latched: true });
+      mock.timers.setTime(Date.parse('2026-11-01T23:58:00Z'));
+      assert.equal(isChildAsleep(CHILD), false, 'the alert path must not wait for the timer');
+      sweepStaleRuns();
+      assert.equal(stateOf().asleep, false);
+      assert.equal(stateOf().window, Date.parse('2026-11-02T00:02:00Z'));
+    } finally {
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('#922 a restarted latch keeps its saved key in the trailing margin', () => {
+    const w = windowAroundNow();
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:52', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:55:00Z') });
+      const oldKey = childWindowKeyNow(CHILD);
+      insertLatch(CAM, CHILD, oldKey);
+      startWakeWatcher();
+      assert.equal(stateOf().window, oldKey);
+      mock.timers.setTime(Date.parse('2026-11-01T23:58:00Z'));
+      assert.equal(isChildAsleep(CHILD), false);
+      sweepStaleRuns();
+      assert.equal(stateOf().asleep, false);
+      assert.equal(latchRow(), undefined);
+    } finally {
+      stopWakeWatcher(); mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('#922 a 24-hour window rejects the old onset in its new lead, then arms from the new night', () => {
+    const w = windowAroundNow();
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('07:00', '07:00', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-02T06:54:00Z') });
+      const oldKey = childWindowKeyNow(CHILD);
+      _setLiveNightProviderForTest((_id, date, at) => ({ in_progress: true, analysis_camera_id: CAM,
+        onset_at: new Date(at - 120_000).toISOString(), as_of: new Date(at).toISOString(),
+        window_start: `${date}T07:00:00Z` }));
+      sendAt('2026-11-02T06:54:00Z');
+      mock.timers.setTime(Date.parse('2026-11-02T06:55:00Z'));
+      sendAt('2026-11-02T06:55:00Z');
+      assert.notEqual(childWindowKeyNow(CHILD), oldKey);
+      assert.equal(stateOf().asleep, false);
+      assert.equal(stateOf().window, childWindowKeyNow(CHILD));
+      for (const minute of ['06:56', '06:57', '06:58', '06:59']) {
+        mock.timers.setTime(Date.parse(`2026-11-02T${minute}:00Z`));
+        sendAt(`2026-11-02T${minute}:00Z`);
+        assert.equal(stateOf().asleep, false, 'the previous night cannot arm the new lead');
+      }
+      mock.timers.setTime(Date.parse('2026-11-02T07:00:00Z'));
+      sendAt('2026-11-02T07:00:00Z');
+      assert.equal(stateOf().asleep, false);
+      mock.timers.setTime(Date.parse('2026-11-02T07:01:00Z'));
+      sendAt('2026-11-02T07:01:00Z');
+      assert.equal(stateOf().asleep, true, 'two new-night computations arm within two minute labels');
+    } finally {
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('#922 a second silent camera cannot keep the child asleep under yesterday’s key', () => {
+    const w = windowAroundNow();
+    makeCamera(db, { id: 'cam-secondary', childId: CHILD });
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:52', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:55:00Z') });
+      const oldKey = childWindowKeyNow(CHILD);
+      _state().set(CAM, { window: oldKey, asleep: true });
+      _state().set('cam-secondary', { window: oldKey, asleep: true });
+      mock.timers.setTime(Date.parse('2026-11-01T23:58:00Z'));
+      sendAt('2026-11-01T23:58:00Z');
+      assert.equal(isChildAsleep(CHILD), false, 'the silent camera is stale before a sweep');
+    } finally {
+      mock.timers.reset();
+      db.prepare('DELETE FROM cameras WHERE id = ?').run('cam-secondary');
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('#922 editing a window mid-night resets an armed watcher immediately', () => {
+    const w = windowAroundNow();
+    try {
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T21:00:00Z') });
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('19:00', '07:00', CHILD);
+      _state().set(CAM, { window: childWindowKeyNow(CHILD), asleep: true, latched: false });
+      db.prepare('UPDATE children SET sleep_window_start = ? WHERE id = ?').run('18:00', CHILD);
+      sendAt('2026-11-01T21:01:00Z');
+      assert.equal(stateOf().asleep, false, 'an admin edit changes the key immediately');
+    } finally {
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('#922 a backward clock step across a key flip resets again', () => {
+    const w = windowAroundNow();
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:52', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:56:00Z') });
+      sendAt('2026-11-01T23:56:00Z');
+      const oldKey = stateOf().window;
+      mock.timers.setTime(Date.parse('2026-11-01T23:58:00Z'));
+      sendAt('2026-11-01T23:58:00Z');
+      assert.notEqual(stateOf().window, oldKey);
+      stateOf().asleep = true;
+      mock.timers.setTime(Date.parse('2026-11-01T23:56:00Z'));
+      sendAt('2026-11-01T23:56:00Z');
+      assert.equal(stateOf().window, oldKey);
+      assert.equal(stateOf().asleep, false);
+    } finally {
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('#922 fourteen old quiet minutes cannot finish settling under the new key', () => {
+    const w = windowAroundNow();
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:52', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:43:00Z') });
+      for (let i = 0; i < 14; i++) {
+        const at = Date.parse('2026-11-01T23:43:00Z') + i * 60_000;
+        mock.timers.setTime(at);
+        sendAt(new Date(at).toISOString(), CAM, 0);
+      }
+      assert.equal(stateOf().quietRun, 14);
+      mock.timers.setTime(Date.parse('2026-11-01T23:57:00Z'));
+      sendAt('2026-11-01T23:57:00Z', CAM, 0);
+      assert.equal(stateOf().asleep, false);
+      assert.equal(stateOf().quietRun, 1);
     } finally {
       mock.timers.reset();
       db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
@@ -3517,6 +3671,75 @@ describe('#1037 asleep latch survives a restart only for its child and window', 
     quiet();
     assert.equal(latchRow(), undefined);
     assert.equal(_state().get(CAM).latched, false);
+  });
+
+  test('#922 a failed old-key clear retries inside a continuous gate without resetting new settling', () => {
+    const w = windowAroundNow();
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:52', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:50:00Z') });
+      _setLiveNightProviderForTest((_id, _date, at) => ({ in_progress: true, analysis_camera_id: CAM,
+        onset_at: '2026-11-01T20:00:00Z', as_of: new Date(at).toISOString(),
+        window_start: new Date(childWindowKeyNow(CHILD)).toISOString() }));
+      const send = (iso, motionPeak = MOTION_ACTIVE + 1) => handleMinute({ cameraId: CAM,
+        bucketStart: new Date(Date.parse(iso) - 60_000).toISOString().slice(0, 19).replace('T', ' '), motionPeak, soundPeak: 0 });
+      send('2026-11-01T23:50:00Z');
+      mock.timers.setTime(Date.parse('2026-11-01T23:51:00Z'));
+      send('2026-11-01T23:51:00Z');
+      const oldKey = latchRow().window_start_ms;
+      db.exec(`CREATE TRIGGER fail_latch_clear BEFORE DELETE ON wake_asleep_latch
+        WHEN OLD.window_start_ms = ${oldKey} BEGIN SELECT RAISE(FAIL, 'test clear failure'); END`);
+      mock.timers.setTime(Date.parse('2026-11-01T23:57:00Z'));
+      send('2026-11-01T23:57:00Z', 0);
+      assert.equal(stateOf().asleep, false);
+      assert.equal(stateOf().quietRun, 1);
+      assert.equal(latchRow().window_start_ms, oldKey);
+      db.exec('DROP TRIGGER fail_latch_clear');
+      mock.timers.setTime(Date.parse('2026-11-01T23:58:00Z'));
+      send('2026-11-01T23:58:00Z', 0);
+      assert.equal(latchRow(), undefined, 'the failed old-key delete is retried');
+      assert.equal(stateOf().quietRun, 2, 'retry must not restart new-key settling');
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS fail_latch_clear');
+      mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
+  });
+
+  test('#922 an old-key retry cannot remove a new saved latch', () => {
+    const w = windowAroundNow();
+    try {
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:52', CHILD);
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:55:00Z') });
+      const oldKey = childWindowKeyNow(CHILD);
+      insertLatch(CAM, CHILD, oldKey);
+      startWakeWatcher();
+      db.exec(`CREATE TRIGGER fail_latch_clear BEFORE DELETE ON wake_asleep_latch
+        WHEN OLD.window_start_ms = ${oldKey} BEGIN SELECT RAISE(FAIL, 'test clear failure'); END`);
+      mock.timers.setTime(Date.parse('2026-11-01T23:57:00Z'));
+      sweepStaleRuns();
+      assert.equal(stateOf().asleep, false);
+      const newKey = childWindowKeyNow(CHILD);
+      // #922: settle the new night while the old delete still fails; its save replaces the old row.
+      _setLiveNightProviderForTest(() => null);
+      for (let i = 0; i < ONSET_QUIET_MIN; i++) {
+        const at = Date.parse('2026-11-01T23:57:00Z') + i * 60_000;
+        mock.timers.setTime(at);
+        handleMinute({ cameraId: CAM,
+          bucketStart: new Date(at - 60_000).toISOString().slice(0, 19).replace('T', ' '),
+          motionPeak: 0, soundPeak: 0 });
+      }
+      assert.equal(stateOf().asleep, true);
+      assert.equal(latchRow().window_start_ms, newKey);
+      db.exec('DROP TRIGGER fail_latch_clear');
+      mock.timers.setTime(Date.parse('2026-11-02T00:12:00Z'));
+      sweepStaleRuns();
+      assert.equal(latchRow().window_start_ms, newKey);
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS fail_latch_clear');
+      stopWakeWatcher(); mock.timers.reset();
+      db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+    }
   });
 
   test('#1037 a failed save keeps the in-memory asleep decision and alert flow', () => {

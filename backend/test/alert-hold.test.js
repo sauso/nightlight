@@ -30,7 +30,8 @@ test('a persistent live onset releases the hold before its unchanged 45-minute c
   const base = Math.floor(Date.now() / 60_000) * 60_000;
   const send = (ms) => handleMinute({ cameraId: 'ca', bucketStart: new Date(ms).toISOString().slice(0, 19).replace('T', ' '), motionPeak: 1, soundPeak: 0 });
   _setLiveNightProviderForTest((_id, _date, at) => ({ in_progress: true, analysis_camera_id: 'ca',
-    onset_at: new Date(base).toISOString(), as_of: new Date(at).toISOString() }));
+    onset_at: new Date(base).toISOString(), as_of: new Date(at).toISOString(),
+    window_start: new Date(childWindowKeyNow('a')).toISOString() }));
   try {
     assert.equal(shouldHold({ id: 'ca' }, 1000), true);
     send(base - 120_000);
@@ -55,7 +56,7 @@ test('#919 outside the gate holds indefinitely without a clock, independently pe
     db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('19:00', '07:00', 'a');
     db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('09:00', '15:00', 'b');
     flag('a', 1); flag('b', 1);
-    _state().set('cb', { asleep: true }); // the second child is inside its window and asleep
+    _state().set('cb', { asleep: true, window: childWindowKeyNow('b') }); // the second child is inside its window and asleep
     assert.equal(shouldHold({ id: 'ca' }, 1000), true);
     assert.equal(holdState().has('a'), false, 'outside-window hold has no cap clock');
     assert.equal(shouldHold({ id: 'cb' }, 1000), false, 'asleep child may alert');
@@ -122,7 +123,7 @@ test('#919 reads child assignment fresh without resetting a spent cap', () => {
 test('#919 asleep releases without resetting the clock, and a backwards step fails open', () => {
   flag('a', 1);
   assert.equal(shouldHold({ id: 'ca' }, 1000), true);
-  _state().set('ca', { asleep: true });
+  _state().set('ca', { asleep: true, window: childWindowKeyNow('a') });
   assert.equal(shouldHold({ id: 'ca' }, 2000), false);
   _state().clear();
   assert.equal(shouldHold({ id: 'ca' }, 500), false);
@@ -185,6 +186,28 @@ test('#919 a new watcher window gives a new night clock', () => {
     assert.equal(shouldHold({ id: 'ca' }, 1000 + HOLD_CAP_MS), false);
     mock.timers.setTime(Date.parse('2026-11-01T19:00:00Z'));
     assert.equal(shouldHold({ id: 'ca' }, 1000 + 24 * 3600_000), true);
+  } finally {
+    mock.timers.reset();
+    const [start, end] = windowAround();
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(start, end, 'a');
+  }
+});
+
+test('#922 a nearly continuous window holds the next night’s first alert after its old latch', () => {
+  mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T23:54:00Z') });
+  try {
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '23:52', 'a');
+    flag('a', 1);
+    const oldKey = childWindowKeyNow('a');
+    _state().set('ca', { asleep: true, window: oldKey });
+    assert.equal(shouldHold({ id: 'ca' }, 1000), false);
+    mock.timers.setTime(Date.parse('2026-11-01T23:58:00Z'));
+    assert.notEqual(childWindowKeyNow('a'), oldKey);
+    assert.equal(shouldHold({ id: 'ca' }, 2000), true);
+    assert.equal(holdState().get('a').firstAt, 2000);
+    mock.timers.setTime(Date.parse('2026-11-02T00:02:00Z'));
+    assert.equal(shouldHold({ id: 'ca' }, 3000), true);
+    assert.equal(holdState().get('a').firstAt, 2000, 'the new night keeps one cap clock');
   } finally {
     mock.timers.reset();
     const [start, end] = windowAround();
