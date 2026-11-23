@@ -1,20 +1,21 @@
 # #971: the Tailscale version and both verified tarball digests are committed in
 # Stage 4, not fetched as metadata during a build. Bump them only in a reviewed
 # PR; the weekly rebuild must retain the reviewed pin.
-# Runtime Node tracks the 24 major again. It was previously pinned to 24.18.1 to dodge a hard
+# #751 SOAK: all Node stages run node:26-alpine while .nvmrc and CI stay on Node 24.
+# The stage-1 24.18.1 pin also goes: the image now follows the Node 26 major tag.
+# Node was previously pinned to 24.18.1 to dodge a hard
 # abort: 24.19.0 added per-object environment cleanup hooks to node::ObjectWrap
 # (nodejs/node#63642), and better-sqlite3 <= 11 subclassed ObjectWrap, so its wrapped objects
 # registered a cleanup hook whose removal path asserted env != nullptr and abort()ed during our
 # teardown ("RemoveEnvironmentCleanupHook: Assertion failed: (env) != nullptr"). better-sqlite3
 # 13's ground-up N-API rewrite no longer touches node::ObjectWrap, which removes the trigger
-# entirely — so the exact pin is no longer needed and the runtime follows node:24-alpine (patch/
-# minor within the 24 major), matching how the MediaMTX base is pinned to its major. Verified on
-# staging: clean graceful shutdown (exit 0, no abort assertion) on current 24.x with sqlite 13.
-# KEEP better-sqlite3 >= 13 while on this tag; if it's ever downgraded below 13, re-pin Node to
-# 24.18.1 or the abort at teardown returns.
+# entirely. The #751 SOAK checks Node 26 shutdown and media behaviour before support moves from 24.
+# The runtime follows node:26-alpine (patch/minor within the 26 major). Previously verified on
+# staging: clean graceful shutdown (exit 0, no abort assertion) on 24.x with sqlite 13.
+# KEEP better-sqlite3 >= 13; a downgrade can bring back the ObjectWrap abort at teardown.
 
 # --- Stage 1: build the React frontend ---
-FROM node:24.18.1-alpine AS frontend-build
+FROM node:26-alpine AS frontend-build
 WORKDIR /frontend
 # npm ci against the committed lockfile, not npm install against version ranges -
 # the image gets the exact dependency tree that was tested, instead of whatever
@@ -32,6 +33,11 @@ RUN npm run build
 # without risking an unannounced breaking change from a future major version.
 FROM bluenviron/mediamtx:1 AS mediamtx-binary
 
+# #1159: immutable model and class map; BuildKit verifies bytes before either enters the image.
+FROM scratch AS yamnet-model
+ADD --checksum=sha256:1510041dce24a2e9e84ec546807ac408ae496da6d1ed41bc3ccba649623f8e19 https://huggingface.co/andrelgomes/yamnet-onnx/resolve/8a03a1572569685c42fdbef54ff36435dbaaf689/yamnet.onnx /yamnet.onnx
+ADD --checksum=sha256:cdf24d193e196d9e95912a2667051ae203e92a2ba09449218ccb40ef787c6df2 https://raw.githubusercontent.com/tensorflow/models/dfffd623b6be8d1d9744b8e261fbac370d17c46d/research/audioset/yamnet/yamnet_class_map.csv /yamnet_class_map.csv
+
 # --- Stage 3: install the backend's production dependencies ---
 # Kept separate from the runtime so the compiler toolchain and npm/node-gyp caches this
 # needs are thrown away with the stage instead of shipping in the final image (~300MB).
@@ -39,11 +45,17 @@ FROM bluenviron/mediamtx:1 AS mediamtx-binary
 # musl prebuilt binary (prebuilds/linuxmusl-*.node) and loads that, so no compile happens
 # today - but keeping the toolchain here means the build still works unchanged if a future
 # dependency (or a better-sqlite3 without a matching prebuild) does need to compile.
-FROM node:24-alpine AS backend-deps
+FROM node:26-alpine AS backend-deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
 COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev
+# Node's package export imports dist/ort.node.min.mjs, which dynamically loads only the
+# simd-threaded WASM loader and binary (measured with the Node entry in 1.22.0). Browser,
+# WebGPU/JSEP and source-map bundles add about 60 MB and are unused by this CPU worker.
+RUN find node_modules/onnxruntime-web/dist -maxdepth 1 -type f \
+  ! -name 'ort.node.min.mjs' ! -name 'ort-wasm-simd-threaded.mjs' \
+  ! -name 'ort-wasm-simd-threaded.wasm' -delete
 
 # --- Stage 4: reviewed Tailscale static binaries ---
 # #971: version and both vendor SHA-256 values were captured on 2026-11-04 and
@@ -52,7 +64,7 @@ RUN npm ci --omit=dev
 # 73a48057aaf5f60e4f770b398e9b7af576b01dbe. A version bump requires a
 # reviewed PR updating these pins; the weekly rebuild never moves them.
 # BUILDPLATFORM runs wget/tar natively for either target arch, so no QEMU is needed.
-FROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries
+FROM --platform=$BUILDPLATFORM node:26-alpine AS tailscale-binaries
 ARG TARGETARCH
 RUN case "$TARGETARCH" in amd64|arm64) ;; *) echo TAILSCALE_UNSUPPORTED_ARCH >&2; exit 1 ;; esac
 RUN apk add --no-cache wget
@@ -68,7 +80,7 @@ RUN case "$TARGETARCH" in \
     sh /tmp/fetch-tailscale.sh "$TARGETARCH" "$TAILSCALE_VERSION" "$sha" /tailscale-bin
 
 # --- Stage 5: combined runtime (app + MediaMTX + FFmpeg) ---
-FROM node:24-alpine
+FROM node:26-alpine
 WORKDIR /app
 
 # ffmpeg: transcodes camera audio (many IP cameras use G711, which HLS can't carry).
@@ -114,6 +126,8 @@ COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
 RUN chmod +x /usr/local/bin/mediamtx
 COPY --from=tailscale-binaries --chown=0:0 --chmod=0755 /tailscale-bin/tailscale /tailscale-bin/tailscaled /usr/local/bin/
 COPY --chown=0:0 licenses/tailscale/ /usr/share/licenses/tailscale/
+COPY --chown=0:0 licenses/yamnet/ /usr/share/licenses/yamnet/
+RUN chmod 0644 /usr/share/licenses/yamnet/*
 # Notices are data: readable by everyone, executable by nobody (COPY --chmod would also strip the directory's x bit).
 RUN chmod 0644 /usr/share/licenses/tailscale/* && tailscaled --version && tailscale version --daemon=false && \
     test "$(stat -c '%u:%g:%a' /usr/local/bin/tailscale)" = 0:0:755 && \
@@ -123,13 +137,16 @@ RUN chmod 0644 /usr/share/licenses/tailscale/* && tailscaled --version && tailsc
 # node-gyp/npm caches. package.json comes along so anything that reads the app version at
 # runtime still can.
 COPY --from=backend-deps /app/node_modules ./node_modules
+# The model is data: root-owned, readable by the app user, executable by nobody. COPY --chmod would also strip
+# the directory's x bit (found by running the built image as the app user, #1159), so set modes in a RUN.
+COPY --from=yamnet-model --chown=0:0 /yamnet.onnx /yamnet_class_map.csv /app/models/
+RUN chmod 0755 /app/models && chmod 0644 /app/models/yamnet.onnx /app/models/yamnet_class_map.csv
 COPY backend/package.json ./
 
 # Drop the base image's bundled npm. npm is the package manager, not part of the running app
 # (the container runs `node src/index.js`; entrypoint.sh only uses su-exec/node) - but the copy
-# that ships in node:24-alpine drags in its own vulnerable transitive deps (tar/undici/
-# brace-expansion/ip-address DoS + SSRF CVEs) that image scanners (Docker Scout/Trivy) flag on an
-# otherwise-clean image. Removing it clears those findings and trims the attack surface.
+# that ships in node:26-alpine adds unused dependencies to the runtime image. The #751 SOAK
+# keeps removing it, as on Node 24, to limit the scanner findings and attack surface.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 COPY backend/src ./src

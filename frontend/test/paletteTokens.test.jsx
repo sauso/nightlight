@@ -84,6 +84,36 @@ describe('the peri palette', () => {
       '.status-badge--highlight',
     ].sort());
   });
+
+  // #1189: a status badge's text is --on-status (white by day, navy at night), never a literal white. The night fills are pale
+  // (--live #8bdbad, --offline #f4a3ad, --text-secondary #bcb3d5), so white text on them was 1.64 / 1.96 / 1.99:1. The fills are
+  // asserted too: a fill swapped for a pale surface would otherwise pass the contrast check by being checked against the wrong colour.
+  test('★ the status badges: text is --on-status, each fill is its own status token, and every pair clears 4.5:1 in both themes', () => {
+    expect(day['--on-status'], 'by day the badge text is white').toBe('#ffffff');
+    expect(night['--on-status'], 'at night it is navy').toBe('#14142a');
+    const fills = { '.status-badge--ok': '--live', '.status-badge--bad': '--offline', '.status-badge--off': '--text-secondary' };
+    for (const [selector, token] of Object.entries(fills)) {
+      const rule = rules.find((r) => r.startsWith(`${selector} {`));
+      expect(rule, `${selector} has a rule`).toBeTruthy();
+      expect(rule, `${selector} fills with ${token}`).toMatch(new RegExp(`(^|[ ;{])background: var\\(${token}\\)`));
+      for (const [theme, t] of [['day', day], ['night', night]]) {
+        expect(contrast(t['--on-status'], t[token]), `${theme}: --on-status on ${token}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    const base = rules.find((r) => r.startsWith('.status-badge {'));
+    expect(base, 'the base status-badge rule').toBeTruthy();
+    expect(base).toMatch(/(^|[ ;{])color: var\(--on-status\)/);
+    expect(base, 'no literal colour for the badge text').not.toMatch(/(^|[ ;{])color: #/);
+    // The text colour that WINS is the one asserted: no later rule may set a badge's `color` (a one-line `.status-badge { color: #fff }`
+    // appended below would restore the unreadable night text and leave the base rule above looking right), except the gold
+    // highlight, whose own dark text is tied to its own fill.
+    const colouring = rules.filter((r) => /\.status-badge\b/.test(r.split('{')[0]) && /(^|[ ;{])color:/.test(r.slice(r.indexOf('{'))));
+    expect(colouring.map((r) => r.split('{')[0].trim()).sort(), 'only the base rule and the highlight set a badge text colour')
+      .toEqual(['.status-badge', '.status-badge--highlight']);
+    const highlight = colouring.find((r) => r.startsWith('.status-badge--highlight {'));
+    expect(highlight).toMatch(/(^|[ ;{])background: var\(--complement\)/);
+    expect(highlight).toMatch(/(^|[ ;{])color: var\(--on-complement\)/);
+  });
 });
 
 describe('child-page interactive surfaces', () => {
@@ -315,7 +345,7 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     // here. Every place that declares one of the pinned tokens is therefore listed; the only deliberate exceptions are named:
     //   .night declares the --night-* custom properties, including search-card error text (and nothing else of the palette).
     // There are no others on this branch. Custom properties set in JSX style props are out of reach of this check.
-    const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+|child-[a-z]+(?:-on|-night)?)$/;
+    const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|on-status|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+|child-[a-z]+(?:-on|-night)?)$/;
     // The child colours (--child-<id>, -on, -night) are pinned too, so a later override elsewhere fails here.
     //   .night--<band> sets --night-tint (the tint colour, one of that band's --band-*-ring tokens) inside the @supports block that
     //           guards color-mix; the next test and "each band class feeds the tint from its own ring colour" pin its value.
@@ -451,7 +481,7 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
   // from color-mix(... var(--night-tint) ...) is "invalid at computed-value time" and the WHOLE background becomes transparent:
   // white text on the page colour. @supports is decided at parse time, so an engine without color-mix skips the block and keeps
   // the plain gradient. jsdom cannot show this, so the stylesheet text is what is checked.
-  test('★ every color-mix on the night card sits inside an @supports (color-mix) block; the plain .night rule has none', () => {
+  test('★ every variable-backed color-mix stays inside @supports; the plain .night rule has none', () => {
     expect(tintBlocks.length, 'an @supports block that tests color-mix exists').toBeGreaterThan(0);
     for (const block of tintBlocks) expect(block.condition, 'it tests a background with color-mix').toMatch(/background:\s*color-mix\(/);
     expect(tintPaint, 'the paint rule was found INSIDE the block').toContain('color-mix');
@@ -460,6 +490,10 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     const outside = outsideSupports.split('}').map((rule) => rule.replace(/\s+/g, ' ').trim());
     const offenders = outside.filter((rule) => /^\.night(--|\s|\{|$)/.test(rule) && /color-mix|--night-tint/.test(rule));
     expect(offenders, `night-card tint outside @supports: ${offenders.join(' | ')}`).toEqual([]);
+    // #1093, Codex plan review 2026-11-17: include the other variable-backed mixes in this existing audit.
+    // A legacy WebView can accept var() at parse time then discard its entire paint at computed-value time.
+    const unguarded = outside.filter((rule) => /color-mix\([^;]*var\(/.test(rule));
+    expect(unguarded, `unguarded variable-backed color-mix: ${unguarded.join(' | ')}`).toEqual([]);
     expect(nightRule).toMatch(/background: linear-gradient\(165deg, #[0-9a-f]{6} 0%, #[0-9a-f]{6} 100%\)/i);
     // The base background declaration holds no var() at all: it must stay valid on an engine that cannot compute the tint.
     expect(nightRule.match(/(?:^|[ ;{])background:[^;]*;/)?.[0], 'the plain card background').not.toContain('var(');

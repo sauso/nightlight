@@ -133,7 +133,9 @@ function insertRow(table, cols, given) {
   for (const c of cols) {
     // A TEXT PRIMARY KEY is not NOT NULL in SQLite (a legacy quirk) and would silently take NULL.
     if (c.name in row || !(c.notnull || c.pk) || c.dflt_value != null) continue;
-    if (c.pk && /^INT/i.test(c.type)) continue; // rowid alias
+    // rowid alias: only a SINGLE-column INTEGER primary key. One part of a composite key (nlcam_readings.bucket) is a
+    // plain NOT NULL column and must be filled.
+    if (c.pk && /^INT/i.test(c.type) && cols.filter((other) => other.pk).length === 1) continue;
     const fk = foreignKeys.get(c.name);
     if (fk?.table === 'cameras') row[c.name] = makeCamera(db, { id: uniq('cam') }).id;
     else if (fk?.table === 'children') row[c.name] = makeChild(db, { id: uniq('child') }).id;

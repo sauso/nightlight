@@ -147,3 +147,26 @@ test('the series is only built when the timeline is asked for', () => {
   assert.equal(stored.climate.series, undefined, 'no series without includeTimeline');
   assert.equal(stored.climate.temp_avg, 20, 'but the summary is always there');
 });
+
+// A Nightlight Camera running invented bench data marks its readings simulated. They must never become part of a night:
+// the average is STORED on the night and later correlated against by the warm/cool insight. The fixture plants a
+// recognisable extreme (99C, -30C) in both simulated rows, in the window, so any path that lets one through shows.
+const insertSimulated = db.prepare(
+  `INSERT INTO sensor_readings (camera_id, temperature, humidity, simulated, created_at) VALUES (?, ?, ?, 1, ?)`
+);
+
+test('a simulated reading is not part of a night: not the average, the extremes, the count or the chart', () => {
+  layQuietNight();
+  insertReading.run(CAM, 20, 50, sqlTime(at(23, 0)));
+  insertSimulated.run(CAM, 99, 99, sqlTime(at(23, 5)));
+  insertSimulated.run(CAM, -30, 1, sqlTime(at(2, 0, 1)));
+  const c = computeNight(CHILD, DATE, { includeTimeline: true }).climate;
+  assert.deepEqual([c.temp_avg, c.temp_min, c.temp_max, c.temp_samples, c.humidity_avg, c.humidity_samples], [20, 20, 20, 1, 50, 1]);
+  assert.deepEqual(c.series.map((p) => [p.temperature, p.humidity]), [[20, 50]], 'the chart carries the real point only');
+});
+
+test('a night with only simulated readings has no climate at all', () => {
+  layQuietNight();
+  insertSimulated.run(CAM, 99, 99, sqlTime(at(23, 5)));
+  assert.equal(computeNight(CHILD, DATE, { includeTimeline: true }).climate, null);
+});

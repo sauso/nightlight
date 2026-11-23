@@ -5,8 +5,8 @@
 // with it (sleepAnalysis.js, "THE NIGHT'S STORED FACTS"). Nothing reads them yet.
 //
 // What this file pins, one line per claim the PR makes:
-//   - a stir minute is IN-BED movement only: a noise, or movement elsewhere in the room, is not one, although the
-//     detail view still draws both as a 'stir' segment (that label is broader, and unchanged);
+//   - a stir minute is IN-BED movement only: an unwitnessed noise is also asleep on the detail bar
+//     under #1159, while movement elsewhere in the room can still appear as a stir segment;
 //   - a minute inside a counted wake, an unwatched minute and the first 30 minutes after onset are not counted;
 //   - `summary_facts.sleep.wakes` is the COUNTED wakes, so its length is always `wake_count`, also where the detail
 //     view's own list is longer (the morning-wake row) or stretches its last row;
@@ -15,8 +15,8 @@
 //   - both are stored, re-stored, and read back through the routes with the names and values a fresh compute has;
 //   - "no one was in the bed" clears the stir count and the sleep facts and keeps the temperature range; a night a
 //     parent promoted from `empty` has none; a time correction leaves both as the detector measured them;
-//   - ★ NO EXISTING FIGURE MOVED: every other key of computeNight's result, in order, and every other stored column,
-//     is byte for byte what the code before this change produced for the same nights (GOLDEN, below).
+//   - ★ the scoring baseline: every key of computeNight's result, in order, and every stored column
+//     stays byte for byte against the #1159 baseline (GOLDEN, below).
 //
 // ★ HOSTILE FIXTURE (the builder is sleep-faulty-mic.test.js's): every row is written through a column list read
 // from the schema, and every column the analysis does NOT read carries a decoy saying the opposite of the scenario
@@ -761,10 +761,10 @@ describe('stir_minutes: in-bed movement in the sleep span, outside a counted wak
     assert.equal(run.stir_minutes, 4);
   });
 
-  test('a sound-only minute is NOT a stir, though the detail view still labels it one', (t) => {
-    // Fails if the criterion is widened to "any active minute" (the detail label's rule): that counts 1 here.
+  test('#1159: an unwitnessed sound-only minute is neither a stir nor active on the detail view', (t) => {
+    // #1159 makes the displayed segment agree with the counted sleep span; stirring still counts in-bed movement.
     const night = nightWith(t, { noise: [minute(2, 0, 1)] }, { includeTimeline: true });
-    assert.equal(segmentAt(night, at(2, 0, 1)), 'stir', 'precondition: the minute IS active, and the timeline says so (label unchanged)');
+    assert.equal(segmentAt(night, at(2, 0, 1)), 'asleep');
     assert.equal(night.stir_minutes, 0, 'household noise must not read as a restless child');
   });
 
@@ -1126,19 +1126,18 @@ describe('corrections', () => {
 // =====================================================================================================
 // ★ NO EXISTING FIGURE MOVED.
 //
-// GOLDEN (test/fixtures/sleep-night-facts-golden.json) was captured by running THIS test, with the fixtures below, on
-// the source before the change (origin/dev f9b7ea47, in a scratch copy of that commit with this file copied in and
-// NIGHT_FACTS_GOLDEN_OUT pointing at the file to write). For each night it holds:
+// GOLDEN (test/fixtures/sleep-night-facts-golden.json) was refreshed for #1159 because the sound-only
+// minutes in its ordinary night deliberately changed. NIGHT_FACTS_GOLDEN_OUT captures it again when
+// the scoring rule changes; the old baseline is in git history. For each night it holds:
 //   - `plain`: computeNight's result as JSON text, key order included;
 //   - `detail_sha256`: the sha256 of the same with includeTimeline (timeline, segments, wakes, visits and all);
 //   - `row`: the stored row as JSON text, without `id`.
-// The test removes the two new keys from today's output and requires the rest to be the SAME TEXT. So an existing
+// The test removes the two sleep-facts keys from today's output and requires the rest to be the SAME TEXT. So an existing
 // value that changed, a key that moved, or a key that disappeared all fail it; only the two added keys may differ.
 // The fixtures reach the paths the new code sits beside: an ordinary night with wakes, stirs, noise, room activity,
 // an unwatched stretch and both bed transitions; a wake after the window (the metrics extension and its second
 // query); a midnight episode (the bridged wake array); an empty bed; a night never asleep; and no data.
-// If a deliberate scoring change moves this, re-capture it on the commit before that change's own additions, and
-// bump SCORING_ALGO: this change did not, because nothing here moved.
+// If a deliberate scoring change moves this, refresh the baseline and bump SCORING_ALGO.
 const GOLDEN_FILE = fileURLToPath(new URL('./fixtures/sleep-night-facts-golden.json', import.meta.url));
 const GOLDEN_NIGHTS = {
   'an ordinary night': () => {
@@ -1196,11 +1195,11 @@ function captureGoldenNights(t) {
   return out;
 }
 
-describe('★ no existing figure moved', () => {
-  test('every other key of computeNight and every other stored column is byte for byte what the code before produced', (t) => {
+describe('★ scoring baseline stays stable', () => {
+  test('every other key of computeNight and every other stored column matches the current scoring baseline', (t) => {
     const now = captureGoldenNights(t);
     if (process.env.NIGHT_FACTS_GOLDEN_OUT) {
-      // Capture mode (see above): run on the PREVIOUS source only. Never set in CI or in an ordinary run.
+      // Capture mode for a deliberate scoring change only. Never set in CI or in an ordinary run.
       fs.writeFileSync(process.env.NIGHT_FACTS_GOLDEN_OUT, `${JSON.stringify(now, null, 2)}\n`);
       return;
     }

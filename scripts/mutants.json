@@ -1,5 +1,32 @@
 [
   {
+    "label": "#hygiene password text /setup",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const { username, password, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || typeof password !== 'string' || password.length < 8) {",
+    "replace": "  const { username, password, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || !password || password.length < 8) {",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#hygiene password text /setup: malformed values"
+  },
+  {
+    "label": "#hygiene password text POST /users",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || typeof password !== 'string' || password.length < 8) {",
+    "replace": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || !password || password.length < 8) {",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#hygiene password text POST /users: malformed values"
+  },
+  {
+    "label": "#hygiene password text PUT /users/:id",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (password !== undefined && (typeof password !== 'string' || (password !== '' && password.length < 8))) {",
+    "replace": "  if (password !== undefined && password !== '' && password.length < 8) {",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#hygiene password text PUT /users/:id: malformed values"
+  },
+  {
     "label": "#978 Serve counted for any name",
     "file": "backend/src/routes/tailscale.js",
     "find": "address === `${remote.dns_name}:443` &&",
@@ -3641,7 +3668,7 @@
   {
     "label": "#455 M2: Playwright browser image falls behind the package",
     "file": "e2e/docker-compose.e2e.yml",
-    "find": "    image: mcr.microsoft.com/playwright:v1.65.0-jammy",
+    "find": "    image: mcr.microsoft.com/playwright:v1.65.1-jammy",
     "replace": "    image: mcr.microsoft.com/playwright:v1.62.1-jammy",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
@@ -3650,8 +3677,8 @@
   {
     "label": "#455 M3: Playwright pin becomes a range",
     "file": "e2e/playwright/package.json",
-    "find": "\"@playwright/test\": \"1.65.0\"",
-    "replace": "\"@playwright/test\": \"^1.65.0\"",
+    "find": "\"@playwright/test\": \"1.65.1\"",
+    "replace": "\"@playwright/test\": \"^1.65.1\"",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
     "namePattern": "^T2:"
@@ -3686,7 +3713,7 @@
   {
     "label": "#455 M6: Playwright pin regresses below its advisory floor",
     "file": "e2e/playwright/package.json",
-    "find": "\"@playwright/test\": \"1.65.0\"",
+    "find": "\"@playwright/test\": \"1.65.1\"",
     "replace": "\"@playwright/test\": \"1.49.0\"",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
@@ -3913,8 +3940,8 @@
   {
     "label": "#E2 M5: POST /users accepts a sub-8-character password",
     "file": "backend/src/routes/auth.js",
-    "find": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  if (!username || !password || password.length < 8) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
-    "replace": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  if (!username || !password) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
+    "find": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || typeof password !== 'string' || password.length < 8) {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
+    "replace": "  const { username, password, role, first_name, last_name } = req.body || {};\r\n  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.\r\n  if (!username || typeof password !== 'string') {\r\n    return res.status(400).json({ error: 'Username and an 8+ character password are required' });\r\n  }",
     "expect": "killed",
     "tests": [
       "auth-routes-branches.test.js"
@@ -15943,8 +15970,8 @@
     "replace": "const OCCUPANCY_MIN_MINUTES = 2;",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T2:",
-    "note": "2 accepts the 2026-10-10 child A 19:07 candidate (exactly 2 occupied minutes before the next put-down) on both databases. The knob is the bound, not the threshold."
+    "namePattern": "#669 T2 within margin:",
+    "note": "The within-margin twin rejects exactly 2 occupied minutes under guard 3 and accepts a threshold of 2."
   },
   {
     "label": "#669 M-669-03: the occupancy threshold rises to 4",
@@ -15953,8 +15980,8 @@
     "replace": "const OCCUPANCY_MIN_MINUTES = 4;",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T2:",
-    "note": "4 would be fitted to one night and eats into the measured floor of real onsets (5-9 occupied minutes in 150). T2's second half (exactly 3 = accepted) pins it."
+    "namePattern": "#669 T2 within margin:",
+    "note": "The within-margin twin accepts exactly 3 occupied minutes under guard 3 and rejects a threshold of 4."
   },
   {
     "label": "#669 M-669-04: the bound is inclusive (`<=`): the next put-down's own minute is counted",
@@ -15963,7 +15990,7 @@
     "replace": "for (let i = from; i <= end; i++) {",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T3:"
+    "namePattern": "#669 T3 within margin:"
   },
   {
     "label": "#669 M-669-05: fail-open 1 removed (a settle near the end of the timeline is judged by the bounded count)",
@@ -15972,8 +15999,8 @@
     "replace": "// fail-open 1 removed (mutant)",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T6a:",
-    "note": "Kept deliberately and FIRST: the before/after replay was measured with this order. T6a pins the known limit it leaves (an in-progress night at 20:30 still shows the false 18:06 put-down)."
+    "namePattern": "within-margin live fail-open needs the end-of-timeline early return",
+    "note": "The sparse within-margin live fixture accepts a put-down only while its 150-minute look-ahead exceeds the recorded timeline."
   },
   {
     "label": "#669 M-669-06: fail-open 2 removed (an unobserved minute inside the count reads as an empty bed)",
@@ -15982,7 +16009,7 @@
     "replace": "// fail-open 2 removed (mutant)",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#669 T6b:"
+    "namePattern": "#669 T6b within margin:"
   },
   {
     "label": "#669 M-669-07: the bound's default is gone (undefined -> Math.min is NaN -> every put-down with no later one is rejected)",
@@ -18592,8 +18619,8 @@
   {
     "label": "#548 login: synchronous compare back on the request path",
     "file": "backend/src/routes/auth.js",
-    "find": "(await passwordHash.compare(String(password || ''), hashToCheck)) && !!user",
-    "replace": "bcrypt.compareSync(String(password || ''), hashToCheck) && !!user",
+    "find": "(await passwordHash.compare(textOrEmpty(password), hashToCheck)) && !!user",
+    "replace": "bcrypt.compareSync(textOrEmpty(password), hashToCheck) && !!user",
     "expect": "killed",
     "tests": [
       "mfa-replay-and-async-bcrypt.test.js"
@@ -19101,8 +19128,18 @@
   {"label": "#365 insights: min_group_nights is not returned", "file": "backend/src/lib/sleepAnalysis.js", "find": "    min_group_nights: INSIGHT_MIN_GROUP_NIGHTS, // additive", "replace": "    // additive", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 golden"},
   {"label": "#365 card: the not-enough-nights verdict is ignored and the comparison is shown", "file": "frontend/src/pages/SleepDetail.jsx", "find": "if (ins.verdict === 'not_enough_nights') {", "replace": "if (false) {", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "too few nights in a group"},
   {"label": "#365 card: the target is hard-written instead of read from the server", "file": "frontend/src/pages/SleepDetail.jsx", "find": "const need = ins.min_group_nights;", "replace": "const need = 5;", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "too few nights in a group"},
-  {"label": "#365 card: a missing (null) cooler group is shown as 1 night, not 0", "file": "frontend/src/pages/SleepDetail.jsx", "find": "cool?.nights ?? 0", "replace": "cool?.nights ?? 1", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "a missing cooler group"},
-  {"label": "#365 card: a missing (null) warmer group is shown as 1 night, not 0", "file": "frontend/src/pages/SleepDetail.jsx", "find": "warm?.nights ?? 0", "replace": "warm?.nights ?? 1", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "a missing warmer group"},
+  {"label": "#365 card: a missing (null) cooler group is shown as 1 night, not 0", "file": "frontend/src/pages/SleepDetail.jsx", "find": "{cool?.nights ?? 0} cooler and", "replace": "{cool?.nights ?? 1} cooler and", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "a missing cooler group"},
+  {"label": "#365 card: a missing (null) warmer group is shown as 1 night, not 0", "file": "frontend/src/pages/SleepDetail.jsx", "find": "{warm?.nights ?? 0} warmer.", "replace": "{warm?.nights ?? 1} warmer.", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "a missing warmer group"},
+  {"label": "#365 insights: leave-one-out gate is removed", "file": "backend/src/lib/sleepAnalysis.js", "find": "if (!leaveOneOutStable(temps, rates, median, verdict)) {", "replace": "if (false) {", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 one influential night"},
+  {"label": "#365 insights: leave-one-out uses the opposite threshold class", "file": "backend/src/lib/sleepAnalysis.js", "find": "remainingR < INSIGHT_R", "replace": "remainingR < -INSIGHT_R", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 leaving one night out"},
+  {"label": "#365 insights: leave-one-out uses the opposite threshold class (fewer)", "file": "backend/src/lib/sleepAnalysis.js", "find": "remainingR > -INSIGHT_R", "replace": "remainingR > INSIGHT_R", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 leaving one night out: fewer wakes"},
+  {"label": "#365 insights: an unstable hint is returned as no link", "file": "backend/src/lib/sleepAnalysis.js", "find": "verdict = 'unstable';", "replace": "verdict = 'none';", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 one influential night"},
+  {"label": "#365 insights: rate divides by asleep minutes", "file": "backend/src/lib/sleepAnalysis.js", "find": "row.wake_count * 60 / row.coverage_minutes", "replace": "row.wake_count * 60 / row.asleep_minutes", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 wake rates remove"},
+  {"label": "#365 insights: nights with no watched time remain eligible", "file": "backend/src/lib/sleepAnalysis.js", "find": " AND n.coverage_minutes > 0", "replace": "", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 zero and missing watched minutes"},
+  {"label": "#365 insights: reported r uses raw wake counts", "file": "backend/src/lib/sleepAnalysis.js", "find": "const rWakes = pearson(temps, rates);", "replace": "const rWakes = pearson(temps, rows.map((r) => r.wake_count));", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 wake rates remove"},
+  {"label": "#365 insights: directional verdict ignores the displayed groups", "file": "backend/src/lib/sleepAnalysis.js", "find": "warmer.avg_wakes > cooler.avg_wakes", "replace": "true", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 median ties"},
+  {"label": "#365 insights: a dropped night can reverse the group direction", "file": "backend/src/lib/sleepAnalysis.js", "find": "if (!agrees) return false;", "replace": "if (false) return false;", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 dropping a warm night"},
+  {"label": "#365 insights: equal rounded columns still support more wakes", "file": "backend/src/lib/sleepAnalysis.js", "find": "warmer.avg_wakes > cooler.avg_wakes", "replace": "warmer.avg_wakes >= cooler.avg_wakes", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 rounded equal columns"},
   {
     "label": "#697 /me/password: a wrong current password answers 401 again (signs the person out)",
     "file": "backend/src/routes/auth.js",
@@ -19112,6 +19149,33 @@
     "tests": ["auth-routes.test.js"],
     "namePattern": "PUT /me/password: wrong password answers a 4xx",
     "note": "api.js clears the token and shows the sign-in form on ANY 401, so this status turns a typo into a sign-out. The find carries the comment line above it since the review of #720: the race loser's line now has the same 400 text."
+  },
+  {
+    "label": "#1093 malformed current password reaches the password guess check",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (typeof current_password !== 'string') {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#1093 malformed password fields return their existing 400s"
+  },
+  {
+    "label": "#1093 session list omits the stable owner id",
+    "file": "backend/src/routes/auth.js",
+    "find": "    user_id: s.user_id,",
+    "replace": "    user_id: undefined,",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "#1093 own and admin session lists carry the owner user_id on every row"
+  },
+  {
+    "label": "#1093 Users sessions join by username again",
+    "file": "frontend/src/pages/SettingsUsers.jsx",
+    "find": "            const sessions = allSessions.filter((s) => s.user_id === u.id);",
+    "replace": "            const sessions = allSessions.filter((s) => s.username === u.username);",
+    "expect": "killed",
+    "tests": ["users.test.jsx"],
+    "namePattern": "#1093 sessions follow user_id across a rename race and username collision"
   },
   {
     "label": "#697 /me/mfa/disable: a wrong password answers 401 again (signs the person out)",
@@ -22181,11 +22245,56 @@
   {
     "label": "#765 mfa setup skips the password (a borrowed session can start, plant or read a secret)",
     "file": "backend/src/routes/auth.js",
-    "find": "() => passwordHash.compare(String(req.body?.password || ''), user.password_hash)",
+    "find": "() => passwordHash.compare(textOrEmpty(req.body?.password), user.password_hash)",
     "replace": "() => true",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "a first start without the right password"
+  },
+  {
+    "label": "#hygiene text credentials login refuses an array-wrapped password",
+    "file": "backend/src/routes/auth.js",
+    "find": "passwordHash.compare(textOrEmpty(password), hashToCheck)",
+    "replace": "passwordHash.compare(String(password || ''), hashToCheck)",
+    "expect": "killed",
+    "tests": ["login-account-throttle.test.js"],
+    "namePattern": "array around the real password misses"
+  },
+  {
+    "label": "#hygiene text credentials setup refuses an array-wrapped password",
+    "file": "backend/src/routes/auth.js",
+    "find": "passwordHash.compare(textOrEmpty(req.body?.password), user.password_hash)",
+    "replace": "passwordHash.compare(String(req.body?.password || ''), user.password_hash)",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "array-wrapped real password cannot start"
+  },
+  {
+    "label": "#hygiene text credentials disable refuses an array-wrapped password",
+    "file": "backend/src/routes/auth.js",
+    "find": "passwordHash.compare(textOrEmpty(password), user.password_hash)",
+    "replace": "passwordHash.compare(String(password || ''), user.password_hash)",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "array-wrapped real password is refused"
+  },
+  {
+    "label": "#hygiene text credentials TOTP refuses an array-wrapped code",
+    "file": "backend/src/lib/mfa.js",
+    "find": "  if (typeof token !== 'string') return null;",
+    "replace": "  /* hygiene mutant: text-only guard removed */",
+    "expect": "killed",
+    "tests": ["mfa.test.js", "mfa-replay-and-async-bcrypt.test.js"],
+    "namePattern": "matchTokenStep refuses an array|/login/mfa refuses an array"
+  },
+  {
+    "label": "#hygiene text credentials backup code refuses an array-wrapped code",
+    "file": "backend/src/lib/mfa.js",
+    "find": "(typeof code === 'string' ? code : '').toLowerCase().replace(/[^a-z0-9]/g, '')",
+    "replace": "String(code || '').toLowerCase().replace(/[^a-z0-9]/g, '')",
+    "expect": "killed",
+    "tests": ["mfa.test.js", "mfa-replay-and-async-bcrypt.test.js"],
+    "namePattern": "array-wrapped valid backup code is not consumed|/login/mfa refuses an array around a valid backup code"
   },
   {
     "label": "#765 a password change keeps a pending two-factor set-up",
@@ -23966,6 +24075,15 @@
     "namePattern": "a snapshot folder follows its DATABASE"
   },
   {
+    "label": "#1073 ensurePrivateDir: a directory created by another boot is mistaken for a dangling symbolic link",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "    if (link?.isSymbolicLink()) throw new Error(`${dir} is a symbolic link to something that does not exist`);",
+    "replace": "    if (link) throw new Error(`${dir} is a symbolic link to something that does not exist`);",
+    "expect": "killed",
+    "tests": ["data-paths.test.js"],
+    "namePattern": "#1073 another boot creates private/ between statSync and lstatSync"
+  },
+  {
     "label": "#553 phase 2a paths: private/ is left to the umask (no explicit chmod 0700)",
     "file": "backend/src/lib/dataPaths.js",
     "find": "  if ((st.mode & 0o777) !== PRIVATE_DIR_MODE) fsImpl.chmodSync(dir, PRIVATE_DIR_MODE);",
@@ -24812,7 +24930,7 @@
   {
     "label": "#904 the never-empty rule removed: a discounted still night becomes `empty` (and loses its frames)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound) {",
     "replace": "    if (true) {",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
@@ -24830,8 +24948,8 @@
   {
     "label": "#904 the never-empty rule counts the whole window instead of the measured span: an evening-only fault blocks `empty`",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
-    "replace": "    if (discountedIn(preMin, totalMin) === 0) {",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound) {",
+    "replace": "    if (discountedIn(preMin, totalMin) === 0 && !unwitnessedSound) {",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
     "namePattern": "discounted minutes all lie before its onset"
@@ -24848,8 +24966,8 @@
   {
     "label": "#904 the metrics extension classifies without the minute index: the fault's post-window sound is awake again",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "        const rowActive = isActiveRow(r, i);",
-    "replace": "        const rowActive = isActiveRow(r);",
+    "find": "        const rowActive = isActiveRow(r, i) &&",
+    "replace": "        const rowActive = isActiveRow(r) &&",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
     "namePattern": "qualifies only through the post-window minutes"
@@ -26304,8 +26422,8 @@
   {
     "label": "#1094 invite: /login skips the compare for a pending account (a timing tell)",
     "file": "backend/src/routes/auth.js",
-    "find": "async () => (await passwordHash.compare(String(password || ''), hashToCheck))",
-    "replace": "async () => (user?.password_set === 0 ? false : await passwordHash.compare(String(password || ''), hashToCheck))",
+    "find": "async () => (await passwordHash.compare(textOrEmpty(password), hashToCheck))",
+    "replace": "async () => (user?.password_set === 0 ? false : await passwordHash.compare(textOrEmpty(password), hashToCheck))",
     "expect": "killed",
     "tests": ["auth-invite.test.js"],
     "namePattern": "even with the password its stored hash really matches",
@@ -26640,5 +26758,77 @@
     "expect": "killed",
     "tests": ["sleep-night-facts.test.js"],
     "namePattern": "fresh empty detail uses a valid saved corrected night"
+  },
+  {
+    "label": "#1159 cry witness removed",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (motionAt[j] || cryAt[j]) return true;",
+    "replace": "if (motionAt[j]) return true;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: a cry-labelled sound alert"
+  },
+  {
+    "label": "#1159 witness window widened to three minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const nearEvidence = (i) => {\n    for (let j = Math.max(0, i - ONSET_SOUND_MOTION_WITHIN_MIN);",
+    "replace": "const nearEvidence = (i) => {\n    for (let j = Math.max(0, i - (ONSET_SOUND_MOTION_WITHIN_MIN + 1));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: a cry (three minutes away|exactly three minutes)"
+  },
+  {
+    "label": "#1159 label threshold removed",
+    "file": "backend/src/lib/audioClassifierWorker.js",
+    "find": "export const AUDIO_LABEL_MIN_SCORE = 0.30;",
+    "replace": "export const AUDIO_LABEL_MIN_SCORE = 0;",
+    "expect": "killed",
+    "tests": ["audioClassifier.test.js"],
+    "namePattern": "#1159: cry and cough include"
+  },
+  {
+    "label": "#1159 extension ignores sound witness",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "|| soundWitnessed(i));",
+    "replace": "|| soundCounts(r, i));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: sound just across"
+  },
+  {
+    "label": "#1159 setting off still uses cry labels",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "?.classify_alert_audio !== 0) {",
+    "replace": "?.classify_alert_audio >= 0) {",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: turning classification off"
+  },
+  {
+    "label": "#1159 empty-bed sound protection removed",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound",
+    "replace": "discountedIn(onset, sleepEnd) === 0",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: a watched still night"
+  },
+  {
+    "label": "#1159 sustained sound threshold lowered to two minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const SUSTAINED_SOUND_MIN = 20;",
+    "replace": "const SUSTAINED_SOUND_MIN = 2;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: unwitnessed sound-only run"
+  },
+  {
+    "label": "#1159 onset uses sustained sound exception",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "activeForOnset[i] = nearNonBlipEvidence(i);",
+    "replace": "activeForOnset[i] = soundWitnessed(i);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#1159: sustained sound at bedtime"
   }
 ]

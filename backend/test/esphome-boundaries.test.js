@@ -50,7 +50,12 @@ test('#917 lib/sleepSensor.js only SELECTs, never writes, and is imported by sle
   // lib/nightVitals.js is the display-only second importer (heart rate and breathing on the card and the timeline): it
   // reads through readDeviceMinutes, so the raw tables are still named in this one file and still only SELECTed.
   // Nothing in the sleep maths imports it (routes/children.js attaches its result after the night is worked out).
-  assert.deepEqual(importers, ['lib/nightVitals.js', 'lib/sleepAnalysis.js']);
+  // lib/cameraVitals.js (a Nightlight Camera's heart rate and breathing for the same display, 2026-11-20) imports ONLY the
+  // three numbers of the minute rule (VITALS_HR_MIN_N, RR_PLACEHOLDER_BELOW, MAX_DISTANCE_CM), so the camera cannot drift from
+  // the one definition; it reads its own table and neither names nor reads an ESPHome one (the first test above pins that).
+  assert.deepEqual(importers, ['lib/cameraVitals.js', 'lib/nightVitals.js', 'lib/sleepAnalysis.js']);
+  assert.match(source('lib/cameraVitals.js'), /import \{ MAX_DISTANCE_CM, RR_PLACEHOLDER_BELOW, VITALS_HR_MIN_N \} from '\.\/sleepSensor\.js'/,
+    'cameraVitals.js imports the three constants and nothing else from the sleep sensor');
   const sleepMaths = ['lib/sleepAnalysis.js', 'lib/sleepScore.js', 'lib/sleepScoreAttach.js', 'lib/nightSummary.js', 'lib/sleepReviews.js'];
   for (const file of sleepMaths) assert.doesNotMatch(source(file), /nightVitals/, `${file} must not read the display-only vitals`);
 });

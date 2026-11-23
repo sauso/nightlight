@@ -1,4 +1,5 @@
 import { Settings, Video } from 'lucide-react';
+import { cameraState } from '../lib/cameraStatus.js';
 
 // A child's camera on their page (UI refresh PR D, the approved design): a dark tile with a status chip and a "Watch live" button.
 // It is NOT a live picture. The page opens often and a stream per child per visit is the wrong cost; the live picture is one
@@ -14,8 +15,8 @@ import { Settings, Video } from 'lucide-react';
 // detection are ON is kept here as one quiet line of words (below), for every role: a caregiver has no other place that says
 // whether the camera is listening (the owner asked for it back, 2026-11-13).
 //
-// ★ STATUS IS NEVER JUST A COLOUR. The dot is green when the camera is online, and the chip also says "Offline" or "Disabled"
-// in words when it is not (a colour-blind parent, or a screen reader, must not have to guess). Online adds no word: the chip
+// ★ STATUS IS NEVER JUST A COLOUR (#1077, Codex plan review 2026-11-17). The chip says Offline, Connecting,
+// Status unknown or Disabled in words beside the dot. Online adds no visible word: the chip
 // would otherwise read "Online" next to every camera forever, which is noise on the normal case. A screen reader still hears it
 // (visually hidden text).
 //
@@ -36,7 +37,9 @@ function detectionLine(cam) {
 // row was a button for an admin and a plain div for a caregiver for exactly that reason. The gear keeps that, so the design's
 // tile does not take the admin's way into a camera's settings away; a caregiver sees no control that can only end in a redirect.
 export default function ChildCameraTile({ cam, onWatch, onSettings }) {
-  const status = cam.disabled ? 'disabled' : cam.statusLevel === 'live' ? 'online' : 'offline';
+  // #1077, Codex plan review 2026-11-17: use the Cameras tab's status so an unknown check never claims Offline.
+  const { word, dot } = cameraState(cam);
+  const status = word === 'Disabled' ? 'disabled' : dot === 'live' ? 'online' : dot;
   const detection = detectionLine(cam);
   return (
     <div className={`child-cam child-cam--${status}`}>
@@ -45,8 +48,7 @@ export default function ChildCameraTile({ cam, onWatch, onSettings }) {
           <span className="child-cam__dot" aria-hidden="true" />
           <span className="child-cam__name">{cam.name}</span>
           {status === 'online' && <span className="child-cam__sr"> (online)</span>}
-          {status === 'offline' && <span className="child-cam__state">· Offline</span>}
-          {status === 'disabled' && <span className="child-cam__state">· Disabled</span>}
+          {word !== 'Online' && <span className="child-cam__state">· {word}</span>}
         </span>
         {detection && <span className="child-cam__detect">{detection}</span>}
       </div>

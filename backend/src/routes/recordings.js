@@ -17,7 +17,21 @@ const router = Router();
 
 // A child's finished recordings, newest first (metadata only; the video streams from the route below).
 router.get('/child/:childId', requireAuth, (req, res) => {
-  res.json(listChildRecordings(req.params.childId));
+  const { limit, before_created_at: createdAt, before_id: beforeId } = req.query;
+  // #1112, Codex plan review 2026-11-16: reject bad or repeated cursor values before
+  // querying; silently returning page one can make a paging client loop forever.
+  const decimal = (value) => typeof value === 'string' && /^[1-9][0-9]{0,14}$/.test(value) && Number.isSafeInteger(Number(value));
+  if (limit !== undefined && (!decimal(limit) || Number(limit) > 200)) {
+    return res.status(400).json({ error: 'limit must be an integer from 1 to 200' });
+  }
+  if ((createdAt === undefined) !== (beforeId === undefined) ||
+      (createdAt !== undefined && (typeof createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(createdAt) || !decimal(beforeId)))) {
+    return res.status(400).json({ error: 'before_created_at and before_id must be a valid cursor together' });
+  }
+  res.json(listChildRecordings(req.params.childId, {
+    limit: limit === undefined ? 50 : Number(limit),
+    before: createdAt === undefined ? null : { created_at: createdAt, id: Number(beforeId) },
+  }));
 });
 
 // Video + thumbnail use query-or-header auth so a plain <video>/<img> can load them (a browser can't

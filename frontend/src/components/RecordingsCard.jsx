@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Play, Video, Trash2, AlertTriangle, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -10,14 +10,15 @@ import { deleteFailureText } from './ClipPlayerModal.jsx';
 
 // "Recordings" card on a child's detail page: the clips someone captured with the tile's Record button
 // (see lib/recordings.js). Deliberately its own card rather than entries in the alert feed — these are
-// moments a person chose to keep, not detections. Renders nothing until the first recording exists.
+// moments a person chose to keep, not detections. Renders nothing until the first recording exists,
+// unless more older recordings are available after local deletes (#1112, Codex plan review 2026-11-16).
 //
 // It is drawn like the "Recent alerts" card next to it (owner, 2026-11-15: "make recordings look like recent alerts"): a titled
 // card, one row per recording with a thumbnail, the camera and the time, the newest THREE shown and a "See all recordings"
 // row for the rest. It reuses AlertList's classes on purpose, so the two cards cannot drift apart. Every row is a button,
 // because every recording opens something (the player, or for a failed one the explanation), which is the opposite of an
-// alert row, where only one with a clip is. There is no recordings page to go to and the endpoint already returns the whole
-// list, so expanding is the whole of "all": nothing new is requested.
+// alert row, where only one with a clip is. There is no recordings page to go to. Expanding shows the loaded
+// rows; Show older recordings requests the next page (#1112, Codex plan review 2026-11-16).
 //
 // Unlike alert clips, recordings have NO automatic retention, so deleting is the only way to reclaim
 // the space — hence the delete action here. It is an ADMIN's action (#552; the server refuses a
@@ -26,6 +27,7 @@ import { deleteFailureText } from './ClipPlayerModal.jsx';
 
 const parseUtc = (s) => new Date(String(s).replace(' ', 'T') + 'Z');
 const PREVIEW_COUNT = 3;
+const PAGE_SIZE = 50;
 const EARLIER_DAY = { weekday: 'short', day: 'numeric', month: 'short' };
 
 // Rendered in HOME time (settings.timezone), with a zone label when the viewer's device is elsewhere
@@ -39,6 +41,12 @@ function when(startedAt, home) {
 
 export default function RecordingsCard({ childId, refreshNonce = 0 }) {
   const [list, setList] = useState([]);
+  const [more, setMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState('');
+  const generation = useRef(0);
+  const pageInFlight = useRef(false);
+  const cursor = useRef(null);
   const [openId, setOpenId] = useState(null);
   const [del, setDel] = useState(''); // '' | 'confirm' | 'deleting' | 'error'
   const [delError, setDelError] = useState('');
@@ -48,18 +56,66 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
   const isAdmin = user?.role === 'admin';
   const home = useHomeTime();
 
-  const load = useCallback(() => {
-    let alive = true;
+  useEffect(() => {
+    // #1112, Codex plan review 2026-11-16: refreshNonce resets to page one and
+    // discards older pages; ChildDetail does not pass this prop yet.
+    const current = ++generation.current;
+    pageInFlight.current = false;
+    cursor.current = null;
+    setList([]);
+    setMore(false);
+    setLoadingMore(false);
+    setMoreError('');
+    setShowAll(false);
     api
       .get(`/recordings/child/${childId}`)
-      .then((rows) => { if (alive) setList(Array.isArray(rows) ? rows : []); })
+      .then((rows) => {
+        if (generation.current !== current) return;
+        const page = Array.isArray(rows) ? rows : [];
+        setList(page);
+        setMore(page.length >= PAGE_SIZE);
+        cursor.current = page.at(-1) || null;
+      })
       .catch(() => {});
-    return () => { alive = false; };
-  }, [childId]);
+    return () => { generation.current++; pageInFlight.current = false; };
+  }, [childId, refreshNonce]);
 
-  useEffect(() => load(), [load, refreshNonce]);
+  async function loadMore() {
+    if (pageInFlight.current || !more || !cursor.current) return;
+    // #1112, Codex plan review 2026-11-16: a ref locks double clicks synchronously;
+    // the generation drops pages returned after refresh, child change or unmount.
+    pageInFlight.current = true;
+    const current = generation.current;
+    const last = cursor.current;
+    setLoadingMore(true);
+    setMoreError('');
+    try {
+      const page = await api.get(`/recordings/child/${childId}?before_created_at=${encodeURIComponent(last.created_at)}&before_id=${encodeURIComponent(last.id)}`);
+      if (generation.current !== current) return;
+      const rows = Array.isArray(page) ? page : [];
+      setList((loaded) => {
+        const ids = new Set(loaded.map((row) => row.id));
+        // #1112, Codex plan review 2026-11-16: dedupe both against loaded rows
+        // and within a page, while retaining the server's order.
+        return [...loaded, ...rows.filter((row) => {
+          if (ids.has(row.id)) return false;
+          ids.add(row.id);
+          return true;
+        })];
+      });
+      setMore(rows.length >= PAGE_SIZE);
+      if (rows.length) cursor.current = rows.at(-1);
+    } catch {
+      if (generation.current === current) setMoreError('Couldn’t load older recordings — try again.');
+    } finally {
+      if (generation.current === current) {
+        pageInFlight.current = false;
+        setLoadingMore(false);
+      }
+    }
+  }
 
-  if (!list.length) return null;
+  if (!list.length && !more) return null;
   const open = list.find((r) => r.id === openId) || null;
   const hasMore = list.length > PREVIEW_COUNT;
   // The list is newest first (the server orders it), so the first three are the newest.
@@ -78,7 +134,9 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
     try {
       await api.del(`/recordings/${open.id}`);
       close();
-      load();
+      // #1112, Codex plan review 2026-11-16: keep paged-in rows and the last
+      // server cursor, even if the deleted row was that cursor.
+      setList((loaded) => loaded.filter((row) => row.id !== open.id));
     } catch (err) {
       // The failed entry's modal and the player word a retry differently, so each passes its own fallback.
       setDelError(deleteFailureText(err, open.status === 'failed' ? 'Couldn’t remove it — try again.' : 'Couldn’t delete — try again.'));
@@ -153,6 +211,12 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
             {showAll ? 'Show fewer' : 'See all recordings'}
           </button>
         )}
+        {more && (showAll || !hasMore) && (
+          <button type="button" className="alert-list__more" disabled={loadingMore} onClick={loadMore}>
+            {loadingMore ? 'Loading older recordings…' : 'Show older recordings'}
+          </button>
+        )}
+        {moreError && <p className="muted">{moreError}</p>}
       </div>
 
       {/* A failed recording gets an explanation and a way to clear it — NOT the player, which would

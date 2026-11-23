@@ -610,8 +610,8 @@ describe('timeline legend and night-event tabs', () => {
       mockSleep({ night: live('2026-08-30 15:00:00') });
       const { container } = mount();
       await screen.findByRole('tab', { name: /Wake-ups/ });
-      // 7p (start) and 1a (exactly now, the right end) are named by the row below; 9p and 11p are the 2-hourly labels between.
-      expect(tickLabels(container)).toEqual(['9p', '11p']);
+      // #1093, Codex plan review 2026-11-17: the suppressed 7p end tick no longer consumes parity, so 8p starts the sequence.
+      expect(tickLabels(container)).toEqual(['8p', '10p', '12a']);
       expect(endsOf(container)[1]).toMatch(/^Now, 1:00\s?am$/i);
     });
 
@@ -628,8 +628,8 @@ describe('timeline legend and night-event tabs', () => {
       mockSleep({ night: live('2026-08-30 13:01:00') });
       const { container } = mount();
       await screen.findByRole('tab', { name: /Wake-ups/ });
-      // Ticks at 7p..11p; labels on every second one (7p, 9p, 11p), minus the two on the bar's ends (7p at 0%, 11p at 99.6%).
-      expect(tickLabels(container)).toEqual(['9p']);
+      // #1093, Codex plan review 2026-11-17: 7p and 11p are end ticks, so eligible parity starts at 8p.
+      expect(tickLabels(container)).toEqual(['8p', '10p']);
     });
 
     test('a tick between 0.5% and 1% from the left, or between 99% and 99.5% from the right, is treated as on the end and not labelled', async () => {
@@ -639,6 +639,27 @@ describe('timeline legend and night-event tabs', () => {
       const { container } = mount();
       await screen.findByRole('tab', { name: /Wake-ups/ });
       expect(tickLabels(container)).toEqual(['8p']);
+    });
+
+    test('#1093: a live 18:58 start labels 20:00 then 22:00 after the 19:00 end tick', async () => {
+      // Codex plan review 2026-11-17: the old n-based parity labelled 21:00 and 23:00 instead.
+      mockSleep({ night: live('2026-08-30 13:30:00', { display_start: '2026-08-30 08:58:00' }) });
+      const { container, unmount } = mount();
+      await screen.findByRole('tab', { name: /Wake-ups/ });
+      expect(tickLabels(container)).toEqual(['8p', '10p']);
+      unmount();
+      // Finished nights retain the old n % every labels across aligned, offset and overnight windows.
+      for (const [start, end, expected] of [
+        ['2026-08-30 09:00:00', '2026-08-30 13:00:00', ['7p', '9p', '11p']],
+        ['2026-08-30 08:30:00', '2026-08-30 13:30:00', ['7p', '9p', '11p']],
+        ['2026-08-30 09:00:00', '2026-08-30 21:00:00', ['7p', '9p', '11p', '1a', '3a', '5a', '7a']],
+      ]) {
+        mockSleep({ night: { ...NIGHT, display_start: start, display_end: end } });
+        const finished = mount();
+        await screen.findByRole('tab', { name: /Wake-ups/ });
+        expect(tickLabels(finished.container)).toEqual(expected);
+        finished.unmount();
+      }
     });
 
     test('the left end follows the bar when it starts before the configured window', async () => {
@@ -675,6 +696,22 @@ describe('timeline legend and night-event tabs', () => {
     fireEvent.mouseMove(container.querySelector('.sleep-tl__barwrap'), { clientX: 200 });
     expect(container.querySelector('.sleep-tl__tip')).not.toBeNull();
     expect(timelineDrawingSegments).not.toHaveBeenCalled();
+  });
+
+  test('#1093: the hover bubble clamps at both bar ends while the cursor keeps the actual percentage', async () => {
+    // Codex plan review 2026-11-17: jsdom checks inline positions; a browser must verify the actual 320px geometry.
+    mockSleep({ night: NIGHT });
+    const { container } = mount();
+    await screen.findByRole('tab', { name: /Wake-ups/ });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function rect() {
+      const width = this.classList.contains('sleep-tl__tip') ? 120 : 272;
+      return { left: 0, right: width, top: 0, bottom: 30, width, height: 30, x: 0, y: 0, toJSON() {} };
+    });
+    for (const [x, left, pct] of [[0, '60px', '0%'], [136, '136px', '50%'], [272, '212px', '100%']]) {
+      fireEvent.mouseMove(container.querySelector('.sleep-tl__barwrap'), { clientX: x });
+      await waitFor(() => expect(container.querySelector('.sleep-tl__tip').style.left).toBe(left));
+      expect(container.querySelector('.sleep-tl__cursor').style.left).toBe(pct);
+    }
   });
 
   test('a new night chooses its own default instead of retaining the previous tab', async () => {
@@ -1573,6 +1610,34 @@ describe('what a night lists', () => {
     expect(within(row).getByText(/Nursery/)).toBeTruthy();
   });
 
+  test('#1159: a sound alert shows what its clip was heard to be; nothing else does', async () => {
+    // The alert lists already showed this badge; the wake-ups list in a night's detail did not, because its alerts come
+    // from a different query. The fixture is hostile: a MOTION alert carrying a stored label (the column exists on every
+    // row), a sound alert with an unrecognised label, and one with none must show no badge at all.
+    mockSleep({
+      night: {
+        ...NIGHT,
+        wake_count: 1,
+        wakes: [{ start_at: '2026-08-30 14:00:00', end_at: '2026-08-30 14:30:00', minutes: 30 }],
+        alerts: [
+          { id: 'a1', type: 'sound', camera_name: 'Nursery', detail: '+11 dB', created_at: '2026-08-30 14:05:00', audio_label: 'voice' },
+          { id: 'a2', type: 'sound', camera_name: 'Nursery', detail: '+12 dB', created_at: '2026-08-30 14:10:00', audio_label: 'cry' },
+          { id: 'a3', type: 'motion', camera_name: 'Nursery', detail: '3.1%', created_at: '2026-08-30 14:12:00', audio_label: 'cry' },
+          { id: 'a4', type: 'sound', camera_name: 'Nursery', detail: '+13 dB', created_at: '2026-08-30 14:15:00', audio_label: 'other' },
+          { id: 'a5', type: 'sound', camera_name: 'Nursery', detail: '+14 dB', created_at: '2026-08-30 14:20:00', audio_label: null },
+        ],
+      },
+    });
+    const { user } = mount('Australia/Melbourne');
+    await user.click((await screen.findByText(/5 alerts$/)).closest('button'));
+    const rowOf = async (detail) => (await screen.findByText(detail)).closest('.sleep-wakes__alert');
+    expect(within(await rowOf(/\+11 dB/)).getByText('Talking')).toBeTruthy();
+    expect(within(await rowOf(/\+12 dB/)).getByText('Crying')).toBeTruthy();
+    expect(within(await rowOf(/3\.1%/)).queryByText('Crying'), 'a motion alert never shows an audio badge').toBeNull();
+    expect(within(await rowOf(/\+13 dB/)).queryByText(/Crying|Coughing|Talking/), 'other shows nothing').toBeNull();
+    expect(within(await rowOf(/\+14 dB/)).queryByText(/Crying|Coughing|Talking/), 'unlabelled shows nothing').toBeNull();
+  });
+
   test('★ an alert AT THE MOMENT OF WAKING attaches to the morning wake (roadmap §1.5 Gap A)', async () => {
     // Closes the client/server seam: the backend now emits one extra row spanning [wake_at, window_end)
     // for the morning wake itself (sleepAnalysis.js), specifically so an alert firing at the exact
@@ -1791,6 +1856,35 @@ describe('★ the temperature insight with too few nights in a group (#365)', ()
       unmount();
       vi.restoreAllMocks();
     });
+  });
+});
+
+describe('#365 temperature hints sensitive to one night', () => {
+  const half = (nights, avg_wakes) => ({ nights, avg_temp: 20, avg_wakes, avg_asleep_minutes: 600 });
+  for (const direction of ['more', 'fewer']) {
+    test(`unstable ${direction} shows the exact hint and evidence without comparison columns`, async () => {
+      mockSleep({ insights: {
+        status: 'ok', nights_analyzed: 21, verdict: 'unstable', direction,
+        cooler: half(10, 2), warmer: half(10, direction === 'more' ? 4 : 1),
+        overall: { avg_humidity: null },
+      } });
+      mount();
+      const body = await screen.findByText(new RegExp(`There is a hint that warmer nights go with ${direction} wake-ups`));
+      const card = body.closest('.sleep-insight');
+      expect(body.textContent).toContain('but it does not hold up if a single night is left out, so it is not reported as a pattern yet.');
+      expect(card.querySelector('.sleep-insight__cmp')).toBeNull();
+      expect(within(card).getByText('Based on 21 tracked nights (10 cooler, 10 warmer).')).toBeTruthy();
+    });
+  }
+
+  test('a directional headline shows both group counts in the footer', async () => {
+    mockSleep({ insights: {
+      status: 'ok', nights_analyzed: 21, verdict: 'warm_more_wakes',
+      cooler: half(10, 2), warmer: half(10, 4), overall: { avg_humidity: null },
+    } });
+    mount();
+    const card = (await screen.findByText(/Warmer nights tend to mean more wake-ups/)).closest('.sleep-insight');
+    expect(within(card).getByText(/Based on 21 tracked nights \(10 cooler, 10 warmer\)\./)).toBeTruthy();
   });
 });
 

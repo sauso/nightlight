@@ -203,6 +203,22 @@ describe('GET /me/mfa setup_pending', () => {
 describe('every set-up call needs the account password', () => {
   const REFUSED = [{ password: undefined }, { password: 'not-the-password' }, { password: '' }, { password: null }];
 
+  test('#hygiene text credentials: array-wrapped real password cannot start or replace a pending set-up', async () => {
+    const wrong = await setup({ password: 'wrong' });
+    const wrappedStart = await setup({ password: [PASSWORD] });
+    assert.equal(wrappedStart.status, 400);
+    assert.deepEqual(wrappedStart.body, wrong.body);
+    assert.deepEqual(wrappedStart.body, { error: 'Password is incorrect' });
+    assert.equal(row().mfa_secret, null);
+
+    const first = await setup({});
+    assert.equal(first.status, 200, 'the string password must still start a set-up');
+    const wrappedRestart = await setup({ password: [PASSWORD], restart: true });
+    assert.equal(wrappedRestart.status, 400);
+    assert.deepEqual(wrappedRestart.body, wrong.body);
+    assert.equal(row().mfa_secret, first.body.secret, 'a refused restart changed the pending secret');
+  });
+
   test('★ a first start without the right password: 400 "Password is incorrect", and nothing is stored (no plant)', async () => {
     for (const body of REFUSED) {
       const res = await setup(body);

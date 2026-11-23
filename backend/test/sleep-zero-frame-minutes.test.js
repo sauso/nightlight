@@ -548,15 +548,18 @@ describe('#508 hostile fixture: an unwatched row carries NOTHING, whatever it cl
   });
 
   test('#508 T9f: its sound does not reach soundAt (a watched movement cannot "witness" a cry nobody saw)', () => {
-    // Put down 18:38 with one watched movement at 18:39, so the settle is 18:40. A loud unwatched twin
-    // at 18:41 sits within ONSET_SOUND_MOTION_WITHIN_MIN of that movement: leaked into soundAt it would
-    // count as witnessed, active noise and push the settle to 18:42.
-    watched(at(18, 20), at(7, 0, 1), { move: [[at(18, 39), at(18, 40)], [at(2, 0, 1), at(2, 3, 1)]] });
+    // Put down 18:38 with three watched movement minutes 18:39-18:41, so the settle is 18:42. (Three, not
+    // one: a one- or two-minute stir right after a put-down no longer restarts the 15-minute quiet run, so
+    // a single movement would put the settle at the put-down itself and this test would stop proving
+    // anything about sound.) A loud unwatched twin at 18:43 sits within ONSET_SOUND_MOTION_WITHIN_MIN of
+    // that movement: leaked into soundAt it would count as witnessed, active noise and push the settle
+    // to 18:44.
+    watched(at(18, 20), at(7, 0, 1), { move: [[at(18, 39), at(18, 42)], [at(2, 0, 1), at(2, 3, 1)]] });
     insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
     const base = computeNight(CHILD, DATE);
-    assert.equal(hhmm(base.onset_at), '18:40', 'sanity: the settle after the one movement');
-    hostile(at(18, 41), { sound: LOUD_DB });
-    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:40');
+    assert.equal(hhmm(base.onset_at), '18:42', 'sanity: the settle after the three-minute movement');
+    hostile(at(18, 43), { sound: LOUD_DB });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:42');
   });
 
   test('#508 T9e: TRIPWIRE (not proof) — every activity_samples query in sleepAnalysis.js selects motion_frames', () => {

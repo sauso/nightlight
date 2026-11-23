@@ -9,6 +9,47 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-24
+
+### Added
+
+- A Nightlight Camera added by IP address is recognised: Nightlight can read its room temperature and humidity, radar presence, heart and breathing rate, ambient light and bed pad every 5 seconds, using the camera's own login, with a switch per group under the camera's settings. Temperature and humidity join the existing history; readings the camera marks as simulated are labelled and never used for a night's figures; heart and breathing rate also appear on the night card and timeline, as display only.
+- A Nightlight Camera's heart rate and breathing rate now appear on the sleep card and the night's timeline as sensor estimates, like an ESPHome sensor's (display only: never part of the sleep figures, score or summary). The camera tile now shows only its temperature and humidity, stacked in the same column as every other camera's readings.
+- Find cameras now also finds Nightlight Cameras (the nightlight-cam project) from their `_nightlight-cam._tcp` mDNS announcement and badges them **Nightlight**, next to the existing ONVIF badge. Across VLANs it needs the router to relay mDNS; add by IP otherwise.
+- The image is now also published to GitHub's container registry as `ghcr.io/sauso/nightlight`, with the same tags and digests as Docker Hub (`sauso/nightlight`, still the primary) from the first mirrored publish. Release `0.49.0` and `latest` were copied by hand. Weekly rebuilt `:latest` and `:dev` are copied too once this workflow reaches `main`. Nightlight is also available as an experimental Home Assistant OS app, from its own repository (`docs/home-assistant.md`).
+- Offline alert-clip analysis adds Crying, Coughing or Talking badges to sound alerts (including those listed under a night's wake-ups) and clips, with a switch in Recording settings (default on, 0 or 1). Older alerts have no badge. The image grows by about 35 MB (a 16 MB model plus about 15 MB of runtime) and the server uses about 250-315 MB more memory while a clip is analysed, released a minute later; the new runtime is not measured on arm64; coughing and talking labels are best-effort (#1159).
+
+### Changed
+
+- The README has a **Sleep scoring and night analysis** section, and the visual walkthrough shows the sleep page's **Why this score?** sheet, its wake-ups and timelapse, and the sleep page on a computer. Documentation only; nothing in the app changes.
+- On a night's sleep page, where the heart-rate or breathing sensor gave no reading for more than 10 minutes, the track now joins the two sides with a dashed line and a legend, "Estimated: no data was available", instead of leaving a blank. The solid line still shows real readings only; nothing is drawn before the first or after the last reading.
+- Brief sound with no nearby movement no longer counts as awake once a child is asleep unless an alert clip was labelled as crying. Sound lasting 20 or more consecutive minutes still counts as awake, even without movement; the bedtime search for sleep onset continues to ignore it. Stored nights are not recomputed, so expect a step in the sleep-score trend (#1159).
+
+- Session lists now include each session's `user_id`, and the Users screen matches sessions to accounts by that id (#1093).
+- The Sleep & room temperature card now compares wake-ups per watched hour, shows the cooler and warmer night counts, and withholds a directional pattern if the shown averages are equal or leaving out one night weakens the correlation or reverses the groups' direction (#365). It still uses stored detector wake totals; a pattern does not establish a cause.
+- The Docker image now runs Node 26 (it follows the `node:26-alpine` tag) instead of Node 24. It ran on the staging server for a week (16 to 23 November 2026) with no restarts, crashes or abnormal stops, including about fifteen redeploys. Node 24 stays supported in CI and `.nvmrc` for now (#751).
+- **Routine dependency updates, no behaviour change intended.** Backend: `ws` 8.22.2 → 8.23.0 (the WebSocket library behind two-way talk), `onvif` 0.8.3 → 0.8.5 (camera discovery and motion events), `firebase-admin` 14.5.0 → 14.5.1 (push alerts), `express-rate-limit` 8.7.3 → 8.7.4, `http-proxy-middleware` 4.2.1 → 4.2.2 (stricter checks on a form body and a WebSocket upgrade passing through the proxy). Web app: `lucide-react` 1.70.0 → 1.73.0 (icons). Build and test tooling (not part of the image): `vite` 8.3.6 → 8.3.8, `@vitejs/plugin-react` 6.2.1 → 6.3.0, `@testing-library/user-event` 14.6.8 → 14.6.10, `@playwright/test` 1.65.0 → 1.65.1 together with the end-to-end Playwright image tag.
+
+### Fixed
+
+- Hold alerts until asleep now holds the first alert of each night when the sleep window is almost or exactly 24 hours long; changing the window's start time or the timezone during a night also starts the hold again (#922).
+
+- On the one night where this was measured, a child's real morning exit is no longer set aside because its first climb-out minute counted as staying in bed; a later exit, such as a parent's visit hours later, had become the wake on the night's detail page (#936). The fresh wake changes from 09:03 to 06:22. Replayed over every night with minute readings, 62 on each database: only the measured night changed. Stored nights are not recomputed, so a saved card can still differ from a fresh detail page.
+- Status badges (Connected, Disconnected, Off, On and the like) are readable in the night theme: their text was white on a pale green, pink or lilac fill (1.6 to 2.0:1 contrast), and is now dark there (9 to 11:1). The day theme is unchanged (#1189).
+- After a put-down, faint in-bed blips with a low mean level no longer make the sound around them count as movement for onset, unless that sound is part of a wake (#1186 follow-up). On the whole-night comparison, 3 of 196 staging and 3 of 194 production nights moved earlier: the largest move was 39 minutes. None moved later, changed status, or gained a wake; every unmoved night was identical. The reviewed 20 November night improved from 9 minutes late to 1 minute late. A child still awake and murmuring with small movements stayed late in the 4-, 5- and 8-minute blip probes, but a fan, mobile or pet with low mean movement that does not form a wake can still make onset read early. **In bed** can land on a visitor's `into_bed`: on the measured night it changed from blank to the time a pet or visitor climbed in, 16 minutes after the real put-down, because the episode walk stops at a 16-minute gap. Check the morning review.
+- A child who settles restlessly can now get wake clips sooner, and held alerts resume sooner (#1186 follow-up). Replaying stored minutes, 55 more staging wakes and 49 more production wakes had a clip; extra clips not near a wake rose by 53 and 47. A withdrawn asleep time does not disarm the watcher for that window.
+- A child put down and then stirring briefly in bed no longer shows as "not asleep yet" for hours; the asleep time can follow the put-down within about 10 minutes. If an earlier bridged settle fails a sleep check, a later ordinary settle is still tried. A child lying quietly awake can still appear asleep early, so check the morning review.
+- A camera on Wi-Fi was restarted every few seconds as "corrupt timestamp", so its live view never settled: FFmpeg prints a timestamp-jump line while it probes a new connection, and packets arriving in a clump at that moment set it off. The restart now needs a large jump (more than 480000 ticks of the stream clock, 10 seconds for 48 kHz audio); small start-up jitter is only logged.
+- Find cameras now asks for cameras again during the 30-second search (at about 1, 3, 7, 15 and 25 seconds) instead of once, so a camera whose first mDNS answer was lost, such as a Nightlight Camera on Wi-Fi, no longer waits for the next search to appear.
+- Creating the first admin, creating an account and changing an account's password now answer 400 (not 500) when the password is not text.
+- Sign-in, two-factor and password-confirmation fields now accept only text; a field of another type is treated as a wrong value, like a missing one.
+- Changing a password now returns a validation error for malformed password fields instead of a server error (#1093).
+- Sleep timeline labels now start at the first interior hour on live nights; hover details stay inside the bar, account names wrap on narrow screens, child camera status dots align with the first line, older browsers keep colour fallbacks, and invite errors are announced (#1093).
+- Two copies of the server starting together on a fresh data folder no longer fail with a false "symbolic link" error (#1073).
+- The child page camera row now says "Status unknown" or "Connecting" instead of "Offline" when a camera is not known to be down (#1077), and focus returns to the user's row after signing out a session (#1093).
+- The Recordings card now reaches manual recordings older than the newest 50 with **Show older recordings** (#1112). Deleting one keeps the older rows already loaded.
+- ESPHome: a device that drops its connection while the app is waiting for an answer now shows "The device did not respond in time." again, instead of the generic "Could not talk to the device." (the library update in 0.49.0 started naming that case differently, #1116).
+
 ## [0.49.0] - 2026-11-16
 
 ### Added
@@ -92,6 +133,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A false put-down far before the sleep window no longer claims a child was asleep over an empty-looking bed.** When the child seems to settle more than 50 minutes before the window, the watched bed must show small movements before the next non-isolated logged put-down; the required number of movements is based on watched time through the window start. This corrects a live night that wrongly showed sleep from 17:03. A very still child who really sleeps that early can instead be shown as falling asleep at the window start; the morning review can correct it. The rule was tuned on two cameras in one house, and confirmed real early nights could not be replayed because their minute samples had expired.
 - Sleep detail: after you correct a night, the night card no longer shows two divider lines (with an empty gap between them) above the "Thanks, that's recorded" row; it shows one.
 - **A password that is not valid text is refused at once instead of failing slowly (found in the review of #1094).** A password holding a lone half of a two-part character (an unpaired UTF-16 surrogate, which no keyboard or password manager produces) used to end, after a delay, in a server error. Choosing one (first set-up, adding a user, changing a password, an invite link) now answers "That password contains characters that cannot be used", and signing in with one is treated as a wrong password. Emoji and other ordinary characters work as before.
 

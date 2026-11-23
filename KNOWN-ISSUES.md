@@ -39,7 +39,7 @@ without anyone doing anything. In **Camera history** it shows as a `restart` (of
 **Why:** Some IP cameras occasionally glitch their RTSP feed — a corrupted timestamp
 (non-monotonic DTS) or a dropped connection (RTSP "end of file"). This is the **camera's
 firmware**, not Nightlight. FFmpeg detects the bad stream and Nightlight restarts that
-camera's transcoder, which is the few-second blip.
+camera's transcoder, which is the few-second blip. The "corrupt timestamp" restart needs a real jump (more than 480000 ticks of the stream's clock, about 10 seconds for 48 kHz audio): the small timing jitter FFmpeg reports in the first seconds of a connection, which a camera on Wi-Fi shows often, no longer restarts anything.
 
 **What to do:** Nothing — it's self-healing by design. If one specific camera does this
 constantly, it's worth power-cycling that camera or checking its firmware; the app can
@@ -521,7 +521,7 @@ the motion alert, which uses the same helper.
   that keeps stalling: its quiet period assumes an exit confirms 6 s after it opens, which a restart now
   lengthens. Suspected, not measured; refusing the switch while a candidate is pending is a follow-up.
 - **The wake watcher (#448) had the same "active, outage, active" shape; it is fixed separately.** See "A wake
-  recording does not bridge a gap in the readings" below.
+  recording does not bridge a long gap in the readings" below.
 - A backward clock step of S seconds still suppresses a bed exit or entry (their 2-minute pause) and an ONVIF
   or MQTT motion alert for up to S plus the cooldown (pre-existing, filed separately, #582). The **frame-diff**
   motion alert is different since #454: after a one-way backward step its cooldown is clamped to the new time,
@@ -715,10 +715,14 @@ closing sentence.
   (2026-09-30): 0 such rows, but only about 14 hours of data exist since #493's clone correction reached it, so
   this is "not seen yet", not "cannot happen". If it ever shows up, a minute with any non-zero motion peak
   should count as watched (a repeat's change is exactly 0, so a non-zero peak proves a real frame).
-- **Applied to the live wake watcher since issue #588, not yet to the bed-transition rules.** The live
-  watcher that records wake clips now treats a minute with sound but no video, on a camera that had delivered
-  video, as a minute it did not see (next section). The bed in/out rules still read the movement peak alone, so
-  during a stall they can still read the bed as still: a follow-up issue. The live watcher decides each minute
+- **Applied to the live wake watcher since issue #588. The bed in/out detector needs no change (#613).** The
+  live watcher that records wake clips now treats a minute with sound but no video, on a camera that had
+  delivered video, as a minute it did not see (next section). The bed in/out detector reads frames, not minutes:
+  during a stall it gets nothing, so it can neither record nor confirm a move, and a move pending before the
+  stall needs 6 seconds of frames received after it (#452). Its limit: movement during the stall cannot cancel
+  that pending move (#452's deliberate "reset, not cancel"). Checked on 2026-11-22 over about ten weeks of both
+  databases: no stored move sat inside a stalled minute and none was confirmed across one. The nightly rules
+  that read these moves already treat a stalled minute as unknown (#508). The live watcher decides each minute
   when it ends, from the frames the motion detector *received*, so it differs from this rule in two shapes. A
   minute whose every frame is later proven a repeat (stored with 0 frames, so unwatched here) still counts as
   watched live: measured on 2026-10-05 over every stored minute of two cameras in one house, there is no such
@@ -743,7 +747,7 @@ closing sentence.
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.
 
-## A wake recording does not bridge a gap in the readings, and settling needs 15 unbroken minutes
+## A wake recording does not bridge a long gap in the readings
 
 **What you see:** wake clips (docs/recording.md, "Wake clips") are recorded by the live wake watcher, which only
 records and never alerts. Three things about when it decides:
@@ -757,9 +761,9 @@ records and never alerts. Three things about when it decides:
   Before issue #448 the watcher counted readings, not minutes, so five active minutes spread over about forty
   minutes of mostly missing readings could be recorded as one wake,
   while the sleep timeline (which has always counted minutes) showed no wake at all.
-- **The watcher starts watching only after 15 consecutive quiet minutes that were actually read.** A hole
-  restarts that count. So after an outage in the evening the watcher can start watching later than the
-  sleep timeline's bedtime, and a wake in between has no clip.
+- **The child's sleep camera starts watching when the current night's onset appears on two consecutive
+  minute computes, or after 15 observed quiet minutes.** Other cameras assigned to the child still
+  need 15 observed quiet minutes. A hole restarts the quiet count and breaks the onset streak.
 - **A video stall is a hole even while the sound keeps arriving (issue #588).** Before #588 the watcher read
   such a minute as watched: a quiet one counted toward the 15 minutes, so the watcher could start watching a
   child nobody could see, and a loud one counted as activity, so a noise during a stall could complete a wake
@@ -781,18 +785,29 @@ progress toward arming restarts, so a wake that follows a camera reconnect is st
 |---|---|---|
 | A minute with no reading in a wake | Not active; bridged up to 3 in a row | The same |
 | A minute with sound but no video (a video stall) | Unknown: not active, its sound not used even when loud; bridged up to 3 in a row | The same since issue #588 (a hole; before #588 it was read as watched). Only on a camera that has delivered video since the server started |
-| Deciding the child has settled | 15-minute window with no active minute and at least 8 minutes actually read quiet | **15 consecutive minutes read quiet**; one missing minute, or one minute of a video stall, starts the count again |
+| Deciding the child has settled | 15-minute window with no active minute and at least 8 minutes actually read quiet | Sleep camera: two consecutive live onset results, at least a minute apart, or 15 observed quiet minutes. Other cameras: 15 observed quiet minutes. A missing minute or video stall breaks progress |
 | Settled, then a hole | n/a | Stays watching |
 
-The live rule is stricter on purpose: its only job is to keep bedtime settling out of the recorder, so the
-safe mistake is to start late (a missed clip, never an alert). The cost, stated: **a camera that drops a
-minute more often than about every 15 minutes never starts watching and records no wake clips.** Any hole
-restarts the count, even a single missing minute. On the saved 30 days of the two cameras of one house there
-were roughly 20-25 holes per camera per month on one database and 45-50 on the other, most of them single
-missing minutes. What shows a night is rarely delayed is replaying those 30 days with the old and the new
-rule: the start of watching differed on exactly one night in four camera-months (8 minutes later). The rate
-on another install is unknown. The nightly job uses the looser rule because requiring a fully read window made
-flaky cameras lose whole nights (issue #442).
+The quiet fallback remains useful when the live onset is absent or its compute fails. The watcher
+stays armed for the rest of the window even if an onset is withdrawn. With **Hold alerts until asleep**
+on, that leaves the hold released, allowing alerts through. A wrong live onset can arm early: the
+live calculation's occupancy check (`bedOccupiedAfter`, #669) fails open while its 150-minute
+horizon runs past now. Its microphone discount (#904) does not apply until 480 timeline minutes
+have accumulated. A child with more than one camera was not measured.
+
+Replaying the real watcher code over stored minute rows from 60 staging and 62 production
+child-nights, the sleep camera armed on all 60 and all 62 (previously 51 and 53). The arm was
+16 minutes after today's onset at the median (previously 36), and 24 minutes at the 90th
+percentile (previously 333 staging and 173 production). Four nights per database took over
+30 minutes (previously 28 and 29): three onsets predated the window, and one was visible
+only in hindsight. No live-onset arm preceded the owner's onset. Wakes with a clip rose from
+330 to 385 staging and 341 to 390 production; clips not near a wake rose by 53 and 47.
+Wakes starting before the arm or on a never-armed night fell from 171 to 9 and 159 to 9;
+3 and 4 counted wakes were already underway when the watcher armed, so their opening was missed.
+The replay used today's settings for every night, one camera per child, minute-end clip
+anchors and no simulated restarts. Live clips can start about 57 seconds earlier. The data
+contained one cry event. A compute took 2 ms median, 8 ms at the 95th percentile and about
+250 ms at worst on a development PC; server hardware was not measured.
 
 **The numbers were tuned on two cameras in one house and not validated anywhere else.** 3, 5 and 15 are the
 nightly job's own constants (`sleepAnalysis.js`), shared by reference with the live watcher, so a retune of
@@ -836,8 +851,9 @@ one moves both. They are constants, not settings, so there is no default to chan
 - **A child crying through a video stall is not recorded as a wake**, the same as on the sleep timeline: a
   bedroom microphone hears the whole house, so a noise nobody saw is not taken as the child. Sound **alerts** are
   a separate path and still fire.
-- **The bed in/out rules are not changed by #588** and still read a stalled minute's movement as before (a
-  separate follow-up).
+- **The bed in/out detector is not changed by #588 and needs no change**: it reads frames, not minutes, so a
+  stall gives it nothing to read (#613; the measurement is in the entry under "Applied to the live wake watcher
+  since issue #588").
 - **A backward clock step of more than about 2 minutes ends the run in progress.** Smaller steps (every
   ordinary clock correction) are absorbed before they reach the watcher and change nothing. A watcher still
   settling also restarts its count; one that is already armed stays armed. The sleep timeline merges the
@@ -862,10 +878,10 @@ one moves both. They are constants, not settings, so there is no default to chan
 
 **What to do:** nothing. In the log, `[wake] "<camera>" settled — watching for wakes` marks the start of
 watching. After a restart in the same sleep window, `[wake] resumed asleep latch` means the camera was already
-settled; it need not wait another 15 quiet minutes. No `settled` line all night can mean the camera never had
-15 unbroken minutes, that it resumed a saved asleep result, or that the watcher was still armed from the previous
+settled; it need not meet either arming rule again. No `settled` line all night can mean the camera never met
+an arming rule, that it resumed a saved asleep result, or that the watcher was still armed from the previous
 night (it settles only once, so it logs nothing the second time).
-To narrow it down, look for the line a hole writes while the watcher is still settling:
+To narrow down a quiet-rule delay, look for the line a hole writes while the watcher is still settling:
 `[wake] "<camera>" settling restarted: readings N min apart after M quiet minute(s)`. N is the distance in minutes
 between the two OBSERVED readings around the hole (a minute with sound but no video is not an observed reading, so
 the minutes of a video stall are part of N) and M is how many quiet minutes it threw away (a forward jump of the
@@ -881,10 +897,13 @@ back by that limit are counted onto the next line (`; K more since the last such
 quiet minute(s)`), but a count still pending when the camera starts watching, or when its sleep window closes, is
 never printed. How to read a night: restart lines repeating about every 15 minutes with no `settled` line
 after them mean holes keep sending that camera's count back to zero. Read the M values, not only whether lines
-appear: M close to 15 means one missing minute each time was all that stood between the camera and watching
-(the strict rule is what is in the way), while small M values say little on their own, because a restless
+appear: M close to 15 means one missing minute each time was all that stood between the camera and the
+quiet fallback; the sleep camera may still arm from a persistent live onset. A camera that drops
+about one minute in every 15 may never start watching under the quiet rule, including a
+secondary camera. Small M values say little
+on their own, because a restless
 child with active minutes in between would not have settled with every hole filled either. No restart line
-and no `settled` line means the child never had 15 quiet minutes, the watcher resumed a saved asleep result,
+and no `settled` line means the child never met either arming rule, the watcher resumed a saved asleep result,
 the watcher was still armed from the night before, or only the silent cases above applied. A
 run dropped at a gap logs `run ended (readings N min apart)` when that run had taken a ring hold (N is the
 distance between the two readings, which is also what a forward jump of the server's clock looks like); a run
@@ -1182,7 +1201,7 @@ alert cannot fire sooner than **Motion cooldown** after it, whatever happened to
   longer re-arms an alert (it did, before).
 - **An alert that was silenced** (outside the alert schedule, or by snoozing the camera) does not start a
   cooldown, so one can fire as soon as the schedule opens or the snooze ends (unchanged).
-- **Hold alerts until asleep (#919, #1037):** held live motion and sound alerts are dropped, not queued, and the hold does not stamp their cooldown. Outside the sleep window the watcher cannot detect sleep, so the hold has no time limit: an evening crying spell or daytime nap can be silent. After sleep is detected, a restart in the same window resumes the saved asleep result; before detection, a restart resets the quiet count and inside-window 45-minute clock, allowing up to another 45 minutes of holding. A saved result for a camera reassigned to another child is discarded at restart. A window open for almost 24 hours can change its start while staying open, so a restart can lose the saved result. `alerting_now` still reports true during a hold because it only reads snooze and the Alert schedule. The 45-minute cap is a design choice, not measured; inside the window, a child who cries without settling can be alerted only after it. This is not a safety device. Demo sample events bypass the live alert path.
+- **Hold alerts until asleep (#919, #1037, #922):** held live motion and sound alerts are dropped, not queued, and the hold does not stamp their cooldown. Outside the sleep window the watcher cannot detect sleep, so the hold has no time limit: an evening crying spell or daytime nap can be silent. After sleep is detected, a restart in the same window resumes the saved asleep result; before detection, a restart resets the quiet count and inside-window 45-minute clock, allowing up to another 45 minutes of holding. A saved result for a camera reassigned to another child is discarded at restart. Each night starts unarmed even when the window remains open between nights. Changing the window's start time or the timezone also resets the watcher at once, so held alerts are dropped until it re-arms or the cap expires; changing only its end does not (the key is the start time). `alerting_now` still reports true during a hold because it only reads snooze and the Alert schedule. The 45-minute cap is a design choice, not measured; inside the window, a child who cries without settling can be alerted only after it. This is not a safety device. Demo sample events bypass the live alert path.
 - **A backward step of the server's clock** (a time-sync correction) silences the frame-diff alert for at most
   one cooldown, counted from the first video frame analysed after the step (at 5 frames a second that is
   immediate; if frames stop for ten minutes after the step it starts at the next frame). The ONVIF and MQTT
@@ -1406,8 +1425,8 @@ chosen for this: the morning departure is searched for, and the night's saved su
   inside the sleep window itself; the live wake watcher (which also decides wake clips) uses the window plus
   5 minutes either side (also for a window that opens between 00:00 and 00:04: its 5-minute lead before
   midnight was missing until #602). A sleep window that leaves under 10 minutes between its end and the next
-  start (nearly 24 hours long) never lets that gate close, so the watcher's asleep state is not cleared
-  between nights, as with a true 24-hour window (#922).
+  start (nearly 24 hours long) never lets that gate close. The watcher still starts each night unarmed
+  when the window key changes, including with a true 24-hour window (#922).
 
 **What to do:** nothing. There is no setting for this span. The only ways to avoid the extra decode are to
 switch the child's sleep tracking off or to unassign the camera from the child. Turning motion alerts on
@@ -1435,6 +1454,18 @@ Since #914 those minutes are counted only **until the child leaves the bed again
 out of bed* that is not logged within a minute after a *got into bed* (judged by the times alone, whatever
 the bed shows afterwards) and not followed within 20 minutes by a *got into bed* the bed backs up. A minute
 after that cannot show the child came back and stayed: by then the bed is empty or someone else is at it.
+The minute after the *got into bed* is now excluded too: on 20 November 2026, the first of six
+quiet, occupied witness minutes was the child's climb out after the real 06:22 exit. Counting it set that exit
+aside and let a later 09:03 exit become the wake on a fresh detail page. The night card still said 06:22
+because its stored row was written before that later exit existed. This change covers that shape; stored
+nights are not recomputed. A still sleeper's later quiet, occupied minutes still count, but a still
+sleeper can lose one quiet, occupied witness minute. The skip is anchored to the *got into bed* minute,
+not the exit: the pair is at most 60 seconds apart, so an exit in the next minute has its own minute
+skipped and a later climb-out minute can still count. The measured night's witness falls from six to five,
+one quiet, occupied minute short of setting the exit aside again. Of 23 settling pairs with a quiet
+minute at +1 or +2 in the replay, 22 were real mid-night stays; the excluded minute is a known cost
+for such stays. Replayed over every night with minute readings, 62 on each database: only the measured
+night changed.
 
 **What it changes, stated rather than guessed:**
 - **6 is measured on two cameras in one house.** Over every stored night of both children there (two
@@ -1442,7 +1473,9 @@ after that cannot show the child came back and stayed: by then the bed is empty 
   2½ hours and the ones a review confirmed were not had 10 or more. Any threshold from 4 to 10 gave identical
   results there; 6 sits in the middle. Scaling every reading by a third to three times (a tighter or looser
   detection zone) kept those groups at 5 or fewer and 7 or more, so the zone's size matters only a little.
-  Nothing checks the number against your camera. **That split did not hold** (#914): on 2026-10-30 (one child,
+  Nothing checks the number against your camera. The one-minute exclusion was measured on two cameras
+  in one house, not elsewhere. Levels are fractions of the painted zone: a noisier room or a larger zone
+  can change which minutes read as quiet and occupied. **That split did not hold** (#914): on 2026-10-30 (one child,
   staging, the day after that bed's camera was replaced) the *got out of bed* that was set aside was the real
   wake, and the bed showed 5 such minutes just after the window, 8 an hour later and 10 by nearly two hours,
   every one after the child had left: an empty bed reading faint noise (see "The opposite camera" below). The
@@ -1485,7 +1518,8 @@ after that cannot show the child came back and stayed: by then the bed is empty 
   4.0% over its 20 nights before (a median night 0%: a few noisy nights). Whether the new camera is noisier is
   **not proven** (two nights), and the other child's camera, not replaced, shows the same thing, before that
   date too. Since #914 only the noise before the child's next *got out of bed* counts, which was 4 minutes that
-  morning, so that night's real exit is found. **What #914 does not fix:** noise that reaches 6 minutes before
+  morning, so that night's real exit is found. The minute after a return no longer counts either.
+  **What remains:** noise that reaches 6 minutes after that exclusion and before
   the next *got out of bed*, or a morning with no later *got out of bed* in the 2½ hours, still sets a real exit
   aside, exactly as before #914. So does a later real *got out of bed* followed within 20 minutes by a stray
   *got into bed*: the noise also supplies the 3 minutes of movement that make that return look real, the later
@@ -1632,7 +1666,8 @@ progress, when the exit is earlier than the start of the activity, or on a night
     It only limits what that costs when this rule runs. A night with no later exit, or one this rule leaves
     alone, is unchanged. (#914 has since changed that check: on that night only 4 of the noisy minutes came
     before the 06:57 *got out of bed*, so the 06:29 exit is no longer set aside and this exception is not
-    needed there. It still applies where the empty bed reaches 6 such minutes before the later exit.)
+    needed there. It still applies where the empty bed reaches 6 such minutes after the first
+    post-return minute and before the later exit.)
 - **Where it shows:** the "Woke <earlier time> <later time>" comparison on a night's detail page appears
   only when the two differ, so it disappears on a night where the exit was set aside; the "got out of bed"
   marker is not drawn for it; the child counts as out of the bed from the start of the activity, so a parent
@@ -1645,6 +1680,65 @@ progress, when the exit is earlier than the start of the activity, or on a night
 - **The window end matters.** The start of the activity can never be later than the window end, and an exit
   is looked for up to 3 hours past it, so the same night can read differently under a 07:00 and a 07:30
   window.
+
+## Short in-bed stirs after a put-down, and missing wake clips
+
+The 2026-11-06 and 2026-11-20 pattern, where a child was put down and then briefly stirred
+in the bed but Nightlight said they had not fallen asleep for hours, is fixed for that
+shape. The nightly sleep calculation now accepts short, bed-only stirs inside its
+15-minute onset search. Faint in-bed blips with a low mean level no longer make the
+sound around them count as movement for onset, unless that sound is part of a wake.
+The bed movement still uses the bridge allowance, while cleared sound counts as
+watched quiet. A child lying awake and murmuring with small movements can still
+read as asleep earlier; the put-down is the only bound, and the morning review can
+correct the time. The onset search rejects a stretch with cleared sound if it
+overlaps any part of a wake. In a murmuring-child probe, sound from 20:09 to 21:30
+and faint movement every 4, 5 or 8 minutes kept onset at 21:30. A fan, mobile or
+pet with a low mean movement level that does not form a wake can still make onset
+read early. The new sound-and-blip rule moved onset earlier on 3/196 staging nights:
+20:19 to 19:56 on 12 November, 20:09 to 20:01 on 20 November, and 21:13 to 20:34
+on 21 November 2026. It moved 3/194 production nights. None moved later, changed
+status, or gained a wake; every unmoved night was identical. The reviewed 20 November
+night improved from 9 minutes late to 1 minute late.
+
+For the earlier short-stir bridge, the pre-window guards only inspect the span from onset to the window start. After the
+window starts, only the 45-minute settle limit and the occupied-bed check protect it.
+On its two databases' changed nights, onset moved 2 to 142 minutes earlier; the two
+owner-reviewed nights moved 124 and 151 minutes closer to the reported time. A
+separate night changed from a broken 06:16 onset to 20:49. A bed zone that moves
+about every 5 minutes all night (a fan, mobile, curtain or pet) can now read as
+asleep from the put-down: one probe changed from `no_sleep` to onset 2 minutes
+after put-down and 673 asleep minutes. Morning review can correct it.
+
+**Still open:** a one-minute outside-bed reading just above the movement threshold
+can appear as an out-of-bed marker without an alert or image. A bed exit needs sustained
+movement, so the marker alone does not create an exit. A measured production night on
+2026-10-30 had a lone 0.033 reading at the owner's onset; such readings can be real.
+The outside-bed rule is left unchanged, and the morning review can correct the time.
+
+**Still open:** **In bed** can land on a visitor's `into_bed` even when the real
+put-down was earlier. On the measured sound-and-blip night it changed from blank
+to the time a pet or visitor climbed in, 16 minutes after the put-down. The put-down episode
+walk stops at a 16-minute gap, leaving that visitor marker as its start. Morning
+review can correct it.
+
+**Still open:** **In bed** can be exactly 45 minutes before onset when a put-down
+episode started earlier. The 45-minute filter checks each marker before the code
+walks back to the episode's first marker. Seen on 2026-11-08 (onset 19:40,
+In bed 18:55; markers actually began 18:47), and on prod 2026-11-19 and
+2026-10-31. Morning review can correct the in-bed time.
+
+**Still open:** a cry label is written after the alert clip is classified. A
+stir bridged while the night is live can be withdrawn a minute or two later when
+the label arrives, changing the displayed onset.
+
+**The wake-watcher gap is closed for the sleep camera:** it can now arm from two
+consecutive live onset results instead of waiting for 15 quiet minutes. Other cameras
+still use the quiet rule. A withdrawn onset does not disarm a watcher, and live onset
+can still be wrong; see the wake-recording limits above. The alert hold is off by default
+and its inside-window limit remains 45 minutes.
+For up to 28 days, "usual" can also mix nights saved under the earlier and newer
+onset rules; a comparison can change because of the rule alone.
 
 ## A bedtime around a second put-down: a false early one discarded, a real one sometimes lost (#669)
 
@@ -1665,7 +1759,32 @@ child settles. A *got into bed* whose neighbouring minutes were both recorded an
 movement on its own: an adult reaching in) does not stop it. "Quiet" is the sleep timeline's own meaning of
 the word, not "the bed did not move": a minute is not quiet if anything moved in the bed, anything moved
 elsewhere in the picture (outside the bed zone), or the microphone heard a noise. None of the numbers
-changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
+changed in #669 (3 minutes, 2½ hours, 0.0005), and there is no setting.
+
+The newer far-early rule adds a separate check after those guards. If a child seems to settle more
+than 50 minutes before the configured window, at least one watched minute in 30 must show even a
+small bed movement (0.0005 or more). The requirement uses all watched minutes from the settle to
+the window start. Evidence stops at the next **non-isolated logged put-down**; a logged blip with
+quiet recorded on both sides does not cut it. This cut can remove evidence but never reduce the
+requirement. Unwatched minutes do not raise it. Movement elsewhere in the picture does not cancel
+a bed reading. This closes
+the "exactly 3" escape for far-early onsets: movement in the real put-down's lead-in or after the
+window cannot by itself rescue a false earlier one. Within the 50-minute margin, the old limit
+remains. The later onset pass skips a far-early put-down only when this new evidence check rejects it.
+If an older check rejects it first, the later pass may still place the asleep time at the window start
+over an empty bed, with **In bed** blank.
+
+The margin comes from 62 owner-corrected nights in one house: confirmed real early onsets were at
+most 50 minutes before the window, while four known false ones were 52, 83, 84 and 117 minutes
+early. The 50-minute edge rests on one real night. The evidence rate scales the older 5-9 bed
+movements per 150 minutes at its low end; it could not be replayed on the confirmed real early
+nights because their minute samples had expired. On 57 completed staging nights, about 18-22%
+had fewer than three occupied minutes in their first 46 minutes, and one reviewed night had none
+in 117. A very still real early sleeper beyond the margin can therefore be rejected and shown
+as asleep only from the window start, late by up to the whole early span. A bed zone seeing only
+part of a child, or a window set too late so that every night counts as early, is most affected.
+The morning correction flow fixes a late time. This was tuned on two cameras in one house and
+has not been measured across other homes.
 
 **What it changes, stated rather than guessed:**
 - **Measured on two cameras in one house.** Replaying every stored night on both databases with the cut
@@ -1690,11 +1809,10 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
   minute before the check (a constructed case, not a recorded night): the check is no longer alone in a quiet
   stretch, it cuts, and the asleep time moves from 19:04 to 19:33 again. A bedroom microphone hears the whole house, so this is likelier in a noisy home; a
   duplicate logged during a stretch of household noise cuts the same way.
-- **A real put-down logged with quiet either side is exempt too, so a false earlier one is still
-  believed.** The exception looks only at the minute either side of the *got into bed*, not at the
+- **A real put-down logged with quiet either side is exempt too.** The exception looks only at the minute either side of the *got into bed*, not at the
   put-down around it. In a quiet house, a real put-down whose movement pauses for a minute at the moment the
   classifier logs it is treated like a parent's glance: it does not stop the count, and a false put-down an
-  hour or two before it is accepted on its movement, exactly as before this change.
+  hour or two before it may still be accepted on its movement if it has enough evidence before the window.
 - **In bed can now be blank where it used to show the false put-down.** When the false put-down is discarded
   but the real one settled after the first long quiet stretch after the window opened (a quiet evening over
   the empty bed), the night falls back to that quiet stretch, and no put-down lies close enough before it to
@@ -1704,10 +1822,11 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
   child: a false 18:48 put-down reaches exactly 3 that way and stays the bedtime, 43 minutes early (staging
   got that night right, because it logged two more *got into bed* that cut earlier). Trimming the approach
   was tried and rejected: it also zeroes a child who is still stirring when the next put-down is logged.
-- **Any put-down whose 2½ hours run past the end of the timeline, in progress or not.** The count is only
+- **Any put-down whose 2½ hours run past the end of the timeline, in progress or not.** The older count is only
   cut once 2½ hours after the settle have been recorded; before that, "not enough of the night yet to
-  judge" accepts the put-down, as it always did. On a night still in progress that is tonight's live
-  figures showing a false early put-down as the bedtime until about 2½ hours after it; figures worked out
+  judge" accepts the put-down, as it always did. The new check still requires evidence when the settle
+  is more than 50 minutes before the window. Within that margin, a night in progress can show live
+  figures with a false put-down as the bedtime until about 2½ hours after it; figures worked out
   later, and the stored night, use the full rule. **A finished night is not exempt:** a false put-down
   within 2½ hours of the end of the night's window is accepted the same way, and so the real put-down
   after it is never considered. For example a false 05:15 put-down over an empty bed, a real one at 06:00
@@ -1717,9 +1836,13 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
 - **Not fixed:** a nap the child was lifted out of without waking (nothing between the nap and bedtime shows
   they woke), and a quiet evening with nothing to break the stillness over the empty bed, which can still be
   read as a child asleep from the window's opening. A camera outage between a false put-down and the next
-  put-down still makes the false one believed: an unrecorded stretch is not proof of an empty bed.
-- **Saved nights keep their old answer** on the child's page; the detail view works a night out afresh, so
-  the two can differ until an admin uses **Recompute this night** (docs/sleep-tracking.md, "Re-working out a night").
+  put-down still makes the older guard accept it; within the 50-minute margin that can still be the onset.
+- **Follow-up:** a far-early put-down rejected by the older occupancy check, or an earlier nap put-down,
+  can still hold the onset at the window start in a quiet house. Only a put-down rejected by the newer
+  evidence check is skipped in the later onset pass.
+- **Saved nights may keep their old answer** on the child's page. A saved night self-updates for up to three
+  hours after its window closes; older rows wait for an admin to use **Recompute this night**. The detail
+  view can work a night out afresh, so it can differ from the saved card until then.
 
 **What to do:** nothing, there is no setting for this. If a bedtime looks wrong, correct it in the morning
 review ("Was last night right?"): the reviewed nights are what this change was checked against.

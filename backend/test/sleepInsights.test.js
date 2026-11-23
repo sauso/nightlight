@@ -31,15 +31,15 @@ const insertNight = db.prepare(
   `INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
      asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
      computed_at, avg_temperature, avg_humidity)
-   VALUES (?, ?, '2026-07-01 09:00:00', '2026-07-01 21:00:00', 'ok', NULL, NULL, ?, 0, ?, ?, 700,
+   VALUES (?, ?, '2026-07-01 09:00:00', '2026-07-01 21:00:00', 'ok', NULL, NULL, ?, 0, ?, ?, ?,
      '2026-07-02 00:00:00', ?, ?)`
 );
 
 // n nights whose temperature and wake-count move together, so there is a real correlation to find.
 function layNights(childId, specs) {
-  specs.forEach(([temp, wakes, asleep, humidity], i) => {
+  specs.forEach(([temp, wakes, asleep, humidity, coverage = 700], i) => {
     const d = String(i + 1).padStart(2, '0');
-    insertNight.run(childId, `2026-06-${d}`, asleep, wakes, asleep, temp, humidity ?? null);
+    insertNight.run(childId, `2026-06-${d}`, asleep, wakes, asleep, coverage, temp, humidity ?? null);
   });
 }
 
@@ -291,7 +291,8 @@ test('#365 one unusual night is not a headline (the shape the issue filed)', () 
 });
 
 test('#365 golden: at and above the minimum the whole output is what it was before the minimum existed', () => {
-  // Hard-coded from the code BEFORE this change (same fixture, run on the previous commit), so this
+  // Constant 700-minute coverage makes rate Pearson and both column averages byte-identical to the old
+  // output. Hard-coded from the code BEFORE this change (same fixture, run on the previous commit), so this
   // fails if the computation moves, and is not derived from the constant it pins. Only `min_group_nights`
   // is new.
   layNights(KID, groupSpecs(10, 10, 1));
@@ -311,6 +312,169 @@ test('#365 golden: at and above the minimum the whole output is what it was befo
     cooler: { nights: 12, avg_temp: 18.6, avg_wakes: 1, avg_asleep_minutes: 595 },
     warmer: { nights: 11, avg_temp: 22.5, avg_wakes: 2.9, avg_asleep_minutes: 555 },
   });
+});
+
+test('#365 one influential night withholds both directional headlines and returns only its direction', () => {
+  // Owner decision 2026-11-17 (#365): a lone extreme observation cannot make a trustworthy headline.
+  // The ordinary nights have equal rates; dropping the extreme makes Pearson null (zero variance).
+  for (const [ordinary, extreme, direction] of [[2, 10, 'more'], [10, 2, 'fewer']]) {
+    db.prepare('DELETE FROM sleep_nights').run();
+    layNights(KID, [
+      ...Array.from({ length: 10 }, () => [18, ordinary, 600]),
+      [20, ordinary, 600],
+      ...Array.from({ length: 9 }, () => [22, ordinary, 600]),
+      [30, extreme, 600],
+    ]);
+    const r = sleepInsights(KID);
+    assert.deepEqual(groupSizes(r), [10, 10]);
+    assert.equal(r.verdict, 'unstable');
+    assert.equal(r.direction, direction);
+    assert.ok(Math.abs(r.temp_wake_r) >= 0.35);
+  }
+});
+
+test('#365 leaving one night out can weaken r below the threshold without making it null', () => {
+  layNights(KID, [
+    ...Array.from({ length: 10 }, (_, i) => [18, 1 + i % 2, 600]),
+    [20, 2, 600],
+    ...Array.from({ length: 9 }, (_, i) => [22, 1 + i % 2, 600]),
+    [30, 10, 600],
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.equal(r.verdict, 'unstable');
+  assert.equal(r.direction, 'more');
+});
+
+test('#365 leaving one night out: r below the threshold alone makes it unstable', () => {
+  // Owner decision 2026-11-17 (#365, Codex plan review): the 10 cooler wakes are
+  // [4, 6, 8, 7, 5, 8, 6, 5, 3, 7] (mean 5.9); the 10 warmer wakes are
+  // [4, 8, 7, 8, 8, 9, 5, 6, 5, 13] (mean 7.3). All nights have 700 watched minutes.
+  // Full r = 0.615422; dropping the 30 C / 13-wake night gives r = 0.226763,
+  // while every other drop has r = 0.597702..0.677442. The warmer-minus-cooler
+  // mean stays 0.766667..1.766667 after every drop, so only the correlation
+  // threshold can make this headline unstable.
+  const coolWakes = [4, 6, 8, 7, 5, 8, 6, 5, 3, 7];
+  const warmWakes = [4, 8, 7, 8, 8, 9, 5, 6, 5];
+  layNights(KID, [
+    ...coolWakes.map((wakes) => [18, wakes, 600]),
+    [20, 5, 600],
+    ...warmWakes.map((wakes) => [22, wakes, 600]),
+    [30, 13, 600],
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.equal(r.temp_wake_r, 0.62);
+  assert.equal(r.verdict, 'unstable');
+  assert.equal(r.direction, 'more');
+});
+
+test('#365 leaving one night out: fewer wakes r above the threshold alone makes it unstable', () => {
+  // Mirror of the fixture above: 14 minus each wake count gives cooler mean 8.1,
+  // warmer mean 6.7, full r = -0.615422 and r = -0.226763 after dropping the
+  // 30 C / 1-wake night. Other drops have r = -0.677442..-0.597702, and the
+  // warmer-minus-cooler mean stays -1.766667..-0.766667 after every drop.
+  // Only the negative correlation threshold can withhold the headline.
+  const coolWakes = [4, 6, 8, 7, 5, 8, 6, 5, 3, 7];
+  const warmWakes = [4, 8, 7, 8, 8, 9, 5, 6, 5];
+  layNights(KID, [
+    ...coolWakes.map((wakes) => [18, 14 - wakes, 600]),
+    [20, 9, 600],
+    ...warmWakes.map((wakes) => [22, 14 - wakes, 600]),
+    [30, 1, 600],
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.equal(r.temp_wake_r, -0.62);
+  assert.equal(r.verdict, 'unstable');
+  assert.equal(r.direction, 'fewer');
+});
+
+test('#365 dropping a warm night must keep the displayed groups in the headline direction', () => {
+  // Owner decision 2026-11-17 (#365, Codex plan review): 21 nights at 700 watched minutes.
+  // Cooler wakes total 53 (5.3 avg); warmer total 57 (5.7 avg), including one 10-wake night.
+  // Full r is about 0.48 and every drop keeps r above 0.35 (lowest about 0.357), but dropping
+  // that warm night leaves 47/9 = 5.22, below the cooler 5.3. One night decides the headline.
+  const coolWakes = [3, 3, 4, 4, 6, 6, 7, 6, 7, 7];
+  const warmWakes = [3, 3, 3, 7, 6, 7, 4, 7, 7, 10];
+  layNights(KID, [
+    ...coolWakes.map((wakes, i) => [18 + i * 0.2, wakes, 600]),
+    [20, 5, 600],
+    ...warmWakes.map((wakes, i) => [20.2 + i * 0.2, wakes, 600]),
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.equal(r.cooler.avg_wakes, 5.3);
+  assert.equal(r.warmer.avg_wakes, 5.7);
+  assert.equal(r.verdict, 'unstable');
+  assert.equal(r.direction, 'more');
+});
+
+test('#365 rounded equal columns cannot support a directional headline', () => {
+  // Owner decision 2026-11-17 (#365, Codex plan review): ten cool nights have 4 wakes/700
+  // watched minutes, the median has 4/695, and ten warm nights have 4/690. The rates and
+  // every leave-one-out r stays above the threshold, but both displayed averages round to 4.0.
+  layNights(KID, [
+    ...Array.from({ length: 10 }, () => [18, 4, 600, null, 700]),
+    [20, 4, 600, null, 695],
+    ...Array.from({ length: 10 }, () => [22, 4, 600, null, 690]),
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.equal(r.cooler.avg_wakes, 4);
+  assert.equal(r.warmer.avg_wakes, 4);
+  assert.equal(r.verdict, 'none');
+  assert.equal('direction' in r, false);
+});
+
+test('#365 median ties cannot produce a headline contradicted by the shown groups', () => {
+  layNights(KID, [
+    ...Array.from({ length: 10 }, () => [18, 1, 600]),
+    ...Array.from({ length: 10 }, () => [20, 10, 600]),
+    ...Array.from({ length: 10 }, () => [20.1, 1, 600]),
+  ]);
+  const r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [10, 10]);
+  assert.ok(r.temp_wake_r >= 0.35);
+  assert.equal(r.cooler.avg_wakes, r.warmer.avg_wakes);
+  assert.equal(r.verdict, 'none');
+  assert.equal('direction' in r, false);
+});
+
+test('#365 wake rates remove a longer-window illusion', () => {
+  layNights(KID, [
+    ...Array.from({ length: 10 }, () => [18, 4, 350, null, 400]),
+    [20, 4, 350, null, 400],
+    ...Array.from({ length: 10 }, () => [22, 7, 600, null, 700]),
+  ]);
+  const r = sleepInsights(KID);
+  assert.equal(r.temp_wake_r, null, 'all observed-hour rates are equal');
+  assert.equal(r.verdict, 'none');
+  assert.equal('direction' in r, false);
+});
+
+test('#365 equal raw wakes in shorter warm windows give a rate headline and aligned columns', () => {
+  layNights(KID, [
+    ...Array.from({ length: 10 }, () => [18, 4, 600, null, 700]),
+    [20, 4, 500, null, 550],
+    ...Array.from({ length: 10 }, () => [22, 4, 350, null, 400]),
+  ]);
+  const r = sleepInsights(KID);
+  assert.equal(r.verdict, 'warm_more_wakes');
+  assert.ok(r.warmer.avg_wakes > r.cooler.avg_wakes);
+  assert.notEqual(r.cooler.avg_wakes, 4);
+  assert.notEqual(r.warmer.avg_wakes, 4);
+  assert.equal('direction' in r, false);
+  assert.deepEqual(Object.keys(r).sort(), ['status', 'nights_analyzed', 'verdict', 'min_group_nights',
+    'temp_wake_r', 'temp_asleep_r', 'temp_spread', 'overall', 'cooler', 'warmer'].sort());
+});
+
+test('#365 zero and missing watched minutes do not count as tracked nights', () => {
+  layNights(KID, [[18, 1, 600], [19, 2, 600], [20, 3, 600], [21, 4, 600],
+    [22, 5, 600, null, 0], [23, 6, 600, null, null]]);
+  const r = sleepInsights(KID);
+  assert.equal(r.status, 'insufficient');
+  assert.equal(r.nights_analyzed, 4);
 });
 
 test('#365 a room that never changes still says "flat", not "not enough nights"', () => {

@@ -39,6 +39,7 @@ const Setup = lazyPage(() => import('./pages/Setup.jsx'));
 // #1094: the page a caregiver opens from an invite link. Lazy like Setup (only the person holding a link ever needs it), and PUBLIC.
 const AcceptInvite = lazyPage(() => import('./pages/AcceptInvite.jsx'));
 const DetectionSettings = lazyPage(() => import('./pages/DetectionSettings.jsx'));
+const NightlightCameraSettings = lazyPage(() => import('./pages/NightlightCameraSettings.jsx'));
 const SettingsGeneral = lazyPage(() => import('./pages/SettingsGeneral.jsx'));
 const SettingsCamera = lazyPage(() => import('./pages/SettingsCamera.jsx'));
 const SettingsCameraRecording = lazyPage(() => import('./pages/SettingsCameraRecording.jsx'));
@@ -250,6 +251,8 @@ function Shell() {
                         /cameras/:id, so react-router matches them first regardless of order. */}
                     <Route path="/cameras/new" element={<AdminProtected><CameraSettings /></AdminProtected>} />
                     <Route path="/cameras/:id" element={<AdminProtected><CameraSettings /></AdminProtected>} />
+                    {/* A Nightlight Camera's own sensors: a literal segment, so it wins over :kind below. */}
+                    <Route path="/cameras/:id/nightlight" element={<AdminProtected><NightlightCameraSettings /></AdminProtected>} />
                     <Route path="/cameras/:id/:kind" element={<AdminProtected><DetectionSettings /></AdminProtected>} />
                     {/* Settings hub is role-aware internally (admin-only rows are hidden for
                         caregivers), so the hub route itself is open to any signed-in user;

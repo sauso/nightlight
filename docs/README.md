@@ -5,6 +5,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 ## Get Nightlight running
 
 - [Installation](installation.md) — Unraid, Docker, Compose, storage and first setup
+- [Home Assistant](home-assistant.md) — run Nightlight as an experimental Home Assistant OS app: how to add it, and its limits
 - [What you need, and what has been tested](requirements.md) — hosts, what each camera starts, disk, browsers and apps, and what has not been measured
 - [How it works](how-it-works.md) — FFmpeg, MediaMTX, the backend and the app, and how video reaches your browser
 - [Cameras and caregivers](cameras.md) — add cameras and share access
@@ -36,6 +37,7 @@ after the next release to `main`; until then, the link opens a plain new issue.
 - [Operations](operations.md) — backup, restore, permissions, upgrades and rollback
 - [Architecture](architecture.md) — implementation details
 - [Building and testing](development.md) — local development and tests
+- [Environment reference](readme-reference.md) — development-only audio model override
 - [Design language](design-language.md) — UI conventions
 - [Mutation testing](mutation-testing.md) — contributor test reference
 - [Demo mode](demo-mode.md) — public read-only demo deployments
@@ -72,6 +74,16 @@ Each child has a page showing last night's sleep with its score and a one-line s
 Tap the summary card to open the night. The strip at the top moves between nights; below it are the score, a short written summary, **Why this score?** and the timeline with each wake-up. The numbers are an estimate from movement and sound, not a medical measurement.
 
 ![A night's detail on a phone](screenshots/sleep-mobile.png)
+
+**Why this score?** opens the five parts of the score, each shown next to the child's usual. Under the timeline are that night's timelapse and the wake-ups.
+
+![The five parts of a sleep score on a phone](screenshots/sleep-score-mobile.png)
+
+![A night's wake-ups and timelapse on a phone](screenshots/sleep-wakeups-mobile.png)
+
+On a computer the same page keeps the strip of nights, the score and the timeline in one column beside the sidebar.
+
+![A night's detail on desktop](screenshots/sleep-desktop.png)
 
 ### 5. Check the estimate
 

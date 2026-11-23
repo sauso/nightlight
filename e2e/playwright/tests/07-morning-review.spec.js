@@ -199,7 +199,16 @@ test('"no one was in the bed" replaces the correction, and undoing it restores t
 
   // Reversible: undoing brings the DETECTOR's own night back, not 19:45/05:30.
   await page.getByText('You said no one was in the bed. Tap to change it.').click();
-  await expect(page.getByText('You said no one was in the bed.')).toBeVisible();
+  // ⚠️ WAIT FOR THE REVIEW SCREEN, THEN ASSERT ON ITS OWN QUESTION. The child page says "You said no one was in the bed." twice
+  // (the night card's `.night__soon` line and the receipt's `.camera-tile__sub`), so the bare text matches TWO elements there, and
+  // a strict-mode violation is thrown at once, not retried. The click only starts the route change (the review screen is a lazy
+  // chunk), so an assertion that runs before it renders still sees the child page and fails. This failed the e2e job on every
+  // run from 2026-11-21 (CI run 45259811124 among them) on a fast runner and passed on a slow one. Reproduced locally by
+  // throttling the browser's CPU 20x in a throwaway copy of this test: the ambiguous text was still on screen right after the
+  // click in 15 of 25 clicks (unthrottled it never was, in 40 clicks), and the original assertion then failed with the same
+  // strict-mode violation. The app is fine: the click does open the review screen.
+  await expect(page).toHaveURL(/\/children\/[^/]+\/review\/\d{4}-\d{2}-\d{2}/);
+  await expect(page.locator('.review-question')).toHaveText('You said no one was in the bed.');
   await page.getByRole('button', { name: 'Someone was in the bed' }).click();
   await expect(page).toHaveURL(/\/sleep\?date=.*saved=1/);
 });

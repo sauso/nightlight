@@ -83,6 +83,18 @@ beforeEach(() => {
 });
 
 describe('which nights make the usual', () => {
+  test('a usual baseline mixes nights saved under both onset-rule labels', () => {
+    for (let n = 1; n <= 7; n++) {
+      put(back(n), {
+        scoring_context: context({ algo: n <= 3 ? '7' : '8' }),
+        wake_count: n <= 3 ? 1 : 3,
+      });
+    }
+    const b = baseline({ scoring_context: context({ algo: '8' }) });
+    assert.equal(b.nights, 7);
+    assert.deepEqual(b.metrics.wake_count, { median: 3, n: 7, ready: true });
+  });
+
   test('a median of the earlier nights: not a mean, and never the night itself or a later one', () => {
     for (let n = 1; n <= 6; n++) put(back(n));
     put(back(7), { asleep_minutes: 30 }); // one freak night: the mean would be 518.6

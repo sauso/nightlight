@@ -192,9 +192,9 @@ Known limits. For the first three, use **Show with today's settings**, or have a
 If a camera reports temperature/humidity over **MQTT** (set
 up under **Settings → Integrations → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
 tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
-the same time axis. A **"Sleep & room temperature"** card compares wake-ups on the child's warmer
-vs cooler nights, so you can spot whether a warm room tends to mean more waking — a pattern, not
-a cause. It reads the child's 30 most recent tracked nights with a temperature (fixed, not a
+the same time axis. A **"Sleep & room temperature"** card compares wake-ups per watched hour of the
+sleep window on a child's warmer and cooler nights. It can suggest a pattern, not a cause. It reads
+the child's 30 most recent tracked nights with a temperature and watched time (fixed, not a
 setting). From the first such night until there are 5 it reads "Collecting nights" with the count
 so far. From 5, a room whose temperature varied by less than 1°C across those nights is reported
 as "barely changed": that says nothing about sleep, only that the room did not change enough to
@@ -204,8 +204,17 @@ compare. Otherwise the nights are split at the median temperature, and the card 
 is the same in any home or climate). Nights at exactly the median temperature belong to neither
 group, so the first comparison needs at least 21 nights (10 cooler, 10 warmer and one at the
 median). Until both groups reach 10 the card reads "Not enough nights yet" with how many it has
-of each, and shows no verdict and no averages. Once both groups have 10, the wording and numbers
-are exactly what they were before. Known limit: each night's average temperature is rounded to
+of each, and shows no verdict and no averages. A warmer or cooler headline also needs the
+correlation and the two groups shown to point in the same direction, and both the correlation and
+the groups' direction must still hold when any one night is left out. If they do not, the card says
+there is a hint but it is not reported as a pattern yet, without showing comparison averages. The
+footer shows the number of tracked nights and how many are in each group. The "wake-ups avg"
+columns put each group's average hourly rate
+onto the same average watched night, so the two columns match what the headline compares. With
+equal watched time every night, these are the ordinary wake-up averages. Known limits: the rate is
+per watched hour of the configured window, not per hour slept; the card uses stored detector wake
+totals rather than later time corrections (#755); and leaving out one night checks single-night
+influence, not whether a pattern is causal. Each night's average temperature is rounded to
 0.1°C, so in a very steady room where many nights share the median value (all of which join
 neither group) one group can stay under 10, and the card keeps saying "Not enough nights yet",
 for as long as the room stays that steady.
@@ -215,7 +224,7 @@ for as long as the room stays that steady.
 If the child has an [ESPHome radar sensor](esphome.md) that reports a heart rate or a breathing rate, the sleep screens show them. A child without one sees none of this.
 
 - **On the child's card:** one small line under the headline, such as "82 bpm avg" and "21/min avg", for a night that was scored. Each figure appears only when there is one. The averages cover the time between falling asleep and the morning wake (the whole night so far, while it is running).
-- **On the sleep page:** two thin tracks, **Heart rate** and **Breathing**, under the room temperature track on the same time axis, with the average and the lowest to highest figure in the caption (such as "avg 82 bpm · 71–103"). The average is over the time asleep, from falling asleep to waking, even when that starts before or ends after the timeline shown, so the card and the sleep page give the same figure for a night. If the sensor has readings on the timeline but none between falling asleep and waking, the caption shows only the range ("71–103 bpm"), without an average. The tracks cover the whole timeline, so the time before falling asleep and after waking can be on the line but is not in the average. A track needs at least two readings, or it is left out. A **gap in the line is a gap in the data**: where the sensor gave no valid reading for about 10 minutes or more, the line stops and starts again rather than joining the two sides.
+- **On the sleep page:** two thin tracks, **Heart rate** and **Breathing**, under the room temperature track on the same time axis, with the average and the lowest to highest figure in the caption (such as "avg 82 bpm · 71–103"). The average is over the time asleep, from falling asleep to waking, even when that starts before or ends after the timeline shown, so the card and the sleep page give the same figure for a night. If the sensor has readings on the timeline but none between falling asleep and waking, the caption shows only the range ("71–103 bpm"), without an average. The tracks cover the whole timeline, so the time before falling asleep and after waking can be on the line but is not in the average. A track needs at least two readings, or it is left out. A **gap in the solid line is a gap in the data**: where the sensor gave no valid reading for about 10 minutes or more, the solid line stops and starts again. A thin **dashed line** joins the two sides so the track reads as one trace, and a small legend, "Estimated: no data was available", appears under the tracks when any dashed line is drawn. The dashed line is a straight join, not a measurement; nothing is drawn before the first reading or after the last.
 - **When you hold or drag along the timeline** (a mouse hover on a computer), the bubble also shows the heart rate and breathing at that minute, when there is a reading within 5 minutes of it. The sensor's readings are grouped in 5-minute steps, and each step sits at the average time of the minutes it was measured in, so a reading is never shown before it was taken. Between readings further apart than that, it shows none.
 
 Unlike the room temperature, these come from the sensor's minute readings and are not saved with the night, so a night older than the ESPHome readings retention (default **30 days**, setting `esphome_retention_days`, adjustable from 1 to 365 on the ESPHome settings screen) shows no heart rate or breathing, while the rest of its sleep summary stays. Reading a night never changes it: these figures are not used in the sleep times, the sleep score, the night summary or any notification. They are **sensor estimates from a radar, not for medical use**, and not a safety device. The heart rate in particular has not been validated against anything, and the sensor can read an adult or a pet at the bed as well as the child. [The ESPHome page](esphome.md#heart-rate-and-breathing-on-the-sleep-screens) lists the limits.
@@ -271,8 +280,8 @@ those are averaged rather than combined.
 
 Across the night it builds a per-minute movement + sound timeline from
 the child's main camera: falling still for a sustained stretch reads as falling asleep,
-sustained movement or noise reads as an awakening (brief stirs don't count; a microphone that looks
-faulty is the one exception, see [A microphone that looks faulty](#a-microphone-that-looks-faulty)). On a completed
+sustained movement or witnessed noise reads as an awakening (brief stirs don't count; a microphone that looks
+faulty is handled separately, see [A microphone that looks faulty](#a-microphone-that-looks-faulty)). On a completed
 night, a short recorded exit-and-return can also count as an awakening even when it's too brief
 to show up as sustained movement on its own — as long as the bed is confirmed quiet in between
 and later bed movement supports the return. This only applies to trips of one to twenty minutes,
@@ -301,6 +310,61 @@ never perfectly still for hours — they move a little, repeatedly — so a bed 
 then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
 is still found if it comes after the configured wake time.
 
+After a put-down, a brief stir in the bed no longer restarts the 15-minute search for sleep.
+Nightlight can bridge a stir of up to 2 minutes, with at most 3 bridged minutes in one
+15-minute stretch. There must be a watched quiet minute on both sides of each stir, some
+movement in the bed, and no crying label or movement outside the bed during it. A nearby
+sound can be part of the same stir and uses the same limits. Bridged minutes do not count
+as watched quiet minutes. The asleep time is the first watched quiet minute in the stretch.
+This applies only after a recorded put-down; the search without one is unchanged.
+
+For this put-down search, faint in-bed blips with a low mean level no longer make
+the sound around them count as movement for onset, unless that sound is part of a wake.
+Here faint means a bed movement peak above 0.01 and at most 0.1, with a mean level at
+most 0.002 and no outside-bed movement. The bed movement itself still uses one of the
+3 bridge minutes; sound cleared this way counts as watched quiet. Real movement or a
+crying label within 2 minutes still witnesses sound, and an outside-bed reading is
+never a faint blip. A candidate stretch containing cleared sound is rejected if it
+overlaps any part of a qualifying wake, so settling is not relabelled as a wake.
+These measured values come from two cameras in one house, without a natural dividing line:
+movement levels are fractions of the painted zone, so zone size and camera distance
+affect them. They have not been measured elsewhere.
+
+For this sound-and-blip change, the whole-night comparison moved onset earlier on
+3 of 196 staging nights and 3 of 194 production nights. In staging, the moves were
+20:19 to 19:56 on 12 November, 20:09 to 20:01 on 20 November, and 21:13 to 20:34
+on 21 November 2026. The reviewed 20 November night moved from 9 minutes late to
+1 minute late. None moved later, changed status, or gained a wake; every unmoved
+night had an identical result. Other differences can start from the new onset on,
+including after the old onset.
+
+The earlier short-stir bridge limits were set from one child's camera in one house and have not been measured
+elsewhere. A child lying awake and still, moving in the bed only briefly while the room
+is otherwise quiet, can be shown as asleep too early. On the two databases' changed
+nights for that earlier bridge, onset moved 2 to 142 minutes earlier; the two owner-reviewed nights moved
+124 and 151 minutes closer to the reported time. Another night changed from a broken
+06:16 onset to 20:49. The put-down is the only bound. A noisy room whose only movement is faint
+bed readings can still bridge. A bed zone over periodic movement from a fan, mobile, curtain or pet,
+or a parent patting the child without enough movement outside the bed, can make it apply
+too often. In one probe, movement about once every 5 minutes all night changed
+`no_sleep` to an onset 2 minutes after the put-down and 673 minutes asleep.
+In a separate murmuring-child probe, sound from 20:09 to 21:30 with faint movement
+every 4, 5 or 8 minutes kept onset at 21:30 with the wake-overlap check. A fan,
+mobile or pet with a low mean movement level that does not form a wake can still
+make onset read too early.
+[Correct a wrong asleep time in the morning review](#correcting-a-night).
+If a cry label is added after the alert clip is analysed, a stir bridged live can
+be withdrawn a minute or two later when that label arrives.
+The pre-window guards only examine the time between the proposed onset and the window
+start; when onset is after the window start, the 45-minute settle limit and the occupied-bed
+check are the remaining protections. That occupied-bed check may initially accept a live
+onset because its 150-minute observation period is unfinished, then withdraw it later.
+
+Nights worked out before this change keep their saved figures until recomputed. The sleep
+detail page works a night out afresh, so it can differ from its saved card. For up to 28
+days, the child's "usual" can mix nights worked out under both rules. A comparison may
+then say "more sleep" or "more wakes" because of the rule change alone.
+
 Only movement **before the next put-down** counts towards that occupied-bed check: a later bedtime
 never vouches for an earlier one. So a *put-down* the camera got wrong an hour or two before the
 real one, with the bed empty in between, is discarded rather than reported as the bedtime (it used
@@ -308,27 +372,51 @@ to be accepted on the real bedtime's movement, and could even end the night in t
 parent then left the room). A *got into bed* with recorded quiet in the minute either side of it (at
 most a lone minute of movement, such as a parent reaching in) is not treated as a new put-down for
 this. "Quiet" there means the same as everywhere else in the timeline: no movement in the bed, no
-movement elsewhere in the picture, and no noise. There is no setting for any of it, and the numbers are
-unchanged: at least 3 minutes with movement in the bed, however slight, in the 2½ hours after the
-child settles.
+movement elsewhere in the picture, and no noise. There is no setting for any of it. That older
+check still asks for at least 3 minutes with movement in the bed, however slight, in the 2½ hours
+after the child settles.
+For a put-down whose settle is **more than 50 minutes before the window**, Nightlight also needs
+about one minute with a small bed movement per 30 watched minutes through to the window start.
+Only movement before the next **non-isolated logged put-down** counts as evidence: an isolated blip
+with quiet recorded on either side does not cut it. The requirement still uses the whole watched
+span to the window start, so a later put-down can remove evidence but never lower the requirement.
+A minute without video does not raise that requirement, and movement elsewhere in the picture does
+not cancel a bed movement. Within 50 minutes, the existing checks still apply. This extra check
+stopped false early bedtimes on an empty-looking bed, including one live night that otherwise said a
+child was asleep before they were put down. It does not catch every case: a put-down that an older
+check rejects first can still leave the asleep time at the window start over an empty bed.
+
+This is a cautious estimate from two cameras in one house, not a measurement of the confirmed real
+early nights: their minute samples had already expired. The 50-minute margin rests on one confirmed
+real early night. About 18-22% of 57 completed nights had fewer than three small bed movements in
+their first 46 minutes. That figure is a proxy for quiet early sleepers, not this rule's rejection
+rate; one reviewed night had none in 117 minutes. A child who truly falls
+asleep more than 50 minutes early and lies very still may therefore be shown as falling asleep at
+the window start, late by as much as the whole early span. This is most likely if the bed zone sees
+only part of the child, or the window is set so late that every night counts as early. You can
+[correct the asleep time in the morning review](#correcting-a-night). If your child is usually
+asleep more than 50 minutes before the window opens, move the window start to their usual bedtime.
+
 **Known limits** (details, and the nights they come from, in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)):
+
 - A very still child whose bedtime is followed by a second *got into bed* that is not quiet either
   side (a parent at the bed for a couple of minutes, the same put-down logged twice, or a one-minute
   check with a noise from elsewhere in the house beside it) before the bed has shown 3 such minutes
   loses that bedtime: the in-bed and asleep times move later, to that second event or after it.
   There is no grace period: this holds a few minutes after the child settles as much as an hour.
 - The other way round: the **real** put-down, if it happens to be logged with quiet either side (a
-  quiet house, a put-down that pauses), is not treated as a new put-down either, so a false earlier
-  one is still believed, exactly as before this change.
+  quiet house, a put-down that pauses), is not treated as a new put-down either. A false earlier
+  one can still be believed if it is within the 50-minute margin or has enough earlier bed movement.
 - Where the false put-down is discarded but the real one settled after the window had already
   opened on a quiet evening, the **In bed** time can now show nothing on a night where it used to
   show the false put-down.
 - The parent's approach in the minute or two before the real put-down still counts for a false
-  earlier one, so a false put-down with exactly that much movement before the real one is still
-  believed.
-- The check needs the 2½ hours after a put-down to have been recorded. A put-down closer than that to
-  the end of what has been recorded is believed without it: while a night is still in progress, a false
-  put-down can show as tonight's bedtime for up to about 2½ hours after it, and the figures worked out
+  earlier one under the older occupied-bed check. Within the 50-minute margin, a false put-down
+  with exactly that much movement can still be believed.
+- The older check needs the 2½ hours after a put-down to have been recorded. A put-down closer than that to
+  the end of what has been recorded is believed without that check, but a far-early one still needs
+  pre-window evidence. Within the 50-minute margin, a false put-down can show as tonight's bedtime
+  for up to about 2½ hours after it while a night is in progress, and the figures worked out
   after that use the full rule. The same is true of a night that has ended, for a put-down within 2½
   hours of the end of its window: a false one over an empty bed there is kept as the bedtime, and a real
   one after it is not looked at.
@@ -338,15 +426,24 @@ child settles.
   discarded false put-down came first. That is still later, and closer to the truth, than the false
   put-down it replaces.
 
-### Noise on its own doesn't delay bedtime
+### When sound counts as awake
 
-A bedroom microphone hears the whole house, and
-bedtime is usually its loudest hour — a sibling being settled, a TV, adults talking. So when
-working out **when your child fell asleep**, a noisy minute counts as awake only if that room
-also *moved* at around the same time. The same holds for the **first half hour** after they
-fall asleep, so the tail of the household's evening isn't reported as their first wake-up.
-After that the rule stops: mid-night the house is quiet, so a cry with no movement counts as a
-wake-up as you'd expect (unless the microphone looks faulty at the time: see the next section).
+A bedroom microphone hears the whole house. A brief sound-only minute counts as activity when
+the room also moved within two minutes, or a saved alert clip from that camera was labelled
+as crying within two minutes. After sleep begins, a stretch of **20 or more consecutive minutes**
+of sound also counts as awake without nearby movement: a child may be awake but still or out of
+view. That exception does not apply while Nightlight looks for sleep onset at bedtime. Previously,
+later noise alone could count as awake even when it was brief. Movement still counts on its own.
+A sound-only minute that stops counting is not stirring either: stirring remains a measure of
+movement in the bed.
+
+Nightlight analyses **alert clips only**, on the device. The per-camera **Save a clip when
+triggered** option (`detect_record_clips`) is off by default. A cry without an alert clip, or
+one the model misses, falls back to the movement rule. Labels live with alert history; after
+an event is removed by retention, recomputing that older night can no longer use its cry label.
+Turn off **Listen for crying, coughing and talking in alert clips** to ignore stored cry labels
+as well as stop new analysis. Stored nights are not recomputed on upgrade, so expect a one-off
+step in the sleep-score trend as newly worked-out nights use the changed rule.
 
 ### A microphone that looks faulty
 
@@ -358,9 +455,11 @@ loud only in **brief spikes** (most of the minute stayed quiet) and such minutes
 goes, is normally far shorter than that; the fault this was built for ran all night.
 
 - **Movement still counts** in those minutes, so a child who stirs or gets up is still seen.
-- **A sound that lasts is never ignored**, even during a fault: a cry or a noise that fills more than a
-  quarter of a minute keeps counting as awake.
-- **Once the microphone is fixed or replaced**, its sound counts again.
+- **A sound that lasts is not discounted as a microphone fault.** A stretch of 20 or more
+  consecutive minutes also counts as awake after sleep begins, even without nearby movement
+  or a cry-labelled alert clip.
+- **Once the microphone is fixed or replaced**, its sound is considered again under the sound
+  rule above.
 - The night's detail page says so under the summary, for example *"The microphone looked faulty for
   9h 40m, so its sound was not counted as awake time. Movement still was."* The night's API answer
   carries the count as `sound_discounted_minutes`: the minutes between falling asleep and waking whose
@@ -403,7 +502,8 @@ Known limits:
   isn't your child.
 - **Only the detail page shows the note.** The child's card and the morning sleep report show the
   saved summary, which has the corrected numbers but not the note.
-- **A night is never reported as "no one was in the bed" when sound was ignored**, because that answer
+- **A night is never reported as "no one was in the bed" when sound was discounted or an unwitnessed
+  sound-only minute stopped counting**, because that answer
   also deletes the night's timelapse frames and the ignored minutes may have been the only sign of a very
   still child. A night watched for less than 90% of its window still reads "no data", as before, because
   that answer deletes nothing. The cost: an empty bed on a camera with a faulty microphone now usually
@@ -446,6 +546,10 @@ minutes of the slight movement a sleeping child makes (too small to count as the
 2½ hours after the return. Bigger movement at the bed does not count, because after a child has
 really got up that is a parent stripping the bed, tidying or reaching in: counting it once turned a
 real early-morning wake into one more than two hours later.
+The minute after that *got into bed* does not count as proof the child stayed:
+it can be the child's climb out after a real exit. The skip follows the *got into bed* minute,
+so if the exit lands in the next minute, that is the skipped minute. Later quiet, occupied minutes still count,
+so a child who did return and settle can still have that short exit set aside.
 Those minutes are only counted **until the child leaves the bed again**: up to the next *got out of
 bed* that is not logged within a minute after a *got into bed* (judged by the times alone) and that
 the child does not come straight back from (a *got into bed* within 20 minutes, with the bed then
@@ -1163,7 +1267,8 @@ card and the detail page then show the same two times and the same figures for m
 unknown, wake-ups, and longest stretch, also after the samples are gone. Minutes the cameras did not see
 inside your times are unknown. If you give an asleep time earlier than the app's, any minute in between with
 movement or sound counts as awake but never as a wake-up: the app did not look for wake-ups before its own
-asleep time, so this is a judgement, not a measurement. It is stricter than the rest of the night, where a
+asleep time, so this is a judgement from the raw pre-onset timeline, not a measurement with the later
+movement-or-cry witness rule. It is stricter than the rest of the night, where a
 short stir still counts as asleep. If your wake-up time cuts a wake-up to under five minutes, those minutes
 count as awake but not as a wake-up, like a stir. The exception is a wake-up the app counted itself (one that
 began before its own wake-up time): it still counts when your time is the app's or later. Its morning

@@ -15,6 +15,8 @@ export default function CameraDiscovery({ onPick, autoStart = false, selectedId 
       // A saved camera shows only "Added", as before; the card itself draws whatever chips it is given (a saved ESPHome
       // device keeps its "Encryption advertised" chip: found in the #1078 review).
       chips: candidate.alreadyAdded === true ? [] : [
+        // 'nightlight' is a Nightlight Camera's own announcement; it keeps the ONVIF chip too (true, and how it is added).
+        ...(candidate.sources?.includes('nightlight') ? [{ text: 'Nightlight' }] : []),
         ...(candidate.sources?.includes('mdns') ? [{ text: 'Thingino' }] : []),
         ...(candidate.sources?.includes('onvif') ? [{ text: 'ONVIF' }] : []),
       ],

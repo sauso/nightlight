@@ -106,12 +106,15 @@ configured in either. `backend/` has a unit test suite (Node's built-in runner, 
 `frontend/` has its own (Vitest + Testing Library, coverage-gated in CI). End-to-end
 coverage lives separately in `e2e/` (Playwright, needs Docker).
 
-**Node 24.** CI, the Docker image and `.nvmrc` are all on Node 24, and `engines` in both `package.json`
-files says `>=24` (npm only warns). Only 24 is supported and gated: on Node 22 three backend suites fail
-(`detector-observation-wiring`, `transcoder-log-redaction`, `sleepInsights`; the cause was never
-established, #565). `backend/test/node-version-pin.test.js` fails if the five places drift apart. One workflow,
+**Node 24 supported; Node 26 image soak (#751).** CI and `.nvmrc` stay on Node 24, and `engines` in both `package.json`
+files say `>=24` (npm only warns). The Docker image runs Node 26 during the one-week staging SOAK.
+Only 24 is supported and gated until it ends: on Node 22, 16 backend test files fail because its
+module mocks ignore the `exports` option (#565). `backend/test/node-version-pin.test.js` guards the supported pins
+and the whole-image soak exception. One workflow,
 `.github/workflows/node-next.yml`, runs both suites on the NEXT major (26, #751) after merges, weekly and on demand: a
-preview that changes nothing about what is supported, and the only file allowed to pin another major.
+preview that changes nothing about what is supported, and the only workflow allowed to pin another major.
+HOLD: no dev-to-main release while the soak runs unless the owner says so or the release PR reverts the
+Dockerfile base to `node:24-alpine`.
 
 **Sandbox with an older Node (the cloud builders came with 22).** Before `npm ci` or any test run, `node -v`;
 if the major is below `.nvmrc`'s, run `. scripts/use-node.sh` (sourced, so it can change PATH). It uses nvm,
@@ -259,7 +262,9 @@ enforces the >=95% core-logic gate, plus the container-specific entrypoint check
 check), and `definition-of-done` (a warning-only docs/tests reminder, not a hard gate).
 
 `.github/workflows/docker-publish.yml` is separate — it builds and pushes a multi-arch
-(amd64/arm64) image to Docker Hub (`sauso/nightlight`) and runs no tests itself. Which tag it
+(amd64/arm64) image to Docker Hub (`sauso/nightlight`) and runs no tests itself. A second job,
+`mirror-ghcr`, then copies the same digest and tags to `ghcr.io/sauso/nightlight`; it can be red
+without the Docker Hub publish being affected (`docs/operations.md`, "Registries"). Which tag it
 publishes depends on the ref:
 - push to **`dev`** → `:dev` (staging). Does NOT touch `:latest`.
 - push to **`main`** or a **`v*` tag** → `:latest` (+ semver tags). This is production.

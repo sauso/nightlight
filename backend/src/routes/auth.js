@@ -102,6 +102,10 @@ function usernameKey(req) {
   return typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
 }
 
+function textOrEmpty(value) {
+  return typeof value === 'string' ? value : '';
+}
+
 // /login/mfa only: the account is inside its short-lived MFA token. DECODED, not verified — this
 // only needs to produce a stable bucket, while the route itself verifies the token before checking a
 // code. A forged token cannot buy guesses at the real code: a valid token always carries the same id,
@@ -535,6 +539,8 @@ const everySession = db.prepare(
 function toPublicSession(s, currentSessionId) {
   return {
     id: s.id,
+    // #1093, Codex plan review 2026-11-17: both list queries already select sessions.user_id; expose it for a stable Users join.
+    user_id: s.user_id,
     device: describeDevice(s.user_agent),
     created_at: s.created_at,
     last_seen_at: s.last_seen_at,
@@ -609,7 +615,8 @@ router.post('/setup', setupLimiter, asyncHandler(async (req, res) => {
   // Refuse before the costly hash, but preserve the existing completed-setup answer above.
   if (refuseExposedLoopbackSetup(req, res)) return;
   const { username, password, first_name, last_name } = req.body || {};
-  if (!username || !password || password.length < 8) {
+  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.
+  if (!username || typeof password !== 'string' || password.length < 8) {
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
   }
   if (refusedUnusablePassword(res, password)) return;
@@ -692,10 +699,13 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   // its placeholder hash, same cost) and counted the same way, so it answers exactly like a wrong password. Its
   // placeholder is a hash of 32 random bytes nobody knows and can never match; this guard is what holds if the stored
   // hash is ever one somebody knows (an older version set a password, a database edited by hand).
+  // Input hygiene: String() also accepted an array around the real password or a number matching a numeric
+  // password. Other types now miss like a missing field: same compare cost, counted failure, status and message.
+  // No behaviour change for strings.
   const attempt = await throttledPasswordCheck(
     loginThrottle,
     loginAccountKey(username),
-    async () => (await passwordHash.compare(String(password || ''), hashToCheck)) && !!user && user.password_set === 1,
+    async () => (await passwordHash.compare(textOrEmpty(password), hashToCheck)) && !!user && user.password_set === 1,
     { known: !!user }
   );
   if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
@@ -843,7 +853,8 @@ router.post('/users', requireAuth, requireAdmin, asyncHandler(async (req, res) =
   // turned into an invite. Everything below is the password path, unchanged.
   if (req.body?.invite === true) return createInvitedUser(req, res);
   const { username, password, role, first_name, last_name } = req.body || {};
-  if (!username || !password || password.length < 8) {
+  // As in PUT /me/password (#1093/#1095), a malformed body gets this route's 400 before hashing.
+  if (!username || typeof password !== 'string' || password.length < 8) {
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
   }
   if (refusedUnusablePassword(res, password)) return;
@@ -902,7 +913,8 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
     const taken = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username, req.params.id);
     if (taken) return res.status(400).json({ error: 'That username is already taken' });
   }
-  if (password !== undefined && password !== '' && password.length < 8) {
+  // As in PUT /me/password (#1093/#1095), refuse a non-text body with this 400 before hashing or writing.
+  if (password !== undefined && (typeof password !== 'string' || (password !== '' && password.length < 8))) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
   }
   if (refusedUnusablePassword(res, password)) return;
@@ -913,8 +925,7 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
     return res.status(400).json({ error: PENDING_CANNOT_BE_ADMIN });
   }
 
-  // (`newHash ?? await` only reaches the await for a non-string truthy password, where bcrypt throws as
-  // it always did, before any write.)
+  // Every nonempty password has a precomputed newHash after validation; the await fallback is unreachable.
   const password_hash = password ? (newHash ?? (await passwordHash.hash(password, 10))) : existing.password_hash;
   let photo;
   try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
@@ -999,12 +1010,18 @@ router.put('/me', requireAuth, (req, res) => {
 // current one - unlike the admin reset above, this doesn't skip verification.
 router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {
   const { current_password, new_password } = req.body || {};
-  if (!new_password || new_password.length < 8) {
+  // #1093, Codex plan review 2026-11-17: an array can pass the length check and reach the hash worker (#1095 review).
+  // Keep this inside the handler: sessionActionLimiter must still count malformed requests.
+  if (typeof new_password !== 'string' || new_password.length < 8) {
     return res.status(400).json({ error: 'New password must be at least 8 characters' });
   }
-  // Before the current password is checked, so an unusable NEW password costs no guess. (An unusable CURRENT one
-  // needs nothing here: compare() answers false, the same 400 as a wrong one.)
+  // #1093, Codex plan review 2026-11-17: reject an unusable NEW password before spending a password guess.
   if (refusedUnusablePassword(res, new_password)) return;
+  // #1093, Codex plan review 2026-11-17 (#1095 review): non-string CURRENT input is malformed, not a guess.
+  // It gets the existing wrong-password 400 without entering sessionThrottle or the hash worker.
+  if (typeof current_password !== 'string') {
+    return res.status(400).json({ error: 'Current password is incorrect' });
+  }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   const attempt = await throttledPasswordCheck(
     sessionThrottle,
@@ -1117,10 +1134,13 @@ router.post('/me/mfa/setup', requireAuth, sessionActionLimiter, asyncHandler(asy
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });
   // The same compare /me/mfa/disable uses (the worker-thread bcrypt of #548), under the same per-account throttle.
+  // Input hygiene: String() also accepted an array around the real password or a number matching a numeric
+  // password. Other types now miss like a missing field: same compare cost, counted failure, status and message.
+  // No behaviour change for strings.
   const attempt = await throttledPasswordCheck(
     sessionThrottle,
     req.user.id,
-    () => passwordHash.compare(String(req.body?.password || ''), user.password_hash)
+    () => passwordHash.compare(textOrEmpty(req.body?.password), user.password_hash)
   );
   if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
   if (!attempt.ok) {
@@ -1260,10 +1280,13 @@ router.post('/me/mfa/enable', requireAuth, mfaEnableUserLimiter, asyncHandler(as
 router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {
   const { password } = req.body || {};
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  // Input hygiene: String() also accepted an array around the real password or a number matching a numeric
+  // password. Other types now miss like a missing field: same compare cost, counted failure, status and message.
+  // No behaviour change for strings.
   const attempt = await throttledPasswordCheck(
     sessionThrottle,
     req.user.id,
-    async () => !!user && (await passwordHash.compare(String(password || ''), user.password_hash))
+    async () => !!user && (await passwordHash.compare(textOrEmpty(password), user.password_hash))
   );
   if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
   if (!attempt.ok) {

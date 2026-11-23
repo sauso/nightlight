@@ -44,6 +44,7 @@ import { stopAllMotionDetectors, reconcileMotionLeg } from './lib/motionDetector
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
 import { startSoundDetector, isSoundDetecting, stopAllSoundDetectors } from './lib/soundDetector.js';
 import { reconcileClipRing, stopAllClipCapture } from './lib/clipCapture.js';
+import { stopAudioClassifier } from './lib/audioClassifier.js';
 import { stopAllRecordingsForShutdown, reconcileStaleRecordings } from './lib/recordings.js';
 import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
@@ -55,6 +56,7 @@ import { parseStunServers, writeMediamtxConfig } from './lib/stunServers.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { refreshEsphome, stopEsphome, startEsphomeSampler, stopEsphomeSampler } from './lib/esphomeManager.js';
 import { startSensorSampler, stopSensorSampler } from './lib/sensorSampler.js';
+import { startCameraSensors, stopCameraSensors } from './lib/cameraSensors.js';
 import { startActivityTracker, stopActivityTracker } from './lib/activityTracker.js';
 import { startSleepJob, stopSleepJob } from './lib/sleepAnalysis.js';
 import { startWakeWatcher, stopWakeWatcher } from './lib/wakeWatcher.js';
@@ -81,6 +83,8 @@ import {
 // lib/cameraWatchdogs.js get from perTargetRunner). See lib/processGuards.js for why an unattended
 // monitor deliberately does NOT follow Node's exit-on-uncaught guidance.
 installCrashGuards();
+// #751 SOAK: one early line makes the running Node and architecture visible in staging evidence.
+logger.info(`[boot] Node ${process.version} (${process.arch})`);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
@@ -119,6 +123,7 @@ startMediamtxApiWatchdog({
 startVideoAddressSync(); // #974: poll the peerless Tailscale status and patch WebRTC hosts when safe.
 refreshMqttConnection(); // no-ops if no broker is configured
 startSensorSampler(); // persist MQTT temp/humidity over time (Stage-2 sleep-tracking groundwork)
+startCameraSensors(); // poll Nightlight Cameras' own sensor API (only cameras whose owner switched it on)
 startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 sleep-tracking timeline)
 startSleepJob(); // compute the nightly per-child sleep summary from that timeline
 startWakeWatcher(); // record a short clip when a wake starts — deliberately WITHOUT alerting
@@ -605,6 +610,8 @@ async function shutdown() {
   // Finish any in-flight recording before the ring goes — it cuts from the segments the ring owns.
   await recordingsFinished;
   stopAllClipCapture();
+  // #1159: no further alert cuts will queue; release loaded WASM and its worker.
+  await stopAudioClassifier();
   await stopAllTranscoders();
   stopMediaMTX();
   stopMqtt();
@@ -635,6 +642,7 @@ async function shutdown() {
   //     would have said so was a hand-typed array that nobody extended. It is derived now
   //     (suite-exits-cleanly.test.js), which is what surfaced this.
   stopSensorSampler();
+  stopCameraSensors();
   stopEsphomeSampler();
   stopClipStorage();
   stopSleepJob();

@@ -67,7 +67,18 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // change these two keys and nothing else. The cost of the bump, the same as every earlier one: a night saved under '5'
 // now reads `algo_differs: true` on a stored-context replay, so the sleep detail page's settings line (shown only for
 // a finished night whose saved settings differ from today's) adds "first worked out under earlier detection rules".
-export const SCORING_ALGO = '6';
+// '7' (#1159): brief sound-only runs need nearby movement or a cry-labelled alert, while sustained
+// sound still counts as awake after onset. The 30-night comparison kept a confirmed morning wake
+// that would otherwise have moved 79 minutes later. Other homes may differ because clips are optional.
+// '8': a put-down-anchored onset can bridge short in-bed stirs, moving the onset and the score
+// computed from it. Old stored rows are not rewritten; their saved context keeps its old label.
+// '9': faint in-bed movement with a low mean level no longer witnesses adjacent sound during
+// put-down-anchored onset. This can move onset and derived sleep figures. Baseline sameContext
+// deliberately ignores this label, so comparison baselines can mix detection rules for 28 days.
+// '10': the settling-tail witness no longer counts the minute after the into_bed of a settling pair as proof
+// the child stayed. A real exit previously set aside can become the wake, moving stored and reported
+// sleep figures; old stored rows are not rewritten and comparison baselines can mix rules for 28 days.
+export const SCORING_ALGO = '10';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
 // Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
@@ -88,7 +99,36 @@ const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = re
 // now only sets the motion alert). They answer different questions and are not kept in step.
 const MOTION_OUT_ACTIVE = 0.03;
 const SOUND_ACTIVE = 6; // dB over ambient above this = a clear noise/cry
-const ONSET_QUIET_MIN = 15; // continuous quiet minutes to call it "asleep"
+const ONSET_QUIET_MIN = 15; // sustained quiet window to call it "asleep"; anchored search may bridge brief stirs
+// 2026-11-06 (stored 22:06, owner about 19:35) and 2026-11-20 (stored 22:04,
+// owner 20:00) set these limits. A 1/2-minute bridge without the outside-bed check
+// made a reviewed night 3-10 minutes early; an uncapped bridge accepted 7 of 15
+// active minutes. Tuned on one camera in one house; not measured elsewhere. A child
+// lying awake and still with occasional bed movement in an otherwise quiet room can
+// read as asleep. On the two databases' changed nights, onset moved 2-142 minutes
+// earlier; the two reviewed nights moved 124 and 151 minutes closer to the owner's
+// time. Another prod night changed from a broken 06:16 onset to 20:49. A bed zone
+// moving about every 5 minutes all night (fan, mobile, curtain or pet) can change
+// no_sleep to onset 2 minutes after put-down and 673 asleep minutes in a probe.
+// With the onset-only sound witness below, a noisy room whose only movement is faint
+// blips can still bridge. A child lying awake and murmuring with small movements, a fan,
+// a mobile or a pet in the bed zone can read as asleep earlier. The put-down is the
+// only bound; the morning review corrects it.
+const ONSET_BRIDGE_MAX_STIR_MIN = 2;
+const ONSET_BRIDGE_MAX_PER_WINDOW = 3;
+// #1186 follow-up: caps set by one night (2026-11-21) and 9,960 + 9,633 minutes
+// with in-bed peak > 0.01 on two cameras in one house. 41% had mean <= 0.003; there is
+// no natural gap (mean p10/25/50/75/90: 0.0003 / 0.0012 / 0.0045 / 0.013 / 0.035).
+// Levels are fractions of the painted zone: a larger zone or more distant camera changes
+// what counts as a low mean level despite a peak. Not measured elsewhere. The two-DB A/B
+// with the wake-overlap veto moved 3/196 staging and 3/194 prod nights, none later,
+// no status changes or new wakes, and every unmoved night was identical. The staging
+// moves were 2026-11-12 20:19 to 19:56, 11-20 20:09 to 20:01, and 11-21 21:13 to 20:34.
+// A level grid found 0.0005 first fixed the evidence night; 0.002 first also improved
+// the reviewed 2026-11-20 night from +9 to +1 minute. 0.003 changed nothing further;
+// 0.001 missed that improvement. Peak 0.1 and 0.2 matched; 0.05 lost it.
+export const ONSET_BLIP_MAX_PEAK = 0.1;
+export const ONSET_BLIP_MAX_LEVEL = 0.002;
 const WAKE_ACTIVE_MIN = 5; // active minutes (within a run) to count as an awakening (vs a brief stir)
 const WAKE_GAP_MIN = 3; // bridge quiet gaps up to this long inside one awakening (intermittent noise/movement)
 // Exported so the LIVE wake watcher (lib/wakeWatcher.js) decides "active minute", "asleep" and
@@ -419,7 +459,21 @@ const JITTER_REENTRY_MS = 60 * 1000;
 // discarded it and the wake fell to the movement-only 06:13, which #618's hand-back undid. Since #914 the skip is not
 // made: only 4 of the noisy minutes come before 06:57:12. Production read that morning's wake for that child right
 // only because its `into_bed` was logged 124 s before the exit, outside JITTER_REENTRY_MS.
+// Six is the calibrated still-sleeper count from the nights above. On 2026-11-20 it was exactly met
+// only because the first minute after the settling pair was counted; excluding it leaves five.
 const SETTLING_WITNESS_MIN_QUIET = 6;
+// #914 excludes the later departure's own minute because a climb-out is not proof of staying.
+// Apply that principle at the start too: skip only the minute after the into_bed of a settling pair.
+// The exit can land in the same or next minute (the pair is at most 60 seconds apart). In the latter
+// case the skipped minute is the exit's own; a later climb-out minute can still count. On 2026-11-20
+// the skipped 06:23 minute was the strongest of six quiet occupied readings; the witness falls from
+// six to five, just one occupied quiet minute from setting the real exit aside again. Replay over
+// every night with minute readings, 62 on each database, changed only that measured night. Of 23
+// settling pairs with a quiet occupied minute at +1 or +2, 22 were real mid-night stays. Skipping
+// one costs at most one such witness minute for a still sleeper; later quiet occupied minutes still
+// count. Calibrated on two cameras in one house, not measured elsewhere: levels are fractions of
+// the painted zone, so a noisier room or larger zone can change what reads as quiet occupancy.
+const SETTLING_WITNESS_CLIMBOUT_MIN = 1;
 // A bedtime is never a rigid clock time — a tired child can be asleep well before the window opens, and
 // clipping onset to window_start silently loses that sleep (and misreports the night's length). So the
 // timeline is built from this far BEFORE window_start; symmetric with WAKE_LOOKAHEAD_MS at the other
@@ -432,7 +486,22 @@ const ONSET_LOOKBEHIND_MS = 3 * 60 * 60 * 1000;
 // An into_bed this long before a quiet run still counts as the put-down that started it (the child is
 // placed, fusses a little, then settles).
 const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
-// SOUND NEEDS A WITNESS, AT BEDTIME ONLY. A bedroom mic hears the whole house, and bedtime is when the
+// A far pre-window put-down over an empty-looking bed gave false onsets on 2026-10-10 (#669),
+// 2026-09-05, 2026-11-07 and 2026-11-20 (52, 84, 83 and 117 minutes early, respectively).
+// On the 2026-11-20 staging snapshot, 62 owner-corrected nights had no confirmed real onset over 50 minutes early; the
+// 2026-09-06 real case sits exactly at 50 (displayed gap 46). The 2026-11-20 false span had
+// 2 occupied minutes of 117, and 2026-11-07 had 0 of 83. One per 30 watched minutes scales
+// the existing OCCUPANCY_MIN_MINUTES comment's quietest-real rate (5-9 per 150) at its low end.
+// This rate was NOT measured on confirmed real early nights (2026-09-04, 09-06): their samples
+// are beyond retention. About 18-22% of 57 completed staging nights had fewer than 3 occupied
+// minutes in their first 46 minutes, and one owner-reviewed night had 0 of 117. This is a number
+// tuned on two cameras in one house. A very still real sleeper beyond this margin can be rejected
+// and read as asleep only from the window start (an error up to the whole early span); a bed zone
+// seeing only part of a child or a window set too late is most exposed. Ordinary stirs still pass,
+// and the correction flow can fix a late onset.
+const PREWINDOW_ONSET_FREE_MIN = 50;
+const PREWINDOW_EVIDENCE_PER_MIN = 30;
+// SOUND NEEDS A WITNESS. A bedroom mic hears the whole house, and bedtime is when the
 // house is at its loudest — the other child being settled, adults talking, a TV. Sound travels through
 // walls; movement does not. So for the ONSET search a sound-only minute counts as "awake" only when the
 // same room ALSO saw real movement (in the bed or elsewhere in it) within this many minutes either side.
@@ -443,26 +512,29 @@ const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
 // his brother was put to bed next door. With this rule his onset lands at 18:51 and his brother's at
 // 19:23, both matching the ground truth to the minute.
 //
-// Deliberately scoped to onset. Wake detection keeps the plain sound rule: mid-night the house is quiet,
-// so a noise in a bedroom is far more likely to be the child's own, and a child who cries without moving
-// is exactly the wake-up a parent most wants counted.
+// #1159 extends this two-minute witness through the measured span: rule E on 14 staging nights
+// changed one restless night from 242 to 435 asleep minutes without moving onset or wake.
+// On other installations a missed cry falls back to movement; a false cry keeps the former
+// sound-active behaviour for that minute.
 const ONSET_SOUND_MOTION_WITHIN_MIN = 2;
-// The same witness rule, applied to the FIRST wake run after onset for this long. Onset and the wake
-// finder read the timeline with different rules, and that seam produces a contradiction at exactly the
+// #1159: on 30 staging nights in one house, unwitnessed transient sound ran at most 12 consecutive
+// minutes, while the shortest long stretch ran 32. A confirmed morning wake moved 79 minutes late
+// when sound after a child left the bed was ignored. Twenty separates those measured cases; in a
+// quieter house short stray noises still need a witness, while a noisy household's continuous sound
+// counts as before. This threshold has not been measured in other homes.
+const SUSTAINED_SOUND_MIN = 20;
+// The original witness rule was applied to the FIRST wake run after onset for this long. Onset and the wake
+// finder read the timeline with different rules, and that seam produced a contradiction at exactly the
 // moment the cross-talk is loudest: once onset correctly ignores the sibling's bedtime next door, the
 // very same sound-only minutes are picked up moments later as the child's first awakening. Measured on
 // prod, 2026-08-27: Child A's onset moves 19:52 -> 19:21 (right), and the noise that had been delaying it
 // immediately reappears as a 10-minute 'wake' at 19:21-19:31 (wrong) - he did not stir once.
 //
-// Scoped to a grace period, not applied to the night, because the argument for discounting sound is
-// entirely about WHEN: bedtime is when the rest of the house is awake and loud. Mid-night it is quiet,
-// a noise in a bedroom is most likely the child's own, and a cry without movement is precisely the
-// wake-up a parent wants counted - so past this grace the plain rule returns. 30 minutes covers the
+// #1159 keeps this value only for the in-bed stir measure; the witness now covers the whole
+// analysed span. 30 minutes covers the
 // other child's bedtime routine (measured 19:19-19:51 on 2026-08-27).
 //
-// What this can cost: a genuine cry in the first half hour that produces NO movement in the bed at all
-// goes uncounted as an awakening. That is a narrow case (a child who cries almost always moves), and it
-// costs nothing in alerting - sound alerts and their pushes are a separate path and still fire.
+// A genuine cry without movement or a saved alert clip can still be missed; alerts remain separate.
 const POST_ONSET_SOUND_WITNESS_MIN = 30;
 // Consecutive into_bed events closer together than this are ONE settling episode, not several arrivals.
 // A child is put down, fusses, is picked up and re-settled — the detector logs each re-settle, but the
@@ -516,6 +588,18 @@ const EMPTY_BED_MAX_PEAK = 0.1;
 // child's night ended at 20:06 on a parent leaving the room. So the window is now also cut at the next
 // put-down after the settle (see bedOccupiedAfter and guard 3); these three numbers did not change.
 const OCCUPANCY_WITNESS_MIN = 150;
+
+// The departure scan passes its minute arrays here; keeping this count callable also pins the
+// uncut (no later departure) boundary where the scan would otherwise hand its only exit back.
+export function settlingQuietWitness(from, until = Infinity, totalMinExt, cribOccExt, cribActExt) {
+  const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);
+  let still = 0;
+  for (let i = Math.max(from, 0); i < witnessEnd; i++) {
+    if (i > from && i <= from + SETTLING_WITNESS_CLIMBOUT_MIN) continue;
+    if (cribOccExt[i] === true && cribActExt[i] === false && ++still >= SETTLING_WITNESS_MIN_QUIET) return true;
+  }
+  return false;
+}
 const OCCUPANCY_MIN_PEAK = 0.0005;
 const OCCUPANCY_MIN_MINUTES = 3;
 // Use bed-transition-derived onset/wake as the AUTHORITATIVE times rather than merely showing them
@@ -594,9 +678,9 @@ const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 // only fill in an instant that used to be closed. With +1 first, a window of nearly 24 hours (say 00:02-23:56)
 // would switch from today's key to tomorrow's at 23:57 while today's window is still open, and a hold in
 // progress would restart its 45-minute clock (pinned in sleep-sampling-horizon.test.js, "#602").
-// Known limit (#922): with +1 in, a window leaving under 10 minutes between its end and the next start never
-// lets the gate close, so the wake watcher's asleep latch (cleared only when the gate closes) carries across
-// nights, as it already did for a true 24-hour window.
+// #922: under 10 minutes between windows keeps this gate open, including a true 24-hour window.
+// The wake watcher resets on a key change even when the gate stays open. The 0, -1, +1 order means
+// the key changes when the selected night changes, which can be local midnight rather than the next lead edge.
 //
 // `leadMs` and `trailMs` are ABSOLUTE milliseconds added to real instants from windowBoundsUtc, exactly
 // as computeNight adds ONSET_LOOKBEHIND_MS and WAKE_LOOKAHEAD_MS, so on a DST night the lead and tail
@@ -802,7 +886,9 @@ export function lastCompletedNightDate(childId) {
 // Overnight temperature/humidity for the child's cameras (those with an MQTT sensor) across
 // [startSql, asOfSql). Returns a summary (avg/min/max, Celsius + %) always, plus a downsampled
 // per-5-min series when includeSeries is set (for the detail chart). Null when there are no readings —
-// so a child without a temp/humidity sensor simply shows no climate. Times are the same UTC
+// so a child without a temp/humidity sensor simply shows no climate. A reading a Nightlight Camera marked SIMULATED
+// (invented bench data) is never part of a night: `simulated = 0` on both queries, because this average is stored on the
+// night and feeds the warm/cool insight. Times are the same UTC
 // 'YYYY-MM-DD HH:MM:SS' strings sensor_readings.created_at uses, so a lexical range works.
 function nightClimate(cams, startSql, asOfSql, { includeSeries = false } = {}) {
   if (!cams.length) return null;
@@ -812,7 +898,7 @@ function nightClimate(cams, startSql, asOfSql, { includeSeries = false } = {}) {
       `SELECT AVG(temperature) AS ta, MIN(temperature) AS tmin, MAX(temperature) AS tmax, COUNT(temperature) AS tn,
               AVG(humidity) AS ha, MIN(humidity) AS hmin, MAX(humidity) AS hmax, COUNT(humidity) AS hn
          FROM sensor_readings
-         WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ?`
+         WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ? AND simulated = 0`
     )
     .get(...cams, startSql, asOfSql);
   if (!agg || (!agg.tn && !agg.hn)) return null;
@@ -826,7 +912,7 @@ function nightClimate(cams, startSql, asOfSql, { includeSeries = false } = {}) {
     const rows = db
       .prepare(
         `SELECT created_at AS t, temperature, humidity FROM sensor_readings
-           WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ? ORDER BY created_at`
+           WHERE camera_id IN (${ph}) AND created_at >= ? AND created_at < ? AND simulated = 0 ORDER BY created_at`
       )
       .all(...cams, startSql, asOfSql);
     // Bucket to a 5-min grid and average across cameras, so multiple sensors (or jittery timestamps)
@@ -1493,7 +1579,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // `sound_p75` is read for the faulty-microphone guard only (#904, below); nothing else here uses it.
   const rows = db
     .prepare(
-      `SELECT bucket_start AS t, motion_peak, sound_peak, sound_p75, motion_out_peak, motion_frames FROM activity_samples
+      `SELECT bucket_start AS t, motion_level, motion_peak, sound_peak, sound_p75, motion_out_peak, motion_frames FROM activity_samples
          WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
     )
     .all(...scoreCams, analysisStartSql, asOfSql);
@@ -1511,6 +1597,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // The two channels kept apart as well as combined: the onset search below has to ask "did anything
   // actually MOVE in this room", which `state` alone can no longer answer once sound has folded into it.
   const motionAt = new Array(totalMin).fill(false); // real movement seen by a camera (in the bed or not)
+  const nonBlipMotionAt = new Array(totalMin).fill(false); // any moving watched row that is not a faint in-bed blip
   const soundAt = new Array(totalMin).fill(false); // a clear noise, wherever in the house it came from
   const idxOf = (t) => Math.round((new Date(t.replace(' ', 'T') + 'Z').getTime() - analysisStartUtc.getTime()) / 60000);
   // Moved up from further down in this function (issue #352's metrics extension needs it earlier than
@@ -1561,12 +1648,27 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   const evidenceEndMin = inProgress
     ? totalMin
     : Math.max(totalMin, Math.round((evidenceCutoffMs - analysisStartUtc.getTime()) / 60000));
+  motionAt.length = evidenceEndMin;
+  motionAt.fill(false, totalMin);
+  // #1159: the 104 alert clips from one house supported cry as a witness; other houses may miss a
+  // cry when clips are off or an alert does not fire, in which case movement alone remains the witness.
+  // Query the scored camera and full measured span once; floor event seconds into the UTC minute bucket.
+  const cryAt = new Array(evidenceEndMin).fill(false);
+  if (db.prepare("SELECT classify_alert_audio FROM settings WHERE id = 'app'").get()?.classify_alert_audio !== 0) {
+    const alerts = db.prepare(`SELECT created_at FROM detection_events
+      WHERE camera_id = ? AND type = 'sound' AND audio_label = 'cry'
+        AND created_at >= ? AND created_at < ?`).all(scoreCams[0], analysisStartSql, txEndSql);
+    for (const { created_at } of alerts) {
+      const i = Math.floor((new Date(created_at.replace(' ', 'T') + 'Z').getTime() - analysisStartUtc.getTime()) / 60000);
+      if (i >= 0 && i < cryAt.length) cryAt[i] = true;
+    }
+  }
   // The post-window rows, from the window end (asOfSql, the main query's exclusive end, so the two never share a
   // row) to the lookahead, as the departure scan reads them; a minute past the cutoff is dropped by index below.
   const postRows = evidenceEndMin > totalMin
     ? db
       .prepare(
-        `SELECT bucket_start AS t, sound_peak, sound_p75, motion_frames FROM activity_samples
+        `SELECT bucket_start AS t, sound_peak, sound_p75, motion_peak, motion_out_peak, motion_frames FROM activity_samples
            WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
       )
       .all(...scoreCams, asOfSql, txEndSql)
@@ -1587,7 +1689,13 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // The same index ranges the two classifying loops keep: [0, totalMin) for the main loop's rows, and from
   // totalMin to the cutoff for the extension's (which stops at its own metricsEnd, never later than the cutoff).
   for (const r of rows) { const i = idxOf(r.t); if (i >= 0 && i < totalMin) noteSound(r, i); }
-  for (const r of postRows) { const i = idxOf(r.t); if (i >= totalMin && i < evidenceEndMin) noteSound(r, i); }
+  for (const r of postRows) {
+    const i = idxOf(r.t);
+    if (i < totalMin || i >= evidenceEndMin) continue;
+    noteSound(r, i);
+    if (motionSeen(r) && ((r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) ||
+      (r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE))) motionAt[i] = true;
+  }
   const soundDiscounted = discountedMinutes(soundSeen.map((m) => m && { spikeOnly: m.spike && !m.real }));
   // Does this row's SOUND count? Over SOUND_ACTIVE and not discounted. The one definition every sound reader below
   // uses: the main loop's `heard` (which feeds the onset view) and isActiveRow (which feeds `state`, so the wake
@@ -1595,6 +1703,27 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // it (a missing one reads `undefined`, which would quietly let the sound count again: the #904 extension test
   // fails if the extension's call drops it).
   const soundCounts = (r, i) => r.sound_peak != null && r.sound_peak > SOUND_ACTIVE && !soundDiscounted[i];
+  // #1159 rule E: +-2 minutes on 14 staging nights changed a restless night from 242 to 435
+  // asleep minutes without moving onset or wake. One house measured it; elsewhere a missed cry
+  // falls back to movement and a false cry keeps the previous sound-active behaviour for that minute.
+  const nearEvidence = (i) => {
+    for (let j = Math.max(0, i - ONSET_SOUND_MOTION_WITHIN_MIN);
+      j <= Math.min(cryAt.length - 1, i + ONSET_SOUND_MOTION_WITHIN_MIN); j++) {
+      if (motionAt[j] || cryAt[j]) return true;
+    }
+    return false;
+  };
+  // Only the put-down-anchored onset view discounts sound beside a low-mean in-bed blip.
+  // nearEvidence remains the witness for wakes, the timeline, sustainedAt and #1159 metrics.
+  const nearNonBlipEvidence = (i) => {
+    for (let j = Math.max(0, i - ONSET_SOUND_MOTION_WITHIN_MIN);
+      j <= Math.min(cryAt.length - 1, i + ONSET_SOUND_MOTION_WITHIN_MIN); j++) {
+      if (nonBlipMotionAt[j] || cryAt[j]) return true;
+    }
+    return false;
+  };
+  const sustainedAt = new Array(evidenceEndMin).fill(false);
+  const soundWitnessed = (i) => nearEvidence(i) || sustainedAt[i];
   // How many discounted minutes lie in [from, to): `sound_discounted_minutes`, and the never-empty rule below.
   const discountedIn = (from, to) => {
     let n = 0;
@@ -1632,10 +1761,36 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     const active = isActiveRow(r, i);
     state[i] = state[i] === null ? active : state[i] || active;
     if (out) outAt[i] = true;
-    if (moved) motionAt[i] = true;
+    if (moved) {
+      motionAt[i] = true;
+      // A quiet duplicate cannot hide a moving row; a real moving duplicate must
+      // override a blip. Null mean levels on old rows are unknown, never zero.
+      const blip = !out && r.motion_peak > MOTION_ACTIVE &&
+        r.motion_peak <= ONSET_BLIP_MAX_PEAK && r.motion_level != null &&
+        r.motion_level <= ONSET_BLIP_MAX_LEVEL;
+      if (!blip) nonBlipMotionAt[i] = true;
+    }
     if (heard) soundAt[i] = true;
     if (i >= preMin && r.motion_peak != null && r.motion_peak > maxBedPeak) maxBedPeak = r.motion_peak;
     if (r.motion_peak != null && r.motion_peak > bedPeakAt[i]) bedPeakAt[i] = r.motion_peak;
+  }
+  // Run length uses every counted, watched sound minute, including post-window evidence. Build the
+  // whole run before marking its first minute: waiting until minute 20 would lose the start of a wake.
+  // The #904 faulty-microphone discount remains upstream in soundCounts.
+  const heardAll = new Array(evidenceEndMin).fill(false);
+  for (let i = 0; i < totalMin; i++) heardAll[i] = soundAt[i];
+  for (const r of postRows) {
+    const i = idxOf(r.t);
+    if (i >= totalMin && i < evidenceEndMin && motionSeen(r) && soundCounts(r, i)) heardAll[i] = true;
+  }
+  for (let i = 0; i < evidenceEndMin;) {
+    if (!heardAll[i] || nearEvidence(i)) { i++; continue; }
+    let end = i + 1;
+    while (end < evidenceEndMin && heardAll[end] && !nearEvidence(end)) end++;
+    if (end - i >= SUSTAINED_SOUND_MIN) {
+      for (let minute = i; minute < end; minute++) sustainedAt[minute] = true;
+    }
+    i = end;
   }
   // Coverage is a statement about the configured window ("did we watch the night"), so it counts only
   // window minutes — the lookbehind must never inflate or dilute it. "Watched" is literal since #508: a
@@ -1645,29 +1800,64 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   const result = { ...base, coverage_minutes: coverage };
   if (coverage < winMin * MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
 
-  // Treat a gap as quiet for continuity (detector momentarily down ≠ awake), but coverage above is what
-  // gates confidence. active[] is the boolean working timeline.
-  const active = state.map((s) => s === true);
+  // A gap stays distinct from confirmed quiet in the witnessed view below; coverage above gates confidence.
 
-  // The onset view of the same timeline, with uncorroborated sound discounted (see
-  // ONSET_SOUND_MOTION_WITHIN_MIN). Movement always counts; a noise counts only if this room moved around
-  // the same time. Used ONLY by the two onset helpers below — every other measurement on the night
-  // (wakes, stirs, awake minutes, the segment bar) keeps reading `active`.
+  // Onset keeps the nearby-movement-or-cry rule: before #1159 the onset search never counted
+  // unwitnessed sound, and including sustained sound moved two measured onsets five hours later.
+  // Wakes and the displayed timeline use the sustained-sound exception below.
   //
   // Tri-state, matching state[]'s convention (issue #442): a minute with no sample at all stays `null`
   // rather than falling into the same `false` as a real confirmed-quiet minute — motionAt/soundAt are
   // both false either way, so without this check firstQuietRunFrom's put-down-anchored search could not
   // tell a camera outage from silence and would seed onset from inside an outage.
+  // Sound beside only blips becomes confirmed-quiet coverage (=== false), not a bridged
+  // minute. This onset view is also read by hasAwakening (earlier-nap guard), the
+  // no-bridge fallback firstQuietRunFrom(putDown, true, false), and the second
+  // transition-onset pass; all three inherit this rule.
   const activeForOnset = new Array(totalMin);
+  const clearedSoundAt = new Array(totalMin).fill(0);
   for (let i = 0; i < totalMin; i++) {
     if (state[i] === null) { activeForOnset[i] = null; continue; }
     if (motionAt[i]) { activeForOnset[i] = true; continue; }
     if (!soundAt[i]) { activeForOnset[i] = false; continue; }
-    let witnessed = false;
-    const from = Math.max(0, i - ONSET_SOUND_MOTION_WITHIN_MIN);
-    const to = Math.min(totalMin - 1, i + ONSET_SOUND_MOTION_WITHIN_MIN);
-    for (let j = from; j <= to; j++) if (motionAt[j]) { witnessed = true; break; }
-    activeForOnset[i] = witnessed;
+    activeForOnset[i] = nearNonBlipEvidence(i);
+    if (!activeForOnset[i] && nearEvidence(i)) clearedSoundAt[i] = 1;
+  }
+  // The start-only veto left settling relabelled as a wake on 6 staging and 5 prod
+  // nights in the whole-night A/B. A window inside an actual wake cannot declare onset
+  // when it only qualifies because blip-adjacent sound was ignored. Vetoing overlap
+  // with the unchanged wake run leaves no night with a new wake in that A/B.
+  const activeForWake = new Array(totalMin);
+  for (let i = 0; i < totalMin; i++) {
+    if (state[i] === null) activeForWake[i] = null;
+    else if (motionAt[i]) activeForWake[i] = true;
+    else if (!soundAt[i]) activeForWake[i] = false;
+    else activeForWake[i] = soundWitnessed(i);
+  }
+  function forEachWakeRun(activeArr, from, to, visit) {
+    for (let i = from; i < to; ) {
+      if (!activeArr[i]) { i++; continue; }
+      let last = i, count = 0, k = i;
+      while (k < to) {
+        if (activeArr[k]) { last = k; count++; k++; continue; }
+        let g = k;
+        while (g < to && !activeArr[g]) g++;
+        if (g < to && g - k <= WAKE_GAP_MIN) { k = g; continue; }
+        break;
+      }
+      if (count >= WAKE_ACTIVE_MIN) visit(i, last);
+      i = last + 1;
+    }
+  }
+  const clearedPrefix = new Array(totalMin + 1).fill(0);
+  const inWakeRunPrefix = new Array(totalMin + 1).fill(0);
+  const inWakeRunAt = new Array(totalMin).fill(0);
+  forEachWakeRun(activeForWake, 0, totalMin, (start, last) => {
+    for (let minute = start; minute <= last; minute++) inWakeRunAt[minute] = 1;
+  });
+  for (let i = 0; i < totalMin; i++) {
+    clearedPrefix[i + 1] = clearedPrefix[i] + clearedSoundAt[i];
+    inWakeRunPrefix[i + 1] = inWakeRunPrefix[i] + inWakeRunAt[i];
   }
 
   // Bed transitions across the whole timeline (lookbehind included, plus a lookahead past the window end
@@ -1695,11 +1885,27 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // Child A's room had someone in it until ~20:00 (outside-motion peaks up to 0.98), but the ten minutes
   // before he was carried in were still and merely noisy, so discounting there declared him asleep at
   // 19:00, an hour and a half early. Anchored on the put-down, the same data gives the right answer.
-  const firstQuietRunFrom = (from, afterPutDown = false) => {
+  // Only a complete, bed-witnessed stir can interrupt an anchored quiet window.
+  // Test the whole active run: sound beside bed motion shares its length, while a
+  // cry, outside-bed motion, or an unknown flank leaves the run active.
+  const bridgedStirLength = (view, start, windowStart, windowEnd) => {
+    let end = start;
+    while (end < windowEnd && view[end] === true) end++;
+    const length = end - start;
+    if (length > ONSET_BRIDGE_MAX_STIR_MIN || start <= windowStart || end >= windowEnd ||
+        view[start - 1] !== false || view[end] !== false) return 0;
+    let bedWitness = false;
+    for (let minute = start; minute < end; minute++) {
+      if (outAt[minute] || cryAt[minute]) return 0;
+      if (bedPeakAt[minute] > MOTION_ACTIVE) bedWitness = true;
+    }
+    return bedWitness ? length : 0;
+  };
+  const firstQuietRunFrom = (from, afterPutDown = false, bridge = true) => {
     // Tri-state view (issue #442): `state` directly for the unanchored search, `activeForOnset` for
     // the put-down-anchored one — both null-aware. Any ACTIVE minute still disqualifies a candidate
-    // run outright, same as always. Unknown minutes do NOT: requiring the whole window to be 100%
-    // sampled sounded right but regressed a merely flaky camera's entire night to `status: 'no_sleep'`
+    // run unless it is a limited stir after a put-down. Unknown minutes do NOT: requiring every
+    // minute to be sampled sounded right but regressed a merely flaky camera's entire night to `status: 'no_sleep'`
     // — scattered single-minute gaps meant no ONSET_QUIET_MIN window anywhere in the night was ever
     // fully observed, even on an otherwise ordinary night (found by adversarial review of this fix's
     // first draft). Instead, a window qualifies once at least MIN_COVERAGE_FRAC of it is CONFIRMED
@@ -1714,9 +1920,16 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     const view = afterPutDown ? activeForOnset : state;
     const minConfirmed = ONSET_QUIET_MIN * MIN_COVERAGE_FRAC;
     for (let i = Math.max(0, from); i + ONSET_QUIET_MIN <= totalMin; i++) {
-      let confirmed = 0, firstConfirmed = -1, active = false;
+      if (afterPutDown && clearedPrefix[i + ONSET_QUIET_MIN] > clearedPrefix[i] &&
+          inWakeRunPrefix[i + ONSET_QUIET_MIN] > inWakeRunPrefix[i]) continue;
+      let confirmed = 0, firstConfirmed = -1, active = false, bridged = 0;
       for (let j = i; j < i + ONSET_QUIET_MIN; j++) {
-        if (view[j] === true) { active = true; break; }
+        if (view[j] === true) {
+          const length = afterPutDown && bridge ? bridgedStirLength(view, j, i, i + ONSET_QUIET_MIN) : 0;
+          if (!length || (bridged += length) > ONSET_BRIDGE_MAX_PER_WINDOW) { active = true; break; }
+          j += length - 1; // bridged minutes are not confirmed-quiet coverage
+          continue;
+        }
         if (view[j] === false) { confirmed++; if (firstConfirmed < 0) firstConfirmed = j; }
       }
       if (!active && confirmed >= minConfirmed) return firstConfirmed;
@@ -1880,24 +2093,24 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // still that fewer than 3 occupied minutes fall before it loses the put-down: to the plain search, or to that
   // second into_bed's own settle (README, KNOWN-ISSUES; pinned by the #669 T8 and T8b tests).
   const isolatedPutDown = (i) => state[i - 1] === false && state[i + 1] === false;
-  for (const { idx: putDown } of earlyPutDowns) {
-    const q = firstQuietRunFrom(putDown, true);
-    if (q == null) continue; // never settled after this put-down
+  const rejectedPrewindowPutDowns = new Set();
+  const qualifiesPutDownSettle = (q, putDown, failedPrewindow) => {
+    if (q == null) return false; // never settled after this put-down
     // Only ever EARLIER than the plain search. The put-down anchor exists to recover sleep the plain
     // search loses to household noise; it must never push onset later. It is also what stops a 3am
     // re-settle — whose own following quiet run qualifies just as well — from being adopted as the
     // night's bedtime on a night where every evening put-down failed its guards.
-    if (onset != null && q >= onset) continue;
-    if (q - putDown > maxSettleMin) continue; // settled far too long after this put-down to be its result
+    if (onset != null && q >= onset) return false;
+    if (q - putDown > maxSettleMin) return false; // settled far too long after this put-down to be its result
     // Don't claim sleep we didn't actually observe: the settle minute must have a sample, and the
     // stretch from there to the window must be mostly covered.
-    if (state[q] === null) continue;
+    if (state[q] === null) return false;
     let seen = 0;
     for (let i = q; i < preMin; i++) if (state[i] !== null) seen++;
-    if (seen < (preMin - q) * MIN_COVERAGE_FRAC) continue;
+    if (seen < (preMin - q) * MIN_COVERAGE_FRAC) return false;
     // Guard 2: it has to still be the same sleep when the window opens. A nap the child got up from has
     // an awakening between it and bedtime, so it can never be adopted as the night's onset.
-    if (hasAwakening(q, preMin)) continue;
+    if (hasAwakening(q, preMin)) return false;
     // Guard 3: the bed has to look OCCUPIED afterwards. Guards 1 and 2 both rest on the put-down being
     // real, and a put-down the detector got wrong satisfies them trivially — an empty room never wakes,
     // so guard 2 in particular passes vacuously. This is the only guard that asks for positive evidence
@@ -1939,9 +2152,38 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // (cutting at the start of the occupied run before the next into_bed zeroes a child still stirring:
     // staging 2026-09-30 child A, 14 -> 0).
     const nextPutDown = earlyPutDowns.find((p) => p.idx > q && !isolatedPutDown(p.idx));
-    if (!bedOccupiedAfter(q, nextPutDown?.idx)) continue;
+    if (!bedOccupiedAfter(q, nextPutDown?.idx)) return false;
+    if (preMin - q > PREWINDOW_ONSET_FREE_MIN) {
+      // A later non-isolated put-down cannot vouch for this one. Size the requirement over
+      // every watched minute through the window start, but count evidence only before the cut.
+      // Otherwise a spurious put-down shortly after one bed blip makes the required count
+      // shrink to one and restores the false early onset (2026-11-20 live reproduction).
+      // Missing video raises neither the requirement nor the evidence count.
+      const end = Math.min(preMin, nextPutDown?.idx ?? preMin);
+      let watched = 0;
+      let occupied = 0;
+      for (let i = q; i < preMin; i++) {
+        if (state[i] === null) continue;
+        watched++;
+        if (i < end && bedPeakAt[i] >= OCCUPANCY_MIN_PEAK) occupied++;
+      }
+      if (occupied < Math.ceil(watched / PREWINDOW_EVIDENCE_PER_MIN)) {
+        failedPrewindow.value = true;
+        return false;
+      }
+    }
     onset = q;
-    break; // earliest qualifying put-down wins
+    return true;
+  };
+  for (const { idx: putDown } of earlyPutDowns) {
+    const qB = firstQuietRunFrom(putDown, true);
+    const failedPrewindow = { value: false };
+    if (qualifiesPutDownSettle(qB, putDown, failedPrewindow)) break;
+    // Review M-1: bridging can move the first window into a span a guard rejects. Keep the
+    // later no-bridge settle available to the same put-down before advancing to another one.
+    const qP = qB == null ? null : firstQuietRunFrom(putDown, true, false);
+    if (qP != null && qP !== qB && qualifiesPutDownSettle(qP, putDown, failedPrewindow)) break;
+    if (failedPrewindow.value) rejectedPrewindowPutDowns.add(putDown);
   }
   if (onset == null) return { ...result, status: 'no_sleep' };
   const algoOnset = onset;
@@ -1950,6 +2192,9 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // the metrics are measured over - promoting only the displayed times would leave the durations
   // describing a different night from the times printed above them. ---
 
+  // This pass takes the first into_bed with any non-null settle and clamps it to the guarded
+  // algoOnset. It has no guard rejection to retry: the no-bridge onset-view fallback belongs only
+  // in the put-down loop above (review M-1), where a bridged answer can fail a guard.
   // Onset: an into_bed only ever DELAYS onset - before the child was actually placed in the bed the
   // quiet is an empty bed, not sleep. Onset is a once-per-night event: the FIRST put-down that leads to
   // sustained sleep. Take the EARLIEST into_bed whose following quiet run qualifies (firstQuietRunFrom
@@ -1970,6 +2215,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     if (t.type !== TRANSITION.INTO_BED) continue;
     const idx = txIdx(t.created_at);
     if (idx < 0 || idx >= totalMin) continue;
+    if (rejectedPrewindowPutDowns.has(idx)) continue; // do not revive a false early anchor as window-start sleep
     if (idx > algoOnset + maxSettleMin) continue; // too late to be the put-down that started this sleep
     const q = firstQuietRunFrom(idx, true);
     if (q != null) { transitionOnset = Math.max(q, algoOnset); break; } // earliest qualifying into_bed wins
@@ -2133,8 +2379,10 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // MEASURE first, not to copy across on the strength of this one.
     //
     // `until` (issue #914): the count stops BEFORE minute `until` (exclusive), so it runs over
-    // [from, min(from + OCCUPANCY_WITNESS_MIN, end of the evidence, until)). The only caller passes the minute of the
-    // next later departure (departureCutIdx below): a quiet minute after the child has really left again cannot say
+    // [from, min(from + OCCUPANCY_WITNESS_MIN, end of the evidence, until)), excluding the minute
+    // after `from` (the into_bed minute; #914's climb-out principle). The only caller
+    // passes the minute of the next later departure (departureCutIdx below): a quiet minute after the
+    // child has really left again cannot say
     // "he came back and stayed" (see SETTLING_WITNESS_MIN_QUIET for the nights). Exclusive because that minute is the
     // departure's own (the climb out, or an empty bed's noise as it empties), not the stay. The cap still applies: a
     // later departure past the 150 minutes does not lengthen the window.
@@ -2142,14 +2390,8 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // runs, and every return would be disbelieved (the same trap as bedOccupiedAfter's `until`).
     // Monotone by construction: every `true` the cut count returns, the uncut one returned too, so the cut can only
     // take back a skip the old count made, never skip an exit the old count kept.
-    const bedQuietlyOccupiedFrom = (from, until = Infinity) => {
-      const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);
-      let still = 0;
-      for (let i = Math.max(from, 0); i < witnessEnd; i++) {
-        if (cribOccExt[i] === true && cribActExt[i] === false && ++still >= SETTLING_WITNESS_MIN_QUIET) return true;
-      }
-      return false;
-    };
+    const bedQuietlyOccupiedFrom = (from, until = Infinity) =>
+      settlingQuietWitness(from, until, totalMinExt, cribOccExt, cribActExt);
     // Is exit `t` logged within JITTER_REENTRY_MS after the `into_bed` `back` (a tie at the same second included)?
     // The TIME half of the settling-tail guard, shared by the guard itself and by departureCutIdx, so the two cannot
     // disagree about what a tail is. The guard adds its witness on top; the cut does not (see there for why).
@@ -2620,35 +2862,17 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // of view — reads as ONE wake rather than being split into sub-threshold stirs. A run qualifies when
   // it contains >= WAKE_ACTIVE_MIN active minutes; it's trimmed to its first/last active minute.
   //
-  // Reads `active` everywhere EXCEPT the first POST_ONSET_SOUND_WITNESS_MIN minutes after onset, where
-  // it reads the witnessed view for the same reason onset does — see POST_ONSET_SOUND_WITNESS_MIN. This
-  // is one view, not a branch inside the run walk, so a run that starts inside the grace and continues
-  // past it is still detected as one run (it simply stops discounting sound at the boundary).
-  const graceEnd = Math.min(totalMin, onset + POST_ONSET_SOUND_WITNESS_MIN);
-  const activeForWake = new Array(totalMin);
-  for (let i = 0; i < totalMin; i++) activeForWake[i] = i >= onset && i < graceEnd ? activeForOnset[i] : active[i];
-
+  // #1159: wake detection uses the sustained-sound exception through the full window, including
+  // the former first-30-minute grace. Onset above remains stricter.
   // Mark minutes belonging to a qualifying wake run within activeArr's [from, to) range, writing true
   // into inWakeArr. Factored out (issue #352) so the post-window metrics extension below can re-run the
   // IDENTICAL algorithm over more data as a genuinely separate invocation, rather than by hand-copying
   // it — see the call for algoSleepEnd just below, which stays bounded at totalMin no matter what, and
   // the second call further down which does not.
   function markWakeRuns(activeArr, from, to, inWakeArr) {
-    for (let i = from; i < to; ) {
-      if (!activeArr[i]) { i++; continue; }
-      let last = i;
-      let count = 0;
-      let k = i;
-      while (k < to) {
-        if (activeArr[k]) { last = k; count++; k++; continue; }
-        let g = k;
-        while (g < to && !activeArr[g]) g++;
-        if (g < to && g - k <= WAKE_GAP_MIN) { k = g; continue; } // bridge a short quiet gap
-        break;
-      }
-      if (count >= WAKE_ACTIVE_MIN) for (let j = i; j <= last; j++) inWakeArr[j] = true;
-      i = last + 1;
-    }
+    forEachWakeRun(activeArr, from, to, (start, last) => {
+      for (let j = start; j <= last; j++) inWakeArr[j] = true;
+    });
   }
 
   // Bridge short quiet gaps (<= WAKE_GAP_MIN) directly between already-true stretches of inWakeArr,
@@ -2916,7 +3140,11 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // EMPTY_MIN_COVERAGE_FRAC becomes `no_data` too, and every other such night reads `ok` with the whole window
     // asleep. A wrong `ok` is reversible (frames kept; a parent can answer "no one was in the bed"), a wrong `empty`
     // is not. Pinned by the #904 tests "KNOWN LIMIT (a deliberate decision): an EMPTY bed with a faulty microphone".
-    if (discountedIn(onset, sleepEnd) === 0) {
+    // #1159: suppressing a watched sound cannot certify an empty bed: a final empty verdict can
+    // discard timelapse frames. Prefer reversible ok, as the faulty-microphone guard already does.
+    let unwitnessedSound = false;
+    for (let i = onset; i < sleepEnd; i++) if (soundAt[i] && !soundWitnessed(i)) { unwitnessedSound = true; break; }
+    if (discountedIn(onset, sleepEnd) === 0 && !unwitnessedSound) {
       return {
         ...result,
         status: 'empty',
@@ -2957,6 +3185,14 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
              WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
         )
         .all(...scoreCams, minuteTime(totalMin), minuteTime(metricsEnd));
+      // Build the extension's movement context before judging any sound minute there. A later
+      // row can witness a sound two minutes earlier, including across the configured window edge.
+      for (const r of extraRows) {
+        const i = idxOf(r.t);
+        if (i < totalMin || i >= metricsEnd || !motionSeen(r)) continue;
+        if ((r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) ||
+            (r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE)) motionAt[i] = true;
+      }
       const activeMetrics = activeForWake.concat(new Array(metricsEnd - totalMin).fill(false));
       const stateMetrics = state.concat(new Array(metricsEnd - totalMin).fill(null));
       // The in-bed peaks over the same combined range (stir_minutes reads them): the main loop's, then these
@@ -2968,7 +3204,9 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
         // The same rule as the main loop (issue #508): an unwatched row is skipped, never merged, so a
         // post-window stall between window end and the departure counts as unknown, not asleep.
         if (!motionSeen(r)) continue;
-        const rowActive = isActiveRow(r, i);
+        const rowActive = isActiveRow(r, i) &&
+          ((r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) ||
+            (r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE) || soundWitnessed(i));
         if (r.motion_peak > bedPeakMetrics[i]) bedPeakMetrics[i] = r.motion_peak;
         if (rowActive) activeMetrics[i] = true;
         // OR-merge, matching the main population loop's own rule for `state` (line ~646) — TWO rows for
@@ -3211,7 +3449,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
       // wake-up. Only before onset, and only minutes not already in a run.
       active_runs: runsOf((i) => i < onset && metricsState[i] === true && !inWake[i]),
     };
-    out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : s ? 'active' : 'quiet', inWake: inWake[i], out: outAt[i] }));
+    out.timeline = state.map((s, i) => ({ t: minuteTime(i), state: s === null ? 'gap' : activeForWake[i] ? 'active' : 'quiet', inWake: inWake[i], out: outAt[i] }));
 
     // The counted awakenings, with clock times + duration — powers the "where the wake-ups were" list.
     const wakes = [];
@@ -3338,7 +3576,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // is real evidence of being awake, not missing data (see markWakeRuns). Found by adversarial
     // review of this fix's first draft, which only fixed the mislabel inside the sleep span.
     const label = (i) =>
-      inWake[i] ? 'wake' : state[i] === null ? 'gap' : i < onset ? 'settling' : i >= sleepEnd ? 'awake' : state[i] === true ? 'stir' : 'asleep';
+      inWake[i] ? 'wake' : state[i] === null ? 'gap' : i < onset ? 'settling' : i >= sleepEnd ? 'awake' : activeForWake[i] === true ? 'stir' : 'asleep';
     const segments = [];
     for (let i = displayStart; i < totalMin; ) {
       const l = label(i);
@@ -3373,7 +3611,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
       ? db
           .prepare(
             `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot,
-                    clip_status, clip_duration_s, protected
+                    clip_status, clip_duration_s, protected, audio_label
                FROM detection_events
                WHERE camera_id IN (${aph}) AND created_at >= ? AND created_at < ?
                ORDER BY created_at ASC`
@@ -3952,6 +4190,7 @@ const INSIGHT_MIN_GROUP_NIGHTS = 10;
 function pearson(xs, ys) {
   const n = xs.length;
   if (n < 2) return null;
+  if (Math.max(...ys) === Math.min(...ys)) return null; // exact constant rates can leave rounding dust after centering
   const mx = xs.reduce((s, x) => s + x, 0) / n;
   const my = ys.reduce((s, y) => s + y, 0) / n;
   let num = 0, dx = 0, dy = 0;
@@ -3964,11 +4203,32 @@ function pearson(xs, ys) {
 }
 
 const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
+const wakeRate = (row) => row.wake_count * 60 / row.coverage_minutes;
+
+function leaveOneOutStable(temps, rates, median, verdictClass) {
+  // Owner decision 2026-11-17 (#365, Codex plan review): a single night must not carry a headline.
+  // This hard gate is judgement, not a measured confidence level. Recheck both correlation and the
+  // direction of the displayed groups; keep their full-set median and membership fixed, and do not
+  // reapply the minimum group size after a drop. Compare drop rates before rounding: rounding here
+  // could mark a night unstable even when the displayed averages would not change.
+  for (let i = 0; i < temps.length; i++) {
+    const remainingR = pearson(temps.filter((_, j) => j !== i), rates.filter((_, j) => j !== i));
+    if (verdictClass === 'warm_more_wakes' ? remainingR == null || remainingR < INSIGHT_R
+      : remainingR == null || remainingR > -INSIGHT_R) return false;
+    const coolRates = rates.filter((_, j) => j !== i && temps[j] < median);
+    const warmRates = rates.filter((_, j) => j !== i && temps[j] > median);
+    if (!coolRates.length || !warmRates.length) return false;
+    const agrees = verdictClass === 'warm_more_wakes'
+      ? mean(warmRates) > mean(coolRates) : mean(warmRates) < mean(coolRates);
+    if (!agrees) return false;
+  }
+  return true;
+}
 
 // Does room temperature correlate with this child's sleep, across their recent stored nights? Uses the
 // per-night avg_temperature stored on each 'ok' night (so it needs no re-scan of sensor history). Splits
-// the nights at the median temperature into a warmer half and a cooler half and compares wake-ups + sleep
-// duration, and reports a Pearson r for temp↔wakes. All temperatures are Celsius (the client converts to
+// the nights at the median temperature into a warmer half and a cooler half and compares wake-up rates
+// per watched hour of the window + sleep duration, and reports a Pearson r for temp↔rate. All temperatures are Celsius (the client converts to
 // the user's unit). Returns { status }: 'off' | 'insufficient' | 'ok'. The client renders the wording.
 //
 // ⚠️ A night a parent marked "no one was in the bed" is EXCLUDED, even though its stored row still
@@ -3981,10 +4241,10 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   if (!childTracksSleep(childId)) return { status: 'off' };
   const rows = db
     .prepare(
-      `SELECT n.night_date, n.wake_count, n.asleep_minutes, n.avg_temperature, n.avg_humidity
+      `SELECT n.night_date, n.wake_count, n.asleep_minutes, n.coverage_minutes, n.avg_temperature, n.avg_humidity
          FROM sleep_nights n
          WHERE n.child_id = ? AND n.status = 'ok' AND n.avg_temperature IS NOT NULL
-           AND n.wake_count IS NOT NULL AND n.asleep_minutes IS NOT NULL
+           AND n.wake_count IS NOT NULL AND n.asleep_minutes IS NOT NULL AND n.coverage_minutes > 0
            AND NOT EXISTS (SELECT 1 FROM sleep_reviews r WHERE r.child_id = n.child_id AND r.night_date = n.night_date AND r.nobody_in_bed = 1)
          ORDER BY n.night_date DESC LIMIT ?`
     )
@@ -3995,11 +4255,15 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   }
 
   const temps = rows.map((r) => r.avg_temperature);
-  const wakes = rows.map((r) => r.wake_count);
+  // Owner decision 2026-11-17 (#365, Codex plan review): use wake-ups per watched hour of the
+  // configured window, not per hour slept. Sleep is an outcome and short spans can inflate that rate.
+  // The denominator is observed coverage, not an estimate of time between onset and wake.
+  const rates = rows.map(wakeRate);
+  const averageCoverageHours = mean(rows.map((r) => r.coverage_minutes)) / 60;
   const asleep = rows.map((r) => r.asleep_minutes);
   const spread = Math.max(...temps) - Math.min(...temps);
 
-  const rWakes = pearson(temps, wakes);
+  const rWakes = pearson(temps, rates);
   const rAsleep = pearson(temps, asleep);
 
   // Median split into cooler/warmer halves (the middle night, on an odd count, drops out of both).
@@ -4011,9 +4275,13 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   const half = (set) => ({
     nights: set.length,
     avg_temp: Math.round(mean(set.map((r) => r.avg_temperature)) * 10) / 10,
-    avg_wakes: Math.round(mean(set.map((r) => r.wake_count)) * 10) / 10,
+    // Owner decision 2026-11-17 (#365, Codex plan review): both columns use the SAME average
+    // observed night so they agree with the rate verdict. This scale is judgement, not measurement.
+    avg_wakes: Math.round(mean(set.map(wakeRate)) * averageCoverageHours * 10) / 10,
     avg_asleep_minutes: Math.round(mean(set.map((r) => r.asleep_minutes))),
   });
+  const cooler = cool.length ? half(cool) : null;
+  const warmer = warm.length ? half(warm) : null;
 
   // Verdict the UI turns into a sentence. 'flat' = temperature barely varied, so we can't say anything.
   // 'flat' stays FIRST (#365): it says nothing about sleep, only that the room barely varied. A room
@@ -4025,13 +4293,27 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   let verdict = 'none';
   if (spread < INSIGHT_TEMP_SPREAD) verdict = 'flat';
   else if (cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';
-  else if (rWakes != null && rWakes >= INSIGHT_R) verdict = 'warm_more_wakes';
-  else if (rWakes != null && rWakes <= -INSIGHT_R) verdict = 'warm_fewer_wakes';
+  // Owner decision 2026-11-17 (#365, Codex plan review): median-tied nights affect r but appear
+  // in neither column. A directional headline needs the rounded values readers see to agree too;
+  // an unrounded difference that displays as equal is not evidence for a directional headline.
+  else if (rWakes != null && rWakes >= INSIGHT_R &&
+    warmer.avg_wakes > cooler.avg_wakes) verdict = 'warm_more_wakes';
+  else if (rWakes != null && rWakes <= -INSIGHT_R &&
+    warmer.avg_wakes < cooler.avg_wakes) verdict = 'warm_fewer_wakes';
+
+  let direction;
+  if (verdict === 'warm_more_wakes' || verdict === 'warm_fewer_wakes') {
+    if (!leaveOneOutStable(temps, rates, median, verdict)) {
+      direction = verdict === 'warm_more_wakes' ? 'more' : 'fewer';
+      verdict = 'unstable';
+    }
+  }
 
   return {
     status: 'ok',
     nights_analyzed: rows.length,
     verdict,
+    ...(direction ? { direction } : {}),
     min_group_nights: INSIGHT_MIN_GROUP_NIGHTS, // additive (#365): the UI says "N of 10" with it
     temp_wake_r: rWakes == null ? null : Math.round(rWakes * 100) / 100,
     temp_asleep_r: rAsleep == null ? null : Math.round(rAsleep * 100) / 100,
@@ -4044,8 +4326,8 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
         ? Math.round(mean(rows.filter((r) => r.avg_humidity != null).map((r) => r.avg_humidity)))
         : null,
     },
-    cooler: cool.length ? half(cool) : null,
-    warmer: warm.length ? half(warm) : null,
+    cooler,
+    warmer,
   };
 }
 

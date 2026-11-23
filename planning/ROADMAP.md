@@ -206,7 +206,7 @@ detector watchdog). Every threshold in it came from one house's runs.
   one install moved on 2026-10-29, so the earliest useful read is about three weeks later. A bed zone and the
   room baselines change with a move, so before and after are not directly comparable: state that in the result.
 - **Late or missing morning wake (#700, #618 follow-ups) — `HELD`** until the shadow nights and reviews above exist.
-- **A sleep window of almost 24 hours never closes the wake watcher's gate (#922) — `IDEA`,** low priority.
+- **A sleep window of almost 24 hours never closes the wake watcher's gate (#922) — `SHIPPED` (0.50.0).** The watcher's state now belongs to one window key and resets when the key changes.
 
 ### 1.8 Sleep Score and Night summary — phases 0 to 4 `SHIPPED` (0.48.0), 5 to 7 open
 

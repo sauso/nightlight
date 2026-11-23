@@ -50,6 +50,7 @@ mock.module('node:child_process', {
 
 const { default: db } = await import('../src/db.js');
 const { logger } = await import('../src/lib/logger.js');
+const { childWindowKeyNow } = await import('../src/lib/sleepAnalysis.js');
 const { flushActivity, onMinuteFlushed, _resetActivityTrackerForTests } = await import('../src/lib/activityTracker.js');
 const { startSoundDetector, stopSoundDetector } = await import('../src/lib/soundDetector.js');
 const { _setObservationClockFactoryForTests } = await import('../src/lib/observationClock.js');
@@ -174,7 +175,7 @@ test('#919 held sound does not consume analyser cooldown and alerts after asleep
   deliver(t, proc, [...rep(30, AMBIENT), ...rep(30, LOUD)], T0);
   await settle();
   assert.deepEqual(rowsFor('detection_events', cam.id), [], 'held sound wrote an alert');
-  _state().set(cam.id, { asleep: true });
+  _state().set(cam.id, { asleep: true, window: childWindowKeyNow('sound-hold-child') }); // #922: a pre-armed slot carries its window key
   deliver(t, proc, rep(10, LOUD), T0 + 60 * STEP_MS);
   await settle();
   assert.equal(rowsFor('detection_events', cam.id).length, 1, 'released sound remained in cooldown');

@@ -1,6 +1,6 @@
 {
   "name": "babymonitor-backend",
-  "version": "0.49.0",
+  "version": "0.50.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -20,17 +20,18 @@
     "bonjour-service": "1.4.4",
     "esphome-client": "2.1.0",
     "express": "^5.3.0",
-    "express-rate-limit": "^8.7.3",
-    "firebase-admin": "^14.5.0",
+    "express-rate-limit": "^8.7.4",
+    "firebase-admin": "^14.5.1",
     "helmet": "^8.0.0",
-    "http-proxy-middleware": "^4.2.1",
+    "http-proxy-middleware": "^4.2.2",
     "jsonwebtoken": "^9.0.2",
     "mqtt": "^5.16.1",
-    "onvif": "^0.8.3",
+    "onnxruntime-web": "1.22.0",
+    "onvif": "^0.8.5",
     "otplib": "^13.6.0",
     "qrcode": "^1.5.4",
     "uuid": "^14.0.3",
-    "ws": "^8.22.2"
+    "ws": "^8.23.0"
   },
   "//": "overrides: issue #455. firebase-admin's OPTIONAL @google-cloud/storage still pulls gaxios 6, whose uuid ^9 matches GHSA-w5hq-g745-h8pq (npm audit fix cannot clear it). Scoped to gaxios 6 only: uuid 11 keeps CommonJS require() and the v4() gaxios calls; the override goes inert once storage moves to gaxios 7. Guarded by test/dependency-hygiene.test.js. Also rimraf (alerts #15 glob, #17 minimatch): google-gax 5 and gaxios 7.1 list rimraf 5 in their manifests but never require it (grep of their build output finds no use), and rimraf 5 pins glob 10 / minimatch 9, below the fixed 14.0.2 / 11.0.1; firestore 9.4.0 still pins firestore-api 0.2.0 which pulls google-gax 5, so no upgrade clears it. rimraf 6 uses glob 14. Remove this override when google-gax 5 leaves the tree.",
   "overrides": {

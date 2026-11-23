@@ -78,6 +78,39 @@ beforeEach(() => {
 });
 
 describe('GET /child/:childId', () => {
+  test('accepts canonical limits and a paired cursor, returning a plain array', async () => {
+    const older = makeRecording();
+    const newer = makeRecording();
+    const first = await call(url(`/child/${CHILD}?limit=1`), { token });
+    assert.equal(first.status, 200);
+    assert.ok(Array.isArray(first.body));
+    assert.deepEqual(first.body.map((row) => row.id), [newer.id]);
+    const last = first.body[0];
+    const next = await call(url(`/child/${CHILD}?limit=1&before_created_at=${encodeURIComponent(last.created_at)}&before_id=${last.id}`), { token });
+    assert.equal(next.status, 200);
+    assert.deepEqual(next.body.map((row) => row.id), [older.id]);
+    assert.equal((await call(url(`/child/${CHILD}?limit=200`), { token })).status, 200);
+  });
+
+  test('rejects invalid or repeated paging values with 400', async () => {
+    // #1112, Codex plan review 2026-11-16: repeated params are arrays in Express;
+    // accepting one half or a coerced number would silently restart pagination.
+    const invalid = [
+      'limit=0', 'limit=abc', 'limit=201', 'limit=1e3', 'limit=1&limit=2',
+      'before_id=1', 'before_created_at=2026-01-01%2000%3A00%3A00',
+      'before_created_at=bad&before_id=1', 'before_created_at=2026-01-01%2000%3A00%3A00&before_id=-1',
+      'before_created_at=2026-01-01%2000%3A00%3A00&before_id=9007199254740991',
+      'before_created_at=2026-01-01%2000%3A00%3A00&before_id=1&before_id=2',
+      'before_created_at=2026-01-01%2000%3A00%3A00&before_created_at=2026-01-01%2000%3A00%3A00&before_id=1',
+      'before_created_at=2026-01-01%2000%3A00%3A00%27%20OR%201%3D1&before_id=1',
+    ];
+    for (const query of invalid) {
+      const res = await call(url(`/child/${CHILD}?${query}`), { token });
+      assert.equal(res.status, 400, `${query}: ${JSON.stringify(res.body)}`);
+      assert.equal(typeof res.body.error, 'string');
+    }
+  });
+
   test('lists a child’s finished recordings with the camera name joined in', async () => {
     const r = makeRecording();
     const res = await call(url(`/child/${CHILD}`), { token });

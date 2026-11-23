@@ -5,6 +5,16 @@ loaded on every change; it moved here because most changes touch none of it. `CL
 **invariants** that must not be broken and points here for the explanation. Update this file when you change
 a subsystem it describes.
 
+Alert clips are analysed on the device by Google's Apache-2.0 YAMNet model (an ONNX conversion
+by andrelgomes). A single lazy Node worker runs `onnxruntime-web` on WASM; it uses about
+250–315 MB while loaded and is released after 60 seconds idle. The pinned 16 MB model and
+class map are fetched at image build time, and their licence is in `/usr/share/licenses/yamnet/`.
+The final image size increase needs a Docker build measurement. arm64 speed and memory have
+not been measured.
+
+Sleep scoring rule version `7` adds the movement-or-cry witness throughout the measured span.
+Stored nights keep their earlier rule version and are not recomputed on upgrade.
+
 **Everything ships as one Docker image, one container** — no multi-container orchestration to
 reason about. The container needs its own routable LAN IP so WebRTC has no NAT/ICE problems
 (MediaMTX advertises that IP to browsers). There are two supported ways to give it one: **host
@@ -143,7 +153,8 @@ reconciliation. Three independent mechanisms keep the pipeline alive without man
   enabled camera, and the camera paths are reconciled as soon as the new MediaMTX is up).
 - FFmpeg and MediaMTX processes both auto-restart on unexpected exit (`transcoder.js`,
   `mediamtxProcess.js`), and `transcoder.js` also watches for a specific known bad-camera
-  symptom ("DTS discontinuity") and proactively restarts rather than let a session run poisoned.
+  symptom ("DTS discontinuity" with a jump over 480000 ticks; smaller start-up jitter is only logged, and a line it
+  cannot parse still restarts) and proactively restarts rather than let a session run poisoned.
 
 **One start at a time per camera (#478).** The reconcile pass, the camera watchdog, the audio watchdog
 and the camera routes (add, an edit with a new address, enable, **Restart stream**, a failed delete putting
@@ -220,7 +231,7 @@ condition, manual recording availability, mirrors `can_record` in `routes/camera
 schedule and cooldown checks. With Track sleep and Hold alerts until asleep on, alerts are dropped outside
 the sleep window because the watcher cannot detect sleep there; no cap clock starts. Inside the window,
 the first held alert starts a per-child, per-window 45-minute clock, after which alerts may pass even
-without detected sleep. Detected sleep allows alerts immediately, including after a restart in the same window: the watcher saves each camera's asleep result with its child and window start. A restart before sleep is detected starts a fresh cap. The hold does not affect the
+without detected sleep. The child's sleep camera can detect sleep from two consecutive live onset results at least a minute apart, while every camera can use 15 observed quiet minutes. Detected sleep allows alerts immediately, including after a restart in the same window: the watcher saves each camera's asleep result with its child and window start. A restart before sleep is detected starts a fresh cap. A withdrawn onset does not restore the hold. The hold does not affect the
 `alerting_now` readiness field or camera-offline, long-silence and sleep-report alerts.
 
 ## Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)
@@ -519,8 +530,8 @@ both null and logs a fixed sentence; #700's history-read counter is restored aft
 night summary need from them is counted in `computeNight` and stored by `upsertNight` in two nullable `sleep_nights`
 columns (guarded `ALTER`s, NULL on older rows, no backfill). `stir_minutes`: minutes of `[onset, sleepEnd)` with an
 in-bed peak over `MOTION_ACTIVE` that are not in a counted wake and are at least `POST_ONSET_SOUND_WITNESS_MIN` after
-onset; sound-only and outside-the-bed-only minutes are excluded on purpose (the detail view's `stir` segment is
-broader and unchanged), and a camera with no bed zone counts all movement (its whole frame is the in-bed channel).
+onset; sound-only and outside-the-bed-only minutes are excluded on purpose (the detail view's `stir` segment
+also excludes unwitnessed sound), and a camera with no bed zone counts all movement (its whole frame is the in-bed channel).
 `summary_facts`: versioned JSON text, the same string on a fresh compute and on the stored row (read it with
 `parseSummaryFacts`): `{ v: 1, climate: { temp_min, temp_max }, sleep: { wakes: [{ start_at, minutes }],
 room_activity_wakes } }`. `wakes` are the runs `accumulateMetrics` counted, so `wakes.length === wake_count` (the
@@ -649,6 +660,8 @@ trusted in the span it was computed in. `GET /review/:date` adds `settings: { ke
 `409 settings_changed`, before anything is written, when the key it would compute now differs, and one without it
 (a page from before) is not checked. Typed times keep today's zone (`localHmToUtcSql`), the zone the page shows.
 Not covered by the key: a night with no usable saved context, whose key is `''` before and after a settings change.
+
+**A child's manual recordings** are listed by `GET /api/recordings/child/:childId` (#1112). It returns a plain array, with an optional `limit` (1–200, default 50) and paired `before_created_at` and `before_id` query values for older pages. Rows are ordered by `created_at DESC, id DESC`; the last row's values form the next cursor, even if that row is later deleted.
 
 **Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
 it. `detection_events.protected` and `recordings.protected` are 0/1 clip flags. The protected-list and

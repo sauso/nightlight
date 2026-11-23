@@ -261,6 +261,9 @@ export function purgeCamera(cameraId) {
     db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(cameraId);
     db.prepare('DELETE FROM camera_events WHERE camera_id = ?').run(cameraId);
     db.prepare('DELETE FROM sensor_readings WHERE camera_id = ?').run(cameraId);
+    // The Nightlight Camera's per-minute readings also cascade with the camera row; deleted by name here too, so the
+    // purge does not depend on foreign-key enforcement alone.
+    db.prepare('DELETE FROM nlcam_readings WHERE camera_id = ?').run(cameraId);
     // A child's "primary camera" pointer has no foreign key. Left alone it would name a camera that no
     // longer exists (and the id never comes back, so it could not even revive).
     db.prepare('UPDATE children SET primary_camera_id = NULL WHERE primary_camera_id = ?').run(cameraId);

@@ -14,11 +14,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-'));
 process.env.DATA_DIR = TMP;
 
-const { computeNight, detectMidnightEpisodes, quietStretchBeforeExit } = await import('../src/lib/sleepAnalysis.js');
+const { computeNight, computeAndStoreNight, runNightlySleepJob, detectMidnightEpisodes, quietStretchBeforeExit, settlingQuietWitness, SCORING_ALGO,
+  ONSET_BLIP_MAX_LEVEL, ONSET_BLIP_MAX_PEAK } = await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
 const CHILD = 'test-child';
@@ -82,10 +84,543 @@ before(() => {
               VALUES (?, 'Test Cam', 'rtsp://example/stream', ?, 'testcam')`).run(CAM, CHILD);
 });
 
+describe('far pre-window put-downs need watched evidence', () => {
+  const windowStart = at(19, 0);
+  const minuteBeforeWindow = (gap) => new Date(windowStart.getTime() - gap * 60000);
+  const putDown = (time) => insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(time));
+  const peak = (time, value = STILL_OCCUPIED, out = 0.0004) =>
+    insertFull.run(CAM, sqlTime(time), value, value, 0.5, out);
+  const windowAt19 = () => db.prepare("UPDATE children SET sleep_window_start = '19:00' WHERE id = ?").run(CHILD);
+
+  // Sound keeps the plain onset search later while the put-down search discounts distant house noise.
+  // The three later bed readings satisfy the older 150-minute guard without vouching for pre-window sleep.
+  function farPutDown(gap, stirs = [], { stirPeak = STILL_OCCUPIED, stirOut = 0.0004, noise = true } = {}) {
+    windowAt19();
+    layNight(at(16, 0), at(7, 0, 1), {
+      noise: noise ? [[at(16, 55), at(19, 20)]] : [], still: 0.0001,
+      move: [[at(22, 0), at(22, 5)]],
+    });
+    putDown(minuteBeforeWindow(gap));
+    for (const m of stirs) peak(m, stirPeak, stirOut);
+    for (const m of [at(19, 10), at(19, 11), at(19, 12)]) peak(m);
+  }
+
+  function incident({ completed = false } = {}) {
+    windowAt19();
+    layNight(at(16, 55), completed ? at(7, 0, 1) : at(19, 22), {
+      noise: [[at(16, 55), completed ? at(20, 3) : at(19, 22)]],
+      move: completed ? [[at(19, 40), at(20, 3)]] : [],
+      out: [[at(19, 9), at(19, 14)]], // room activity, while the bed zone still reads empty
+      still: 0.0001,
+      noiseP75: 8,
+    });
+    db.prepare('UPDATE activity_samples SET sound_level = 1.7 WHERE camera_id = ?').run(CAM);
+    peak(at(16, 57), 1.0);
+    peak(at(17, 0), 0.98);
+    peak(at(18, 50), 0.0067);
+    peak(at(18, 58), 0.97);
+    insertTransition.run(CAM, 'out_of_bed', 1, sqlTime(at(16, 57, 0, 49)));
+    insertTransition.run(CAM, 'into_bed', 0.98, sqlTime(at(17, 0, 0, 18)));
+    insertTransition.run(CAM, 'out_of_bed', 0.97, sqlTime(at(18, 58, 0, 49)));
+    if (completed) {
+      peak(at(19, 9)); // older guard's third witness lies INSIDE the window
+      putDown(at(19, 40));
+    }
+  }
+
+  test('incident live: removing the pre-window evidence check restores a 17:03 onset', (t) => {
+    incident();
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.in_progress, true);
+    assert.equal(night.onset_at, null);
+    assert.equal(night.status, 'no_sleep');
+  });
+
+  test('incident completed: removing the evidence check restores the false early onset', () => {
+    incident({ completed: true });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '20:03');
+    assert.equal(hhmm(night.in_bed_at), '19:40');
+  });
+
+  test('a later put-down lead-in cannot rescue the 83-minute false onset', () => {
+    windowAt19();
+    layNight(at(16, 55), at(7, 0, 1), {
+      noise: [[at(16, 55), at(20, 3)]],
+      move: [[at(17, 34), at(17, 35)], [at(19, 40), at(20, 3)]],
+      still: 0.0001,
+    });
+    for (const m of [at(19, 35), at(19, 36), at(19, 37)]) peak(m);
+    putDown(at(17, 34));
+    putDown(at(19, 40));
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:03');
+  });
+
+  test('50 is free but 51 requires evidence: changing the margin moves the boundary', () => {
+    farPutDown(50);
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:10');
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+    farPutDown(51);
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:20');
+  });
+
+  test('ceil(watched / 30): 60/61, 90/91 and 117 each require the next counted minute', () => {
+    for (const [gap, need] of [[60, 2], [61, 3], [90, 3], [91, 4], [117, 4]]) {
+      for (const count of [need - 1, need]) {
+        db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+        db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+        const q = minuteBeforeWindow(gap);
+        const stirs = Array.from({ length: count }, (_, i) => new Date(q.getTime() + (i + 1) * 10 * 60000));
+        farPutDown(gap, stirs);
+        assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), count === need ? hhmm(sqlTime(q)) : '19:20',
+          `gap ${gap}, occupied ${count}, need ${need}`);
+      }
+    }
+  });
+
+  test('the occupancy threshold includes exactly 0.0005, not a value just below it', () => {
+    for (const value of [0.00049, 0.0005]) {
+      db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+      db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+      farPutDown(60, [at(18, 10), at(18, 30)], { stirPeak: value });
+      assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), value === 0.0005 ? '18:00' : '19:20');
+    }
+  });
+
+  test('guard: ordinary and sparse real stirs, even with outside-bed motion, keep the early onset', () => {
+    const stirs = [at(18, 0), at(18, 20), at(18, 40)];
+    farPutDown(80, stirs, { stirOut: 0.04, noise: false });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '17:40');
+  });
+
+  test('a later real put-down never vouches across the cut, even during the guard-3 fail-open', (t) => {
+    windowAt19();
+    layNight(at(16, 55), at(19, 22), {
+      noise: [[at(16, 55), at(18, 20)], [at(18, 40), at(19, 22)]], still: 0.0001,
+      move: [[at(17, 0), at(17, 1)], [at(18, 30), at(18, 31)], [at(19, 10), at(19, 15)]],
+    });
+    putDown(at(17, 0));
+    putDown(at(18, 30));
+    peak(at(18, 29), 0.0001, 0.04); // active left neighbour makes the real put-down the evidence cut
+    for (const m of [at(18, 35), at(18, 40), at(18, 45), at(18, 50), at(18, 55), at(19, 5)]) peak(m);
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '18:31', 'the later real put-down may anchor, but the 17:00 one cannot');
+  });
+
+  test('a short evidence cut keeps the full-span need at both live and later clocks', (t) => {
+    windowAt19();
+    layNight(at(16, 55), at(20, 0), {
+      noise: [[at(16, 55), at(19, 20)]], still: 0.0001, noiseP75: 8,
+      move: [[at(17, 0), at(17, 1)]],
+    });
+    db.prepare('UPDATE activity_samples SET sound_level = 1.7 WHERE camera_id = ?').run(CAM);
+    peak(at(17, 10));
+    // Household sound makes the 17:19 log non-isolated without adding bed evidence.
+    putDown(at(17, 0));
+    putDown(at(17, 19));
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    const outcomes = [];
+    for (const clock of [at(19, 22), at(20, 0)]) {
+      t.mock.timers.setTime(clock.getTime());
+      const night = computeNight(CHILD, DATE);
+      outcomes.push([night.status, hhmm(night.onset_at)]);
+    }
+    assert.deepEqual(outcomes, [['no_sleep', null], ['empty', null]]);
+  });
+
+  test('guard: a cut after sufficient stirs keeps a real far-early onset', () => {
+    windowAt19();
+    layNight(at(16, 55), at(7, 0, 1), {
+      still: 0.0001, move: [[at(17, 0), at(17, 3)], [at(22, 0), at(22, 5)]],
+    });
+    for (const m of [at(17, 10), at(17, 30), at(17, 50), at(18, 10)]) peak(m);
+    peak(at(18, 29), 0.0001, 0.04); // non-isolated later log cuts after all four stirs
+    putDown(at(17, 0));
+    putDown(at(18, 30));
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '17:03');
+  });
+
+  test('an isolated logged blip does not cut far-early evidence', () => {
+    windowAt19();
+    layNight(at(16, 55), at(7, 0, 1), {
+      still: 0.0001, move: [[at(17, 0), at(17, 1)], [at(22, 0), at(22, 5)]],
+    });
+    putDown(at(17, 0));
+    putDown(at(17, 30)); // quiet on both sides: not the next real put-down
+    for (const m of [at(17, 40), at(18, 0), at(18, 20), at(18, 40)]) peak(m);
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '17:01');
+    assert.equal(hhmm(night.in_bed_at), '17:00');
+  });
+
+  test('the second onset pass skips a rejected put-down and takes the real 20:03 settle', () => {
+    windowAt19();
+    layNight(at(16, 55), at(7, 0, 1), {
+      move: [[at(17, 0), at(17, 1)], [at(19, 40), at(20, 3)]],
+      still: 0.0001,
+    });
+    for (const m of [at(18, 0), at(18, 20), at(18, 40)]) peak(m);
+    putDown(at(17, 0));
+    putDown(at(19, 40));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '20:03');
+    assert.equal(hhmm(night.in_bed_at), '19:40');
+  });
+
+  test('a bridged far-early settle rejected by pre-window evidence stays skipped in the second pass', () => {
+    windowAt19();
+    layNight(at(16, 55), at(7, 0, 1), {
+      move: [[at(17, 0), at(17, 1)], [at(17, 8), at(17, 9)], [at(19, 40), at(20, 3)]],
+      still: 0.0001,
+    });
+    for (const m of [at(18, 0), at(18, 20)]) peak(m);
+    putDown(at(17, 0));
+    putDown(at(19, 40));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '20:03');
+    assert.equal(hhmm(night.in_bed_at), '19:40');
+  });
+
+  test('partly watched pre-window span uses watched minutes in ceil, not elapsed minutes', () => {
+    for (const count of [2, 3]) {
+      db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+      db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+      windowAt19();
+      layNight(at(17, 0), at(18, 12), { still: 0.0001 }); // 72 of 120 pre-window minutes
+      layNight(at(19, 0), at(7, 0, 1), { move: [[at(22, 0), at(22, 5)]], still: 0.0001 });
+      for (const m of [at(17, 20), at(17, 40), at(18, 0)].slice(0, count)) peak(m);
+      putDown(at(17, 0));
+      assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), count === 3 ? '17:00' : '19:00');
+    }
+  });
+
+  test('known limit: a very still real early sleeper can fall to the window start', () => {
+    windowAt19();
+    layNight(at(17, 0), at(7, 0, 1), { still: 0.0001, move: [[at(22, 0), at(22, 5)]] });
+    for (const m of [at(17, 20), at(17, 40), at(18, 0)]) peak(m);
+    putDown(at(17, 0));
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:00');
+  });
+
+  test('live clocks: a rejected far put-down never moves onset back before the window', (t) => {
+    windowAt19();
+    layNight(at(17, 0), at(20, 0), { still: 0.0001,
+      move: [[at(17, 0), at(17, 1)], [at(19, 15), at(19, 18)]] });
+    for (const m of [at(18, 0), at(18, 20), at(18, 40)]) peak(m);
+    putDown(at(17, 0));
+    // The unanchored baseline can still choose an in-window quiet run: existing behaviour.
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 5).getTime() });
+    for (const time of [at(19, 5), at(19, 15), at(19, 30), at(20, 0)]) {
+      t.mock.timers.setTime(time.getTime());
+      const night = computeNight(CHILD, DATE);
+      assert.ok(!night.onset_at || night.onset_at >= night.window_start, sqlTime(time));
+    }
+  });
+
+  test('guard: a put-down inside the 50-minute margin keeps the old in-progress fail-open', (t) => {
+    farPutDown(40);
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:20');
+  });
+
+  test('within-margin live fail-open needs the end-of-timeline early return', (t) => {
+    windowAt19();
+    layNight(at(16, 55), at(21, 10), {
+      noise: [[at(16, 55), at(19, 20)]], still: 0.0001,
+    });
+    putDown(at(18, 20)); // 40-minute gap; fewer than three occupied readings
+    t.mock.timers.enable({ apis: ['Date'], now: at(19, 22).getTime() });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:20');
+    t.mock.timers.setTime(at(21, 10).getTime());
+    assert.equal(computeNight(CHILD, DATE).onset_at, null);
+  });
+
+  test('guard: a pre-window onset is preserved when a daylight-saving change follows the window', () => {
+    const localBeforeJump = (h, m) => new Date(Date.UTC(2026, 9, 3, h - 10, m));
+    const localAfterJump = (h, m) => new Date(Date.UTC(2026, 9, 4, h - 11, m));
+    windowAt19();
+    layNight(localBeforeJump(16, 30), localAfterJump(7, 0), {
+      move: [[localBeforeJump(22, 0), localBeforeJump(22, 5)]], still: 0.0001,
+    });
+    putDown(localBeforeJump(18, 0)); // 60 real minutes before the window, despite the shorter night
+    peak(localBeforeJump(18, 20));
+    peak(localBeforeJump(18, 40));
+    peak(localBeforeJump(19, 10)); // third witness for the older 150-minute guard
+    const night = computeNight(CHILD, '2026-10-03');
+    assert.equal(hhmm(night.window_start), '19:00');
+    assert.equal(hhmm(night.onset_at), '18:00');
+  });
+
+  test('guard: three in-window fixture nights keep their sleep figures', () => {
+    for (const [hour, minute, asleepMinutes] of [
+      [19, 10, 697], [19, 20, 687], [19, 35, 672],
+    ]) {
+      db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+      db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+      windowAt19();
+      const start = at(hour, minute);
+      const end = new Date(start.getTime() + 5 * 60000);
+      layNight(at(18, 45), at(7, 0, 1), {
+        move: [[start, end], [at(2, 0, 1), at(2, 8, 1)]], still: STILL_OCCUPIED,
+      });
+      putDown(start);
+      const night = computeNight(CHILD, DATE);
+      assert.equal(hhmm(night.onset_at), hhmm(sqlTime(end)));
+      assert.equal(night.status, 'ok');
+      assert.equal(hhmm(night.in_bed_at), hhmm(sqlTime(start)));
+      assert.equal(night.asleep_minutes, asleepMinutes);
+      assert.equal(night.wake_count, 1);
+      assert.equal(night.wake_at, null);
+    }
+  });
+});
+
 beforeEach(() => {
+  db.prepare("UPDATE children SET sleep_window_start = '19:30' WHERE id = ?").run(CHILD);
   db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
   db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
-  db.prepare('DELETE FROM detection_events WHERE camera_id = ?').run(CAM);
+  db.prepare('DELETE FROM detection_events').run();
+  db.prepare("UPDATE settings SET classify_alert_audio = 1 WHERE id = 'app'").run();
+});
+
+// #1159: a plain sound run used to count as a wake after the former 30-minute grace.
+function soundOnlyNight() {
+  laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(1, 0, 1)), sqlTime(at(1, 8, 1)));
+}
+function cryAlert(time, { camera = CAM, type = 'sound', label = 'cry' } = {}) {
+  db.prepare('INSERT INTO detection_events (camera_id, camera_name, type, created_at, audio_label) VALUES (?, ?, ?, ?, ?)')
+    .run(camera, 'Test camera', type, sqlTime(time), label);
+}
+
+test('#1159: unwitnessed sound-only run is not a wake and the timeline agrees', () => {
+  soundOnlyNight();
+  db.prepare('UPDATE activity_samples SET motion_peak = 0.2 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(at(3, 0, 1))); // a genuine one-minute stir belongs in displayed sleep
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.status, 'ok');
+  assert.equal(night.timeline.find((m) => m.t === sqlTime(at(1, 4, 1))).state, 'quiet');
+  assert.equal(night.segments.filter((s) => ['asleep', 'stir'].includes(s.state))
+    .reduce((n, s) => n + s.minutes, 0), night.asleep_minutes);
+  assert.equal(night.wake_count, 1, 'only the movement run at 22:00 wakes');
+});
+
+test('#1159: a cry-labelled sound alert within two minutes rescues a sound wake', () => {
+  soundOnlyNight();
+  cryAlert(at(1, 3, 1, 43));
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.wake_count, 2);
+});
+
+test('#1159: a cry three minutes away, another camera, another type, and other labels do not rescue', () => {
+  soundOnlyNight();
+  cryAlert(at(0, 57, 1));
+  cryAlert(at(1, 3, 1), { camera: 'other-camera' });
+  cryAlert(at(1, 3, 1), { type: 'motion' });
+  for (const label of [null, 'other', 'voice', 'cough']) cryAlert(at(1, 3, 1), { label });
+  assert.equal(computeNight(CHILD, DATE).wake_count, 1);
+});
+
+test('#1159: turning classification off ignores a previously stored cry label', () => {
+  soundOnlyNight();
+  cryAlert(at(1, 3, 1));
+  db.prepare("UPDATE settings SET classify_alert_audio = 0 WHERE id = 'app'").run();
+  assert.equal(computeNight(CHILD, DATE).wake_count, 1);
+});
+
+test('#1159: movement within two minutes witnesses sound; movement and movement-plus-sound stay active', () => {
+  soundOnlyNight();
+  const baseline = computeNight(CHILD, DATE);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(22, 0)), sqlTime(at(22, 6)));
+  assert.equal(computeNight(CHILD, DATE).wake_count, baseline.wake_count);
+  db.prepare('UPDATE activity_samples SET motion_peak = 0.2 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(at(1, 3, 1)));
+  assert.equal(computeNight(CHILD, DATE).wake_count, baseline.wake_count + 1);
+});
+
+test('#1159: a cry at bedtime can delay onset without movement', () => {
+  laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(19, 30)), sqlTime(at(19, 40)));
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 30)));
+  const noCry = computeNight(CHILD, DATE);
+  cryAlert(at(19, 32, 0, 43));
+  const withCry = computeNight(CHILD, DATE);
+  assert.equal(hhmm(noCry.onset_at), '19:30');
+  assert.equal(hhmm(withCry.onset_at), '19:35');
+});
+
+test('#1159: the alerts a night returns carry the stored audio label (the wake-ups list shows it as a badge)', (t) => {
+  laySamples(at(19, 30), at(7, 15, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+  t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+  cryAlert(at(22, 2), { label: 'voice' });
+  db.prepare(`INSERT INTO detection_events (camera_id, camera_name, type, created_at) VALUES (?, 'Test camera', 'sound', ?)`)
+    .run(CAM, sqlTime(at(22, 4)));
+  const alerts = computeNight(CHILD, DATE, { includeTimeline: true }).alerts;
+  assert.deepEqual(alerts.map((a) => a.audio_label), ['voice', null], 'the label is returned, and an unclassified alert says null');
+});
+
+test('#1159: a cry on a different day cannot witness tonight', () => {
+  soundOnlyNight();
+  cryAlert(at(1, 3, 0));
+  assert.equal(computeNight(CHILD, DATE).wake_count, 1);
+});
+
+test('#1159: UTC minute buckets witness a cry across a daylight-saving change', () => {
+  const start = new Date('2026-10-03T09:30:00Z');
+  const end = new Date('2026-10-03T20:00:00Z');
+  laySamples(start, end, [[new Date('2026-10-03T12:00:00Z'), new Date('2026-10-03T12:06:00Z')]], STILL_OCCUPIED);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, '2026-10-03 16:00:00', '2026-10-03 16:08:00');
+  assert.equal(computeNight(CHILD, '2026-10-03').wake_count, 1);
+  db.prepare(`INSERT INTO detection_events (camera_id, camera_name, type, created_at, audio_label)
+    VALUES (?, 'Test camera', 'sound', '2026-10-03 16:03:43', 'cry')`).run(CAM);
+  assert.equal(computeNight(CHILD, '2026-10-03').wake_count, 2);
+});
+
+test('#1159: sound just across and wholly after the window edge uses the same witness rule', (t) => {
+  laySamples(at(19, 30), at(7, 15, 1), [[at(22, 0), at(22, 6)], [at(7, 12, 1), at(7, 15, 1)]], STILL_OCCUPIED);
+  laySamples(at(7, 15, 1), at(7, 40, 1), [], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 15, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+  const baseline = computeNight(CHILD, DATE);
+  assert.equal(hhmm(baseline.wake_at), '07:15', 'precondition: the post-window extension is used');
+  for (const [from, to] of [[at(6, 56, 1), at(7, 5, 1)], [at(7, 1, 1), at(7, 9, 1)]]) {
+    db.prepare('UPDATE activity_samples SET sound_peak = 0 WHERE camera_id = ?').run(CAM);
+    db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+      .run(CAM, sqlTime(from), sqlTime(to));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.awake_minutes, baseline.awake_minutes);
+    assert.equal(night.asleep_minutes, baseline.asleep_minutes);
+    assert.equal(night.wake_count, baseline.wake_count);
+  }
+});
+
+test('#1159: a cry-labelled alert still counts post-window sound', (t) => {
+  laySamples(at(19, 30), at(7, 15, 1), [[at(22, 0), at(22, 6)], [at(7, 12, 1), at(7, 15, 1)]], STILL_OCCUPIED);
+  laySamples(at(7, 15, 1), at(7, 40, 1), [], STILL_EMPTY);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 15, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+  const baseline = computeNight(CHILD, DATE);
+  assert.equal(hhmm(baseline.wake_at), '07:15', 'precondition: the metrics pass extends past the window');
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(7, 3, 1)), sqlTime(at(7, 8, 1)));
+  cryAlert(at(7, 5, 1, 43)); // Within two minutes of all five sound minutes in the extension.
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.wake_at), '07:15');
+  assert.equal(night.awake_minutes, baseline.awake_minutes + 5);
+  assert.equal(night.asleep_minutes, baseline.asleep_minutes - 5);
+  assert.equal(night.wake_count, baseline.wake_count + 1);
+});
+
+test('#1159: a watched still night with short unwitnessed sound bursts remains ok, not empty', () => {
+  // Without the empty-bed guard this night reads `empty` (no wake, no awake minute, no in-bed movement), and a final
+  // `empty` can delete the timelapse frames. Each burst is under the 20-minute sustained-sound bar, so only the guard
+  // keeps the night `ok` (the mutation run found the sustained-sound fixture below no longer exercised it).
+  laySamples(at(19, 30), at(7, 0, 1), [], STILL_EMPTY);
+  for (const [from, to] of [[at(1, 0, 1), at(1, 8, 1)], [at(3, 0, 1), at(3, 8, 1)]]) {
+    db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+      .run(CAM, sqlTime(from), sqlTime(to));
+  }
+  assert.equal(computeNight(CHILD, DATE).status, 'ok');
+});
+
+test('#1159: a cry exactly three minutes before or after a lone sound minute does not extend a movement wake', () => {
+  // The witness window is +-2 minutes on BOTH sides (the mutation run found only the "after" side was pinned). A lone
+  // sound minute 3 minutes after a movement wake is bridged into that wake only if a witness reaches it.
+  const build = () => {
+    laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+    db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?').run(CAM, sqlTime(at(22, 9)));
+  };
+  build();
+  const baseline = computeNight(CHILD, DATE).awake_minutes;
+  cryAlert(at(22, 6, 0, 30)); // 3 minutes before the sound minute
+  assert.equal(computeNight(CHILD, DATE).awake_minutes, baseline);
+  db.prepare('DELETE FROM detection_events').run();
+  cryAlert(at(22, 12, 0, 30)); // 3 minutes after
+  assert.equal(computeNight(CHILD, DATE).awake_minutes, baseline);
+  db.prepare('DELETE FROM detection_events').run();
+  cryAlert(at(22, 7, 0, 30)); // 2 minutes before: the control, the sound minute now counts and the wake grows
+  assert.ok(computeNight(CHILD, DATE).awake_minutes > baseline);
+});
+
+test('#1159: a watched still night with sustained sound remains ok, not empty', () => {
+  laySamples(at(19, 30), at(7, 0, 1), [], STILL_EMPTY);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(1, 0, 1)), sqlTime(at(1, 30, 1)));
+  assert.equal(computeNight(CHILD, DATE).status, 'ok');
+});
+
+test('#1159: 20 consecutive sound-only minutes count from the first minute', () => {
+  soundOnlyNight();
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(2, 0, 1)), sqlTime(at(2, 20, 1)));
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.wake_count, 2);
+  assert.equal(night.timeline.find((m) => m.t === sqlTime(at(2, 0, 1))).state, 'active');
+  assert.equal(night.segments.find((s) => s.state === 'wake' && s.from_at === sqlTime(at(2, 0, 1)))?.minutes, 20);
+  assert.equal(night.segments.filter((s) => ['asleep', 'stir'].includes(s.state))
+    .reduce((n, s) => n + s.minutes, 0), night.asleep_minutes);
+});
+
+test('#1159: 19 sound-only minutes and two runs split by silence stay discounted', () => {
+  soundOnlyNight();
+  const setSound = (from, to) => db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(from), sqlTime(to));
+  setSound(at(2, 0, 1), at(2, 19, 1));
+  assert.equal(computeNight(CHILD, DATE).wake_count, 1);
+  db.prepare('UPDATE activity_samples SET sound_peak = 0 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(2, 0, 1)), sqlTime(at(2, 20, 1)));
+  setSound(at(2, 0, 1), at(2, 10, 1));
+  setSound(at(2, 11, 1), at(2, 21, 1));
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.wake_count, 1);
+  assert.equal(night.timeline.find((m) => m.t === sqlTime(at(2, 11, 1))).state, 'quiet');
+});
+
+test('#1159: sustained sound at bedtime does not delay onset', () => {
+  laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)]], STILL_OCCUPIED);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 30)));
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(19, 30)), sqlTime(at(20, 0)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:30');
+});
+
+test('#1159: sustained sound after the window counts in the metrics extension', (t) => {
+  laySamples(at(19, 30), at(7, 50, 1), [[at(22, 0), at(22, 6)], [at(7, 27, 1), at(7, 30, 1)]], STILL_OCCUPIED);
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 30, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
+  const baseline = computeNight(CHILD, DATE);
+  assert.equal(hhmm(baseline.wake_at), '07:30');
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(7, 1, 1)), sqlTime(at(7, 21, 1)));
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.awake_minutes, baseline.awake_minutes + 20);
+  assert.equal(night.asleep_minutes, baseline.asleep_minutes - 20);
+});
+
+test('#1159: movement followed by 60 sound-only minutes keeps the morning wake at movement', () => {
+  laySamples(at(19, 30), at(7, 0, 1), [[at(22, 0), at(22, 6)], [at(5, 59, 1), at(6, 0, 1)]], STILL_OCCUPIED);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(6, 0, 1)), sqlTime(at(7, 0, 1)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '05:59');
+});
+
+test('#1159: the final nightly pass stores a sound-heavy still night as ok', async (t) => {
+  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(CHILD);
+  laySamples(at(19, 30), at(7, 0, 1), [], STILL_EMPTY);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+    .run(CAM, sqlTime(at(1, 0, 1)), sqlTime(at(1, 8, 1)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(12, 0, 1).getTime() });
+  runNightlySleepJob();
+  assert.equal(db.prepare('SELECT status FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(CHILD, DATE)?.status, 'ok');
+  await new Promise((resolve) => setTimeout(resolve, 100)); // let the job's deferred snapshot refresh finish before DB teardown
 });
 
 after(() => {
@@ -982,9 +1517,10 @@ test('★★ the return is indexed with txIdx, consistently, on both sides of th
   // the regression test for #260 on this call site: the wake path sits on the same txIdx seam as onset,
   // and this proves it moved when #260 did rather than quietly keeping its own rounding.
   //
-  // The witness is exactly SETTLING_WITNESS_MIN_QUIET (6) quiet occupied minutes, 05:49-05:54 — it was
+  // The witness is exactly SETTLING_WITNESS_MIN_QUIET (6) counted quiet occupied minutes, 05:49 and
+  // 05:52-05:56; 05:50-05:51 are active, and the climb-out exclusion also covers 05:50. It was
   // OCCUPANCY_MIN_MINUTES (3) occupied ones until issue #598 gave this guard its own, quiet-only witness.
-  // Both :29 and :31 now floor into 05:49, so both see all 6 and the guard fires in both cases. The
+  // Both :29 and :31 now floor into 05:49, so both see all 6 counted minutes and the guard fires. The
   // count sits ON the threshold, so an index one minute late (a hand-rolled ROUND, the #260 defect
   // coming back by hand) loses 05:49, sees 5, and gives a different night: that is the mutant this kills.
   // A LATER real exit is what makes the seam observable at all: without one the fallback below hands
@@ -992,11 +1528,11 @@ test('★★ the return is indexed with txIdx, consistently, on both sides of th
   // passed for the wrong reason (both `null`).
   const layWitnessOnTheBoundary = (second) => {
     laySamples(at(19, 30), at(5, 49, 1), [[at(19, 30), at(19, 40)], [at(5, 48, 1), at(5, 49, 1)]], STILL_OCCUPIED);
-    laySamples(at(5, 49, 1), at(5, 55, 1), [], STILL_OCCUPIED); // exactly SETTLING_WITNESS_MIN_QUIET quiet
+    laySamples(at(5, 49, 1), at(5, 57, 1), [[at(5, 50, 1), at(5, 52, 1)]], STILL_OCCUPIED); // six counted minutes
     // ⚠️ The later exit's own active minute has to sit OUTSIDE the 150-minute witness window. It could
     // not count as a quiet minute anyway (it is active), but keeping it out keeps this test about the
     // index and nothing else. 08:30 is 161 min after 05:49.
-    laySamples(at(5, 55, 1), at(9, 0, 1), [[at(8, 30, 1), at(8, 31, 1)]], STILL_EMPTY);
+    laySamples(at(5, 57, 1), at(9, 0, 1), [[at(8, 30, 1), at(8, 31, 1)]], STILL_EMPTY);
     insertTransition.run(CAM, 'into_bed', 0.02, sqlTime(at(5, 49, 1, second)));
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(5, 49, 1, second + 10)));
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(8, 30, 1, 5))); // the later, real departure
@@ -1237,16 +1773,17 @@ describe('★★★ #598: the settling-tail guard believes a still sleeper, not 
 
   test('#598 C12: the window starts at the return\'s own minute: a quiet minute just before it does not count', () => {
     // The early end of the window, pinned (C5 pins the far end). The return lands at 05:49:29 in a minute
-    // that is itself ACTIVE (so not a quiet one), 5 quiet minutes follow (05:50-05:54, one under the
+    // that is itself ACTIVE (so not a quiet one), 5 counted quiet minutes follow (05:51-05:55, one under the
     // threshold), and the minute just BEFORE the return (05:48) is quiet too, between two active ones.
-    // Counted, 05:48 would make the sixth and skip the exit; it is outside the window, so the exit stands.
+    // 05:50 is skipped after the return. Counting 05:48 would make the sixth and skip the exit;
+    // it is before the window, so the exit stands.
     // The later real exit (08:30) is 161 minutes after 05:49, outside the window as well.
     laySamples(at(19, 30), at(5, 46, 1), [[at(19, 30), at(19, 40)]], STILL_OCCUPIED);
-    laySamples(at(5, 46, 1), at(5, 55, 1), [
+    laySamples(at(5, 46, 1), at(5, 56, 1), [
       [at(5, 46, 1), at(5, 48, 1)], // awake and moving
       [at(5, 49, 1), at(5, 50, 1)], // the return's own minute: ACTIVE
-    ], STILL_OCCUPIED); // so 05:48 is quiet, and 05:50-05:54 are the five quiet minutes
-    laySamples(at(5, 55, 1), at(9, 0, 1), [[at(8, 30, 1), at(8, 31, 1)]], STILL_EMPTY);
+    ], STILL_OCCUPIED); // so 05:48 is quiet, and 05:51-05:55 are the five counted minutes
+    laySamples(at(5, 56, 1), at(9, 0, 1), [[at(8, 30, 1), at(8, 31, 1)]], STILL_EMPTY);
     insertTransition.run(CAM, 'into_bed', 0.02, sqlTime(at(5, 49, 1, 29)));
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(5, 49, 1, 39))); // the tail, 10 s later
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(8, 30, 1, 5))); // a later exit
@@ -1273,6 +1810,113 @@ describe('★★★ #598: the settling-tail guard believes a still sleeper, not 
   });
 });
 
+// #914 excludes the later departure's own minute. The start-side climb-out exclusion uses
+// the same witness, with a 06:22 pair and a 09:03 exit after the 07:00 window.
+function layClimboutWitness({ quietAt = [23, 24, 45, 48, 58, 117], activeAt = [], pair = true,
+  laterActive = true, laterOffset = 183 } = {}) {
+  const minute = (k) => new Date(at(6, 0, 1).getTime() + k * 60000);
+  laySamples(at(19, 30), minute(23), [[at(19, 30), at(19, 40)], [minute(20), minute(23)]], STILL_OCCUPIED);
+  for (let k = 23; k < 240; k++) {
+    const motion = activeAt.includes(k) || (laterActive && k >= laterOffset && k < laterOffset + 3) ? 0.4
+      : quietAt.includes(k) ? STILL_OCCUPIED : STILL_EMPTY;
+    insertSample.run(CAM, sqlTime(minute(k)), motion, motion);
+  }
+  if (pair) insertTransition.run(CAM, 'into_bed', 0.142, sqlTime(new Date(minute(22).getTime() + 19000)));
+  insertTransition.run(CAM, 'out_of_bed', 0.102, sqlTime(new Date(minute(22).getTime() + 31000)));
+  insertTransition.run(CAM, 'out_of_bed', 0.028, sqlTime(new Date(minute(laterOffset).getTime() + 4000)));
+}
+
+describe('settling witness excludes the exit climb-out', () => {
+  test('2026-11-20 shape: six old witness minutes include the first climb-out minute', (t) => {
+    layClimboutWitness();
+    for (const [h, m] of [[9, 25], [10, 0]]) {
+      t.mock.timers.enable({ apis: ['Date'], now: at(h, m, 1).getTime() });
+      try { assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22'); }
+      finally { t.mock.timers.reset(); }
+    }
+  });
+
+  test('prod shape: five old witness minutes already keep the real exit (guard)', () => {
+    layClimboutWitness({ quietAt: [23, 24, 45, 48, 58] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('still sleeper: six later occupied quiet minutes still set aside a tail (guard)', () => {
+    layClimboutWitness({ quietAt: [23, 35, 45, 48, 58, 70, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:03');
+  });
+
+  test('five later witness minutes do not meet the six-minute boundary (guard)', () => {
+    layClimboutWitness({ quietAt: [35, 45, 48, 58, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('documented cost: one quiet minute at +1 and five others takes the exit; the rule cannot tell this from the measured night', () => {
+    layClimboutWitness({ quietAt: [23, 35, 45, 48, 58, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('the second minute after into_bed still counts: it makes six with five later minutes (guard)', () => {
+    layClimboutWitness({ quietAt: [24, 35, 45, 48, 58, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:03');
+  });
+
+  test('uncut witness skips from +1 even when the exit lands at +1, then counts a quiet +3', () => {
+    // No later departure cuts this window. The into_bed is minute 22, the exit minute 23;
+    // +1 is quiet occupied, +2 is empty, +3 and five later minutes are quiet occupied.
+    // Correct count is six if +3 and all five later minutes are present, and five without one.
+    const occupied = new Array(150).fill(false);
+    const active = new Array(150).fill(false);
+    for (const minute of [23, 25, 35, 45, 48, 58, 117]) occupied[minute] = true;
+    assert.equal(settlingQuietWitness(22, Infinity, occupied.length, occupied, active), true,
+      'the quiet +3 minute counts despite the next-minute exit');
+    occupied[117] = false;
+    assert.equal(settlingQuietWitness(22, Infinity, occupied.length, occupied, active), false,
+      'the +1 minute follows into_bed and cannot make the sixth');
+  });
+
+  test('#914: a sixth minute on the later departure itself cannot vouch (guard)', () => {
+    layClimboutWitness({ quietAt: [35, 45, 48, 58, 117, 150], activeAt: [151, 152], laterActive: false, laterOffset: 150 });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('a real return with eleven later quiet minutes and small stirs stays protected (guard)', () => {
+    layClimboutWitness({ quietAt: [23, 35, 40, 45, 48, 53, 58, 70, 80, 90, 100, 117], activeAt: [43, 63] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:03');
+  });
+
+  test('without a settling pair the real exit remains the wake (guard)', () => {
+    layClimboutWitness({ pair: false, quietAt: [23, 24, 35, 45, 48, 58, 117] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:22');
+  });
+
+  test('radar shadow uses the same witness; sensor evidence can still reject the early exit', (t) => {
+    layClimboutWitness();
+    const dev = db.prepare("INSERT INTO esphome_devices (name, host, child_id) VALUES ('climbout', '192.0.2.14', ?)").run(CHILD).lastInsertRowid;
+    const hr = db.prepare(`INSERT INTO esphome_entities (device_id, object_id, child_id, kind, name, unit)
+      VALUES (?, 'heart_rate', ?, 'sensor', 'Heart Rate', 'bpm')`).run(dev, CHILD).lastInsertRowid;
+    const put = db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n, nzero, nmiss) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)');
+    try {
+      for (let tt = at(6, 0, 1); tt < at(10, 0, 1); tt = new Date(tt.getTime() + 60000)) {
+        const nearExit = tt >= at(6, 23, 1) && tt < at(6, 33, 1);
+        put.run(hr, Math.floor(tt.getTime() / 60000), nearExit ? 80 : 0,
+          nearExit ? 80 : null, nearExit ? 80 : null, nearExit ? 80 : null,
+          nearExit ? 10 : 0, nearExit ? 0 : 10);
+      }
+      t.mock.timers.enable({ apis: ['Date'], now: at(10, 0, 1).getTime() });
+      const night = computeNight(CHILD, DATE);
+      assert.equal(hhmm(night.wake_at), '06:22');
+      assert.equal(hhmm(night.wake_at_sensor), '09:03');
+      assert.equal(night.sensor_rejects, 1);
+    } finally {
+      t.mock.timers.reset();
+      db.prepare('DELETE FROM esphome_readings').run();
+      db.prepare('DELETE FROM esphome_entities').run();
+      db.prepare('DELETE FROM esphome_devices').run();
+    }
+  });
+});
+
 // --- #914: the settling-tail witness stops at the next real departure ------------------------------------------------
 //
 // ★★★ The night of 2026-10-30 (staging, one child): a stray `into_bed` at 06:29:05, the REAL exit 51 s later at 06:29:56
@@ -1290,8 +1934,8 @@ describe('★★★ #598: the settling-tail guard believes a still sleeper, not 
 //   marks    — more bed transitions: [type, minute offset, second]
 // No sound anywhere: the #509 veto needs an awake run reaching the window end, so it never runs and the wake is the
 // departure scan's own choice: 06:29 when the exit stands, a later exit when it is set aside. The witness window runs
-// from the return's minute (06:29, offset 29) for 150 minutes: offsets 29-178. The evidence ends at 10:00 (window end +
-// 3 h, offset 240), so a later exit needs its 20 quiet minutes before then.
+// from the return's minute (06:29, offset 29) for 150 minutes: offsets 29-178. The evidence ends at 10:00 (window end
+// + 3 h, offset 240), so a later exit needs its 20 quiet minutes before then.
 const om914 = (k, s = 0) => new Date(at(6, 0, 1).getTime() + k * 60000 + s * 1000);
 function layWitnessMorning({ quietAt = [], activeAt = [], marks = [] } = {}) {
   laySamples(at(19, 30), om914(30), [[at(19, 30), at(19, 40)], [om914(22), om914(30)]], STILL_OCCUPIED);
@@ -1537,6 +2181,505 @@ function layNight(from, to, { move = [], noise = [], out = [], still = STILL_OCC
   }
 }
 
+// A watched, occupied night with a put-down and an otherwise quiet 20:09 settle.
+// Offsets are minutes after 20:09; the long active lead-in prevents an earlier onset.
+function layBridgeNight(stirs = [], { putDown = true, still = STILL_OCCUPIED } = {}) {
+  const q = at(20, 9);
+  const minute = (n) => new Date(q.getTime() + n * 60000);
+  layNight(at(19, 30), at(7, 0, 1), {
+    move: [[at(19, 30), q], ...stirs.map(([from, to]) => [minute(from), minute(to)])], still,
+  });
+  if (putDown) insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(20, 0)));
+  return minute;
+}
+
+test('short in-bed stirs after a put-down keep the first quiet minute as onset', () => {
+  const minute = layBridgeNight([[8, 9], [16, 18], [27, 28]]);
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.onset_at), '20:09');
+  assert.equal(hhmm(night.in_bed_at), '20:00');
+  assert.equal(night.status, 'ok');
+  // The golden fixture pins the literal label; this verifies a saved worked-out row uses the exported one.
+  computeAndStoreNight(CHILD, DATE);
+  const saved = db.prepare('SELECT scoring_context FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(CHILD, DATE);
+  assert.equal(JSON.parse(saved.scoring_context).algo, SCORING_ALGO);
+  assert.equal(sqlTime(minute(8)), sqlTime(at(20, 17)));
+});
+
+function layGuardRetryNight({ noise = false, sparse = false } = {}) {
+  if (sparse) {
+    layNight(at(18, 30), at(7, 0, 1), {
+      move: [[at(18, 30), at(18, 31)], [at(18, 44), at(18, 45)],
+        [at(20, 0), at(20, 1)], [at(20, 30), at(20, 31)], [at(21, 0), at(21, 1)],
+        [at(22, 0), at(5, 0, 1)]], still: 0.0001,
+    });
+    insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 30)));
+    return;
+  }
+  const noises = noise ? Array.from({ length: 70 }, (_, i) => {
+    const from = at(19, 15 + i * 10);
+    return [from, new Date(from.getTime() + 60000)];
+  }) : [];
+  layNight(at(18, 50), at(7, 0, 1), {
+    move: [[at(18, 50), at(18, 51)], [at(18, 58), at(18, 59)],
+      [at(19, 8), at(19, 14)], [at(2, 0, 1), at(2, 3, 1)]],
+    noise: noises,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 50)));
+}
+
+test('a bridged settle rejected by an awakening retries the plain settle', () => {
+  layGuardRetryNight();
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:14');
+});
+
+test('a rejected bridge still permits the later plain settle amid household noise', () => {
+  layGuardRetryNight({ noise: true });
+  const night = computeNight(CHILD, DATE);
+  assert.equal(night.status, 'ok');
+  assert.equal(hhmm(night.onset_at), '19:16');
+});
+
+test('a bridged far-early settle rejected for missing bed evidence retries the plain settle', () => {
+  layGuardRetryNight({ sparse: true });
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.onset_at), '18:45');
+  assert.equal(hhmm(night.in_bed_at), '18:30');
+});
+
+test('a bridge that passes the guards remains the chosen settle', () => {
+  const minute = layBridgeNight([[8, 9]]);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:09');
+  assert.equal(sqlTime(minute(8)), sqlTime(at(20, 17)));
+});
+
+test('when bridged and plain settles both fail the put-down keeps the baseline onset', () => {
+  layNight(at(18, 50), at(7, 0, 1), {
+    move: [[at(18, 50), at(18, 51)], [at(18, 58), at(18, 59)],
+      [at(19, 8), at(19, 41)]],
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 50)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:41');
+});
+
+test('a put-down episode with repeated bed stirs stays at 20:09 across live clocks', (t) => {
+  const q = at(20, 9);
+  const minute = (n) => new Date(q.getTime() + n * 60000);
+  const stirs = [[9, 10], [18, 19], [27, 29], [38, 39], [47, 49], [58, 59],
+    [67, 69], [78, 79], [87, 89], [98, 99], [107, 109], [118, 119], [127, 129]];
+  layNight(at(19, 30), at(7, 0, 1), {
+    move: [[at(19, 30), q], ...stirs.map(([a, b]) => [minute(a), minute(b)])],
+    still: STILL_OCCUPIED,
+  });
+  // The witnessed sound minute at 20:17 belongs to the 20:18 bed stir.
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(8)));
+  for (const [hour, min] of [[19, 39], [19, 42], [19, 44], [19, 46], [19, 48],
+    [19, 51], [19, 54], [19, 57], [20, 0]]) {
+    insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(hour, min)));
+  }
+  db.prepare(`INSERT INTO bed_transitions (camera_id, type, peak, out_peak, out_frames, created_at)
+              VALUES (?, 'out_of_bed', 0.029, 0.029, 2, ?)`).run(CAM, sqlTime(at(20, 5)));
+  t.mock.timers.enable({ apis: ['Date'], now: at(20, 10).getTime() });
+  assert.equal(computeNight(CHILD, DATE).onset_at, null);
+  for (let clock = at(20, 30); clock <= at(22, 15); clock = new Date(clock.getTime() + 5 * 60000)) {
+    t.mock.timers.setTime(clock.getTime());
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '20:09', `at ${clock.toISOString()}`);
+    assert.equal(hhmm(night.in_bed_at), '19:39');
+  }
+  t.mock.timers.setTime(at(12, 0, 1).getTime());
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:09');
+});
+
+test('one and two active minutes bridge; a three-minute run does not', () => {
+  for (const [length, expected] of [[1, '20:09'], [2, '20:09'], [3, '20:20']]) {
+    const minute = layBridgeNight([[8, 8 + length]]);
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected, `stir length ${length}`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+    assert.equal(sqlTime(minute(8)), sqlTime(at(20, 17)));
+  }
+});
+
+test('outside-bed motion in either minute of a stir cannot be bridged', () => {
+  for (const offset of [8, 9]) {
+    const minute = layBridgeNight([[8, 10]]);
+    db.prepare('UPDATE activity_samples SET motion_out_peak = 0.3 WHERE camera_id = ? AND bucket_start = ?')
+      .run(CAM, sqlTime(minute(offset)));
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:19', `outside at ${offset}`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('an outside-bed minute at 20:10 blocks every earlier candidate window', () => {
+  const minute = layBridgeNight([[1, 2]]);
+  db.prepare('UPDATE activity_samples SET motion_out_peak = 0.3 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(1)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:11');
+});
+
+test('a stir needs confirmed quiet on both sides inside its window', () => {
+  let minute = layBridgeNight([[14, 15]]);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:10', 'right flank beyond first window');
+  db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+  db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  layNight(at(19, 58), at(7, 0, 1), {
+    move: [[at(20, 0), at(20, 1)], [at(20, 15), at(20, 18)]],
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(20, 0)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:18', 'left flank lies just outside the first window');
+  db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+  db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  minute = layBridgeNight([[4, 5]]);
+  db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start = ?').run(CAM, sqlTime(minute(3)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:14', 'unknown left flank');
+});
+
+test('an unknown right flank cannot complete a bridged stir', () => {
+  const minute = layBridgeNight([[8, 9]]);
+  db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start = ?').run(CAM, sqlTime(minute(9)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:19');
+});
+
+test('a bed minute followed by witnessed sound forms one bridged stir', () => {
+  const minute = layBridgeNight([[8, 9]]);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(9)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:09');
+});
+
+test('a cry on the sound minute after bed movement blocks the bridge', () => {
+  const minute = layBridgeNight([[8, 9]]);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(9)));
+  cryAlert(minute(9));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:19');
+});
+
+test('a sound-active minute with bed peak exactly at the motion threshold is not a bed stir', () => {
+  const minute = layBridgeNight([[6, 7]]);
+  // Motion at 20:15 witnesses the sound two minutes later; the 0.01 bed peak
+  // itself remains quiet under motionAt's strict > convention.
+  db.prepare('UPDATE activity_samples SET motion_peak = 0.01, motion_level = 0.01, sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(8)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:18');
+});
+
+test('three bridged minutes fit; a fourth moves the returned onset to a later window', () => {
+  layBridgeNight([[2, 3], [6, 7], [10, 11]]);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:09');
+  db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+  db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  layBridgeNight([[2, 3], [5, 6], [8, 9], [11, 12]]);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:12');
+});
+
+test('a sound neighbour shares its bed stir length and the per-window cap', () => {
+  const minute = layBridgeNight([[9, 10], [12, 13]]);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(8)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:09', 'sound plus two bed minutes reaches the cap');
+  db.prepare('UPDATE activity_samples SET motion_peak = 0.05 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(5)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:15', 'sound uses one of three bridge slots');
+});
+
+test('a witnessed sound-only stir cannot be bridged without bed movement in its own run', () => {
+  const minute = layBridgeNight([[6, 7]]);
+  db.prepare('UPDATE activity_samples SET sound_peak = 20 WHERE camera_id = ? AND bucket_start = ?')
+    .run(CAM, sqlTime(minute(8))); // movement two minutes away witnesses this separate sound minute
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:18');
+});
+
+test('bridged minutes do not fill missing confirmed-quiet coverage', () => {
+  const minute = layBridgeNight([[3, 4], [7, 8], [11, 12]]);
+  for (const offset of [1, 5, 9, 13, 14]) {
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start = ?').run(CAM, sqlTime(minute(offset)));
+  }
+  // First window: 7 confirmed quiet + 3 bridged + 5 unknown. Its 7/15
+  // confirmed share is below MIN_COVERAGE_FRAC; the slide to q+2 has 8.
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:11');
+});
+
+test('the second transition-onset pass uses the bridge for a later put-down', () => {
+  layNight(at(19, 30), at(7, 0, 1), {
+    move: [[at(20, 5), at(20, 10)], [at(20, 18), at(20, 19)]], still: STILL_OCCUPIED,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(20, 5)));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:10');
+});
+
+test('a wake can begin inside the window used to declare onset', () => {
+  layBridgeNight([[11, 13], [15, 16], [17, 19]]);
+  const night = computeNight(CHILD, DATE);
+  assert.equal(hhmm(night.onset_at), '20:09');
+  assert.equal(night.wake_count, 1); // existing wake run bridges the later short quiet gaps
+});
+
+test('the existing occupancy fail-open can later withdraw a bridged live onset', (t) => {
+  layBridgeNight([[8, 9]], { still: STILL_EMPTY });
+  t.mock.timers.enable({ apis: ['Date'], now: at(20, 25).getTime() });
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:09');
+  t.mock.timers.setTime(at(23, 0).getTime()); // the 150-minute witness horizon is now complete
+  assert.notEqual(hhmm(computeNight(CHILD, DATE).onset_at), '20:09');
+});
+
+test('a cry-labelled stir is never bridged', () => {
+  const minute = layBridgeNight([[8, 9]]);
+  cryAlert(minute(8));
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:18');
+});
+
+// #1186 follow-up: only sound's onset witness changes. The moving minute itself
+// remains active and consumes the existing bridge budget.
+const setOnsetMinute = (time, level, peak, sound = 0.5, outside = 0.0004) =>
+  db.prepare(`UPDATE activity_samples SET motion_level = ?, motion_peak = ?, sound_peak = ?, motion_out_peak = ?
+    WHERE camera_id = ? AND bucket_start = ?`).run(level, peak, sound, outside, CAM, sqlTime(time));
+
+function layBlipOnsetNight() {
+  layNight(at(19, 30), at(7, 0, 1), {
+    move: [[at(20, 3), at(20, 6)], [at(20, 14), at(20, 25)]],
+    still: 0,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(20, 3)));
+  insertTransition.run(CAM, 'out_of_bed', 0.5, sqlTime(at(20, 20)));
+  for (let m = 14; m <= 24; m++) {
+    setOnsetMinute(at(20, m), 0.05, 0.26, 0.5, m >= 19 && m <= 21 ? 0.085 : 0.0004);
+  }
+  setOnsetMinute(at(20, 33), 0, 0.001, 0.5, 0.035);
+  setOnsetMinute(at(20, 35), 0.002, 0.069);
+  setOnsetMinute(at(20, 44), 0, 0.05, 6.2);
+  setOnsetMinute(at(20, 45), 0, 0, 6.1);
+  setOnsetMinute(at(20, 46), 0, 0, 7.5);
+  setOnsetMinute(at(20, 53), 0.001, 0.076, 5.8);
+  setOnsetMinute(at(21, 0), 0, 0, 8.2);
+  setOnsetMinute(at(21, 2), 0.001, 0.057);
+  for (const [m, peak] of [[9, 8.9], [10, 6.1], [11, 2.8], [12, 8.8]]) {
+    setOnsetMinute(at(21, m), 0, m === 11 ? 0.014 : 0, peak);
+  }
+}
+
+test('faint bed peaks beside sound allow the 20:34 onset after a real visit', () => {
+  layBlipOnsetNight();
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.onset_at), '20:34');
+  assert.equal(night.status, 'ok');
+  assert.ok(!night.timeline.some((row) => hhmm(row.t) >= '20:34' && hhmm(row.t) < '21:13' && row.inWake));
+});
+
+test('a fourth blip in the first window exceeds the shared bridge budget', () => {
+  // No sound: four bridged blips test the cap without forming a wake that the
+  // separate overlap veto would reject first.
+  const minute = layBridgeNight([]);
+  for (const offset of [2, 5, 8, 12]) setOnsetMinute(minute(offset), 0.001, 0.05);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:12');
+});
+
+test('cleared sound with a wake start vetoes the first onset window', () => {
+  const minute = layBridgeNight([]);
+  for (let offset = 8; offset < 20; offset++) {
+    setOnsetMinute(minute(offset), 0, STILL_OCCUPIED, 12);
+  }
+  for (const offset of [9, 13, 17]) setOnsetMinute(minute(offset), 0.001, 0.05, 12);
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.onset_at), '20:29');
+});
+
+test('a wake run beginning before a cleared-sound window vetoes its overlap', () => {
+  const minute = layBridgeNight([]);
+  for (let offset = -4; offset < 11; offset++) {
+    setOnsetMinute(minute(offset), 0, STILL_OCCUPIED, 12);
+  }
+  for (const offset of [-2, 2, 6, 10]) setOnsetMinute(minute(offset), 0.001, 0.05, 12);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+});
+
+test('the pre-window nap guard reads cleared sound in the anchored view', () => {
+  layNight(at(17, 30), at(7, 0, 1), {
+    move: [[at(17, 30), at(18, 15)]], still: STILL_OCCUPIED,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 10)));
+  // Keep the noise beyond the first 15 quiet minutes: the overlap veto should
+  // leave this fixture to exercise hasAwakening's later pre-window scan.
+  for (let m = 31; m < 54; m++) setOnsetMinute(at(18, m), 0, STILL_OCCUPIED, 12);
+  for (const m of [33, 41, 49]) setOnsetMinute(at(18, m), 0.001, 0.05, 12);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '18:15');
+});
+
+test('the no-bridge retry reads cleared sound after its first settle fails', () => {
+  layGuardRetryNight();
+  // The first bridged settle fails the later awakening guard. The next blip
+  // ends at 19:18, leaving sound at 19:19-20 beside only that blip. This run
+  // is too short to be a wake, so the no-bridge retry must read the cleared view.
+  setOnsetMinute(at(19, 18), 0.001, 0.05);
+  for (let m = 19; m < 21; m++) setOnsetMinute(at(19, m), 0, STILL_OCCUPIED, 12);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '19:19');
+});
+
+test('a murmuring child with recurring faint movement keeps the late settle', () => {
+  for (const interval of [4, 5, 8]) {
+    layNight(at(19, 30), at(7, 0, 1), {
+      move: [[at(19, 30), at(20, 9)]], still: STILL_OCCUPIED,
+    });
+    insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(20, 0)));
+    for (let minute = 9; minute < 90; minute++) {
+      setOnsetMinute(at(20, minute), 0, STILL_OCCUPIED, 12);
+    }
+    for (let minute = 13; minute < 90; minute += interval) {
+      setOnsetMinute(at(20, minute), 0.001, 0.05, 12);
+    }
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '21:30', `${interval}-minute blips`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('sustained sound beside blips still contributes to a wake', () => {
+  layBridgeNight([]);
+  for (let m = 0; m < 20; m++) setOnsetMinute(at(22, m), 0, STILL_OCCUPIED, 12);
+  for (const m of [2, 7]) setOnsetMinute(at(22, m), 0.001, 0.05, 12);
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(night.wake_count, 1);
+  assert.equal(night.timeline.find((row) => row.t === sqlTime(at(22, 0))).state, 'active');
+  assert.equal(night.timeline.find((row) => row.t === sqlTime(at(22, 19))).state, 'quiet');
+});
+
+test('a real duplicate before a blip keeps the minute as a sound witness', () => {
+  layWitnessCase({ level: 0.02, peak: 0.2, duplicate: { level: 0.001, peak: 0.05 } });
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+});
+
+test('an outside reading beside a blip blocks the onset through its sound witness', () => {
+  const minute = layBridgeNight([]);
+  db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(minute(0)));
+  setOnsetMinute(minute(-1), 0.001, 0.05, 0.5, 0.2);
+  setOnsetMinute(minute(1), 0, STILL_OCCUPIED, 12);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:11');
+});
+
+test('a cry just beyond the window still witnesses its last sound minute', () => {
+  layNight(at(19, 30), at(7, 0, 1), {
+    move: [[at(19, 30), at(6, 45, 1)]], still: STILL_OCCUPIED,
+  });
+  insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(6, 45, 1)));
+  setOnsetMinute(at(6, 59, 1), 0, STILL_OCCUPIED, 12);
+  cryAlert(at(7, 1, 1));
+  assert.notEqual(hhmm(computeNight(CHILD, DATE).onset_at), '06:45');
+});
+
+test('three minutes of real movement still block the put-down window', () => {
+  const minute = layBridgeNight([]);
+  for (const offset of [8, 9, 10]) setOnsetMinute(minute(offset), 0.02, 0.05);
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+});
+
+function layWitnessCase({ level = 0.001, peak = 0.05, outside = 0.0004,
+  duplicate = null, cry = false, soundOffset = 9, soundCount = 2 } = {}) {
+  const minute = layBridgeNight([]);
+  setOnsetMinute(minute(8), level, peak, 0.5, outside);
+  setOnsetMinute(minute(soundOffset), 0, STILL_OCCUPIED, 12);
+  if (soundCount === 2) setOnsetMinute(minute(soundOffset + 1), 0, STILL_OCCUPIED, 12);
+  if (duplicate) insertFull.run(CAM, sqlTime(minute(8)), duplicate.level,
+    duplicate.peak, 0.5, duplicate.outside ?? 0.0004);
+  if (cry) cryAlert(minute(soundOffset));
+  return minute;
+}
+
+test('exact peak and mean caps are inclusive; one step above either keeps sound active', () => {
+  for (const [level, peak, expected] of [[ONSET_BLIP_MAX_LEVEL, ONSET_BLIP_MAX_PEAK, '20:09'],
+    [ONSET_BLIP_MAX_LEVEL + 0.000001, ONSET_BLIP_MAX_PEAK, '20:20'],
+    [ONSET_BLIP_MAX_LEVEL, ONSET_BLIP_MAX_PEAK + 0.000001, '20:20']]) {
+    layWitnessCase({ level, peak });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected, `${level}/${peak}`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('measured onset blip caps stay at 0.002 mean and 0.1 peak', () => {
+  // 0.002 is the smallest measured cap that also improves the owner-reviewed night
+  // (see the source constant); changing either calibrated cap needs a new whole-night A/B.
+  for (const [level, peak, expected] of [
+    [0.002, 0.05, '20:09'], [0.0021, 0.05, '20:20'],
+    [0.001, 0.1, '20:09'], [0.001, 0.1001, '20:20'],
+  ]) {
+    layWitnessCase({ level, peak });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected, `${level}/${peak}`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('outside movement and null mean are never blips', () => {
+  for (const options of [{ outside: 0.2 }, { level: null }]) {
+    layWitnessCase(options);
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('a real duplicate overrides a blip; a quiet duplicate does not', () => {
+  for (const [duplicate, expected] of [
+    [{ level: 0.02, peak: 0.2 }, '20:20'],
+    [{ level: 0, peak: STILL_OCCUPIED }, '20:09'],
+  ]) {
+    layWitnessCase({ duplicate });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('cry near a blip stays active and cannot bridge', () => {
+  layWitnessCase({ cry: true });
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:20');
+});
+
+test('real movement witnesses sound two minutes away, not three; a blip witnesses neither', () => {
+  for (const [level, soundOffset, expected] of [
+    [0.02, 6, '20:16'], [0.02, 5, '20:09'],
+    [0.001, 6, '20:09'], [0.001, 5, '20:09'],
+  ]) {
+    layWitnessCase({ level, soundOffset, soundCount: 1 });
+    assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), expected, `${level}/${soundOffset}`);
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+  }
+});
+
+test('a mid-night blip with five sound minutes remains a wake on the timeline', () => {
+  layBridgeNight([]);
+  for (let m = 0; m < 5; m++) setOnsetMinute(at(22, m), 0, STILL_OCCUPIED, 12);
+  setOnsetMinute(at(22, 2), 0.001, 0.05, 12);
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.equal(hhmm(night.onset_at), '20:09');
+  assert.equal(night.wake_count, 1);
+  for (let m = 0; m < 5; m++) {
+    assert.equal(night.timeline.find((row) => row.t === sqlTime(at(22, m))).state, 'active');
+  }
+});
+
+test('an unchanged onset keeps the entire night object with a mid-night blip', () => {
+  layBridgeNight([]);
+  for (let m = 0; m < 5; m++) setOnsetMinute(at(22, m), 0, STILL_OCCUPIED, 12);
+  setOnsetMinute(at(22, 2), 0.001, 0.05, 12);
+  const night = computeNight(CHILD, DATE, { includeTimeline: true });
+  // The complete returned object, including wake and timeline arrays, is pinned;
+  // the same hash was checked against the old source for this unchanged-onset case.
+  assert.equal(createHash('sha256').update(JSON.stringify(night)).digest('hex'),
+    '9ed1709068583ae93b6212ac5a04fb459b57ae69200b178b59ee701f819995f3',
+    'To regenerate, hash JSON.stringify(night) here; compare the full old/new night objects, especially onset_at, in_bed_at, wake_count and timeline, before replacing the hash.');
+});
+
+test('the unanchored onset search is unchanged with the same stirs', () => {
+  layBridgeNight([[8, 9], [16, 18]], { putDown: false });
+  assert.equal(hhmm(computeNight(CHILD, DATE).onset_at), '20:27');
+});
+
 test('a still child in a noisy house is asleep once a put-down proves they are in bed', () => {
   // The real 2026-08-26 night: down at 18:38, then motionless while the house stays loud for another
   // hour (the other child's bedtime, through the wall). Owner-confirmed asleep from the put-down; the
@@ -1564,10 +2707,8 @@ test('household noise alone cannot invent a bedtime without a put-down', () => {
   assert.equal(hhmm(night.onset_at), '20:05', 'onset must wait for the room to actually settle');
 });
 
-test('a child who cries without moving still counts as an awakening', () => {
-  // The discount is deliberately confined to onset. Mid-night the house is quiet, so noise in a bedroom
-  // is most likely the child's own — and a cry with no movement is precisely the wake-up a parent wants
-  // counted. If this ever fails, the rule has leaked out of the onset search into wake detection.
+test('a child who cries without moving still counts as an awakening when an alert clip heard it', () => {
+  // #1159: a sound-only cry needs a classified alert; raw noise alone no longer witnesses it.
   //
   // #904: the cry carries a REAL p75, and a low one (1.5 dB: a child calling out for under 15 s of each minute),
   // so every cry minute is "spike-only" to the faulty-microphone guard (lib/micGuard.js). Expected: still one
@@ -1575,6 +2716,8 @@ test('a child who cries without moving still counts as an awakening', () => {
   // With the old NULL p75 this test could not see the guard at all (a NULL p75 is never spike-only); now it fails
   // if the guard's window is made short enough to swallow a crying episode.
   layNight(at(18, 20), at(7, 0, 1), { noise: [[at(2, 0, 1), at(2, 10, 1)]], noiseP75: 1.5 });
+  cryAlert(at(2, 2, 1));
+  cryAlert(at(2, 7, 1));
   insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
 
   const night = computeNight(CHILD, DATE);
@@ -1850,9 +2993,8 @@ test('household noise just after bedtime is not the first awakening', () => {
   assert.equal(night.wake_count, 0, 'noise with nothing moving, minutes after falling asleep, is not a wake');
 });
 
-test('the grace is a grace, not a licence: the same noise later IS a wake', () => {
-  // Guard on the test above. Past POST_ONSET_SOUND_WITNESS_MIN the plain rule returns, because
-  // mid-night the house is quiet and a noise in a bedroom is most likely the child's own.
+test('the sound witness rule also applies later in the night', () => {
+  // #1159: the former 30-minute grace no longer limits the movement-or-cry rule.
   layNightOut(at(18, 20), at(7, 0, 1), {
     move: [[at(19, 38), at(19, 41)]],
     noise: [[at(21, 0), at(21, 12)]],
@@ -1860,7 +3002,7 @@ test('the grace is a grace, not a licence: the same noise later IS a wake', () =
   insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(19, 38)));
 
   const night = computeNight(CHILD, DATE);
-  assert.equal(night.wake_count, 1, 'a cry an hour later is a wake-up, discount or no discount');
+  assert.equal(night.wake_count, 0, 'unclassified noise an hour later is not a wake');
 });
 
 test('the onset marker is the START of the settling episode, not the last re-settle', () => {
@@ -2009,7 +3151,8 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
   //   `realMoveFrom`  the first minute the real put-down moves the bed (and the first minute the bed is
   //                   occupied). Default: the real into_bed's own minute.
   //   `realAt`        the real into_bed.
-  function layFalseThenRealPutDown({ occupied = [], realMoveFrom = at(19, 47), realAt = at(19, 47) } = {}) {
+  //   `falseAt`       the false into_bed; a within-margin value tests the older guards independently.
+  function layFalseThenRealPutDown({ occupied = [], realMoveFrom = at(19, 47), realAt = at(19, 47), falseAt = at(18, 6) } = {}) {
     layNight(at(16, 30), realMoveFrom, { noise: [[at(17, 0), realMoveFrom]], still: STILL_EMPTY });
     layNight(realMoveFrom, at(7, 0, 1), {
       move: [[realMoveFrom, at(19, 55)]],
@@ -2017,7 +3160,7 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
       still: STILL_OCCUPIED,
     });
     for (const m of occupied) insertFull.run(CAM, sqlTime(m), STILL_OCCUPIED, STILL_OCCUPIED, 0.5, 0.0004);
-    insertTransition.run(CAM, 'into_bed', 0.076, sqlTime(at(18, 6))); // the false one
+    insertTransition.run(CAM, 'into_bed', 0.076, sqlTime(falseAt)); // the false one
     insertTransition.run(CAM, 'into_bed', 0.121, sqlTime(realAt)); // the real one
   }
 
@@ -2030,7 +3173,7 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
     assert.equal(hhmm(night.onset_at), '19:57', 'asleep at the real settle, not on an empty bed');
   });
 
-  test('#669 T2: 2 occupied minutes before the next put-down are not enough: the false put-down is rejected', () => {
+  test('#669 T2: far-early candidate with 2 occupied minutes is rejected', () => {
     // The 10-10 knife-edge: child A's 19:07 candidate had exactly 2 (19:45 and 19:46, the real put-down's
     // lead-in) against a threshold of 3. Here the real put-down's own minute reads an EMPTY bed (its movement
     // starts at 19:48), so this test is about the threshold alone and not about the exclusive end (T3).
@@ -2040,14 +3183,16 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
     assert.equal(hhmm(night.in_bed_at), '19:47');
   });
 
-  test('#669 T2: ...3 are: the earlier put-down is accepted (OCCUPANCY_MIN_MINUTES is unchanged)', () => {
+  test('#669 T2: far-early candidate with 3 later occupied minutes still lacks pre-window evidence', () => {
+    // The three readings are all AFTER the 19:30 window. They still prove guard 3's count,
+    // but cannot establish sleep from 18:06 under the new pre-window rule.
     layFalseThenRealPutDown({ occupied: [at(19, 44), at(19, 45), at(19, 46)], realMoveFrom: at(19, 48) });
     const night = computeNight(CHILD, DATE);
-    assert.equal(hhmm(night.onset_at), '18:06');
-    assert.equal(hhmm(night.in_bed_at), '18:06');
+    assert.equal(hhmm(night.onset_at), '19:57');
+    assert.equal(hhmm(night.in_bed_at), '19:47');
   });
 
-  test('#669 T3: the next put-down\'s OWN minute is not counted (the end is exclusive)', () => {
+  test('#669 T3: far-early candidate is rejected with two minutes before the cut', () => {
     // Two occupied minutes before it, and the into_bed minute itself occupied (the real put-down moves the bed
     // from 19:47): 2, not 3, so the false put-down is rejected.
     layFalseThenRealPutDown({ occupied: [at(19, 45), at(19, 46)] });
@@ -2056,12 +3201,32 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
     assert.equal(hhmm(night.in_bed_at), '19:47');
   });
 
-  test('#669 T3: ...the same occupied minute one minute BEFORE the next into_bed is counted', () => {
+  test('#669 T3: far-early candidate is rejected despite a third minute before the cut', () => {
     // The other side of the boundary: the real into_bed is logged at 19:48, a minute after its movement began,
-    // so 19:47 now lies before the cut and makes 3.
+    // so 19:47 now lies before the cut and makes 3 for guard 3. All three lie after the window opened.
     layFalseThenRealPutDown({ occupied: [at(19, 45), at(19, 46)], realAt: at(19, 48) });
     const night = computeNight(CHILD, DATE);
-    assert.equal(hhmm(night.onset_at), '18:06');
+    assert.equal(hhmm(night.onset_at), '19:57');
+  });
+
+  test('#669 T2 within margin: two occupied minutes reject, three accept under guard 3', () => {
+    for (const count of [2, 3]) {
+      db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+      db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+      layFalseThenRealPutDown({ falseAt: at(18, 45), occupied: [at(19, 44), at(19, 45), at(19, 46)].slice(0, count), realMoveFrom: at(19, 48) });
+      const night = computeNight(CHILD, DATE);
+      assert.equal(hhmm(night.onset_at), count === 3 ? '18:45' : '19:57');
+    }
+  });
+
+  test('#669 T3 within margin: the next put-down minute is exclusive, its lead-in counts', () => {
+    for (const realAt of [at(19, 47), at(19, 48)]) {
+      db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
+      db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+      layFalseThenRealPutDown({ falseAt: at(18, 45), occupied: [at(19, 45), at(19, 46)], realAt });
+      const night = computeNight(CHILD, DATE);
+      assert.equal(hhmm(night.onset_at), realAt.getTime() === at(19, 48).getTime() ? '18:45' : '19:57');
+    }
   });
 
   test('#669 T4: into_beds between a put-down and its settle (and one AT the settle minute) do not cut it', () => {
@@ -2154,31 +3319,38 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
     assert.equal(hhmm(night.onset_at), '19:04');
   });
 
-  test('#669 T6a: KNOWN LIMIT, pinned: a settle within 150 minutes of the END of the timeline escapes the bound', (t) => {
+  test('#669 T6a: far-early evidence rejects despite guard 3 fail-open', (t) => {
     // Fail-open 1 of bedOccupiedAfter, "not enough timeline left to judge", kept and kept FIRST: it returns
-    // before the bound is looked at. On a night still in progress the timeline ends now, so at 20:30 the
-    // 18:06 settle (+150 = 20:36) is judged by this return alone and the false put-down shows as the bedtime in
-    // tonight's live figures. From 20:36 on the bound applies and it goes; at 21:00 the real one wins.
+    // before the bound is looked at. At 20:30 the 18:06 settle (+150 = 20:36) still passes that guard,
+    // but its empty pre-window span fails the new rule. From 20:36 on guard 3 rejects it as well.
     layFalseThenRealPutDown();
     t.mock.timers.enable({ apis: ['Date'], now: at(20, 30).getTime() });
     const early = computeNight(CHILD, DATE);
     assert.equal(early.in_progress, true, 'precondition: an open night, whose timeline ends at 20:30');
-    assert.equal(hhmm(early.onset_at), '18:06', 'fail-open 1 kept: the false put-down escapes the bound');
+    assert.equal(hhmm(early.onset_at), '19:57', 'the separate pre-window rule rejects the false put-down');
     t.mock.timers.setTime(at(21, 0).getTime());
     const later = computeNight(CHILD, DATE);
     assert.equal(later.in_progress, true);
     assert.equal(hhmm(later.onset_at), '19:57', 'enough timeline now: the bound applies and the false put-down goes');
   });
 
-  test('#669 T6b: a camera outage between the settle and the next put-down still fails OPEN (accepted)', () => {
+  test('#669 T6b: far-early evidence rejects despite a guard 3 camera-gap fail-open', () => {
     // Fail-open 2, "a gap: can't prove the bed was empty through it", kept: a null minute INSIDE the bounded
-    // count still accepts the put-down, so a false put-down followed by an outage before the next one is still
-    // believed. The residual risk bedOccupiedAfter's #508 note already names; #669 does not change it.
+    // count still accepts the put-down under guard 3. Watched pre-window minutes remain empty here,
+    // so the new rule rejects it. The older fail-open still matters inside the 50-minute margin.
     layFalseThenRealPutDown();
     db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
       .run(CAM, sqlTime(at(18, 30)), sqlTime(at(18, 40)));
     const night = computeNight(CHILD, DATE);
-    assert.equal(hhmm(night.onset_at), '18:06', 'fail-open 2 kept: an unobserved minute is not proof of an empty bed');
+    assert.equal(hhmm(night.onset_at), '19:57', 'watched pre-window minutes still lack evidence');
+  });
+
+  test('#669 T6b within margin: a camera gap keeps guard 3 fail-open', () => {
+    layFalseThenRealPutDown({ falseAt: at(18, 45) });
+    db.prepare('DELETE FROM activity_samples WHERE camera_id = ? AND bucket_start >= ? AND bucket_start < ?')
+      .run(CAM, sqlTime(at(19, 20)), sqlTime(at(19, 21)));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.onset_at), '18:45');
   });
 
   // The 2026-10-10 child B shape. A false settling episode (into_beds 19:11, 19:16, 19:21: someone at the bed,
@@ -2318,15 +3490,16 @@ describe('★★★ #669: a later put-down never vouches for an earlier one', ()
     insertTransition.run(CAM, 'into_bed', 0.3, sqlTime(at(19, 47, 0, 20)));
   }
 
-  test('#669 T10: KNOWN LIMIT, pinned: a real put-down logged with recorded quiet either side is exempt, so a false earlier one is believed as before', () => {
+  test('#669 T10: a quiet-sided real put-down remains exempt, but the false far-early one lacks evidence', () => {
     // The price of the isolated-blip exemption: it reads the minutes either side of the into_bed, not the put-down
     // around it. Here those two minutes (19:46 and 19:48) are both quiet, so the real put-down does not cut, the
-    // 150 minutes reach its movement again, and the false 18:06 put-down is accepted exactly as before #669.
+    // 150 minutes reach its movement again, and guard 3 accepts the false 18:06 put-down. The new rule
+    // has too little evidence before the window and rejects it; the real put-down then supplies onset.
     layQuietHouseFalseThenReal({ parentOutside: false });
     const night = computeNight(CHILD, DATE);
     assert.equal(night.status, 'ok');
-    assert.equal(hhmm(night.in_bed_at), '18:06');
-    assert.equal(hhmm(night.onset_at), '18:07');
+    assert.equal(hhmm(night.in_bed_at), '19:47');
+    assert.equal(hhmm(night.onset_at), '19:53');
   });
 
   test('#669 T10: ...KNOWN LIMIT, pinned: the same night with the parent seen OUTSIDE the bed the minute before cuts, and the in-bed marker goes BLANK', () => {
@@ -2655,6 +3828,7 @@ describe('midnight episode integration', () => {
           db.prepare('UPDATE activity_samples SET sound_peak = 10 WHERE camera_id = ? AND bucket_start = ?')
             .run(CAM, sqlTime(at(23, m)));
         }
+        cryAlert(at(23, Math.floor((from + to - 1) / 2)));
       }
       const before = computeNight(CHILD, DATE);
       assert.equal(before.wake_count, twoRuns ? 2 : 1);
@@ -2681,6 +3855,7 @@ describe('midnight episode integration', () => {
       db.prepare('UPDATE activity_samples SET sound_peak = 10 WHERE camera_id = ? AND bucket_start = ?')
         .run(CAM, sqlTime(at(23, m)));
     }
+    cryAlert(at(23, 8));
     const before = computeNight(CHILD, DATE);
     assert.equal(before.wake_count, 1, 'the activity run alone is already a qualifying wake');
     addPair(at(23, 0), at(23, 3)); // episode spans 23:00-23:03 inclusive; 23:04-23:05 stay quiet
@@ -2716,6 +3891,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
   const wipe = () => {
     db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(CAM);
     db.prepare('DELETE FROM bed_transitions WHERE camera_id = ?').run(CAM);
+    db.prepare('DELETE FROM detection_events WHERE camera_id = ?').run(CAM);
   };
 
   // The morning, laid per minute. Returns where things landed so a test can state its expectation from the fixture.
@@ -2750,6 +3926,9 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       else { sound = 0; if (strayTail) motion = STILL_OCCUPIED; } // quiet and silent afterwards
       if (soundStopsAt && t >= soundStopsAt) sound = 0;
       insertTrace.run(CAM, sqlTime(t), motion, motion, sound, out);
+      // These older departure fixtures need their sound-based A wake to remain a wake under #1159.
+      // A cry label every five minutes witnesses the whole audible run without altering bed motion.
+      if (sound > 0 && Math.round((t - a0) / 60000) % 5 === 2) cryAlert(t);
     }
     const tOut = plus(clusterEnd, -1, 23); // the final exit, 37 s before the gap it corroborates opens
     insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(plus(restEnd, 0, 10)));
@@ -2845,7 +4024,10 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
     // a stir ending at 05:30, quiet and silent from 05:31, then the room wakes at 06:25 and stays active
     for (let m = at(5, 25, 1); m < at(5, 31, 1); m = plus(m, 1)) insertTrace.run(CAM, sqlTime(m), 0.15, 0.15, 0, 0);
     for (let m = at(5, 31, 1); m < at(6, 25, 1); m = plus(m, 1)) insertTrace.run(CAM, sqlTime(m), STILL_EMPTY, STILL_EMPTY, 0, 0);
-    for (let m = at(6, 25, 1); m < at(8, 0, 1); m = plus(m, 1)) insertTrace.run(CAM, sqlTime(m), STILL_EMPTY, STILL_EMPTY, 10, 0);
+    for (let m = at(6, 25, 1); m < at(8, 0, 1); m = plus(m, 1)) {
+      insertTrace.run(CAM, sqlTime(m), STILL_EMPTY, STILL_EMPTY, 10, 0);
+      if (Math.round((m - at(6, 25, 1)) / 60000) % 5 === 2) cryAlert(m);
+    }
     insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(5, 31, 1, 10)));
     t.mock.timers.enable({ apis: ['Date'], now: at(8, 0, 1).getTime() });
     const night = computeNight(CHILD, DATE);
@@ -2866,6 +4048,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       for (let m = at(6, 0, 1); m < at(9, 0, 1); m = plus(m, 1)) {
         const stir = m.getTime() === at(6, 50, 1).getTime();
         insertTrace.run(CAM, sqlTime(m), stir ? 0.05 : STILL_EMPTY, stir ? 0.05 : STILL_EMPTY, m < at(7, 0, 1) ? 10 : 0, 0);
+        if (m < at(7, 0, 1) && Math.round((m - at(6, 0, 1)) / 60000) % 5 === 2) cryAlert(m);
       }
       insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(6, 50, 1, 20)));
     };
@@ -2933,6 +4116,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       const k = Math.round((m - at(6, 0, 1)) / 60000);
       const bed = ((k >= restlessFrom && k < 30) || k === blipAt || (lateActivity && k >= 70 && k < 92)) ? 0.15 : STILL_EMPTY;
       insertTrace.run(CAM, sqlTime(m), bed, bed, k < 60 ? 10 : 0, outZone && k >= 20 && k < 30 ? 0.99 : 0);
+      if (k < 60 && k % 5 === 2) cryAlert(m);
     }
     insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(6, 29, 1, 50)));
     if (lateActivity) insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(7, 31, 1, 50)));
@@ -3098,6 +4282,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
         // end and A exists (without it the veto never runs: #509 C5).
         const sound = k >= soundFrom && om(k) < at(7, 30, 1) ? 10 : 0;
         insertTrace.run(CAM, sqlTime(om(k)), motion, motion, sound, out);
+        if (sound > 0 && (k - soundFrom) % 5 === 2) cryAlert(om(k));
       }
       if (eveningTail) {
         insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(20, 41, 0, 30)));
@@ -3293,6 +4478,8 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       // choice of "the last recorded" passes it. Here the `into_bed` is 06:30:05 and the exits 06:30:10 and 06:31:00,
       // the gap opens at 06:30 and the nearer exit (10 s) is the first one; "the last" would read 06:31 from the
       // moment the later exit qualifies, a clock drift the scan's own fallback does not have (06:30 at 07:08).
+      // With one climb-out minute skipped, the 06:32 witness still counts and both exits are set aside;
+      // removing the nearest-skip choice makes the 07:38 wake read 06:31.
       const { clock } = layHandBack({ strayAt: [30, 5], exitAt: [30, 10], extraExits: [[31, 0]] });
       for (const [h, m] of [[7, 8], [7, 38], [10, 0]]) {
         assert.equal(hhmm(nightAt(t, clock(h, m)).wake_at), '06:30', `clock ${h}:${m}`);

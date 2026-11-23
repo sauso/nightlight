@@ -2,8 +2,9 @@ name: Next Node major preview
 
 # Runs the backend and front-end suites on the NEXT Node major (26 today), beside the Node 24 the project
 # supports, so that what breaks on the move is known well before anyone makes it (#751, step 1 of its plan).
-# This is a preview, not a gate: nothing about what is supported changes, `engines`, `.nvmrc`, the Docker image
-# and every other workflow stay on the supported major, and backend/test/node-version-pin.test.js says so.
+# This remains a preview, not a support gate: `engines`, `.nvmrc` and other suites' setup-node pins stay on 24.
+# The e2e and docker-publish builds use the Dockerfile's Node 26 base during the #751 SOAK.
+# #751 SOAK runs the Docker image on 26 for staging; backend/test/node-version-pin.test.js guards that exception.
 #
 # HOW TO READ IT. A failure here that ALSO fails on the supported Node is an ordinary bug. A failure that appears
 # only here is a Node-26 incompatibility: file it as its own issue and link it from #751. The run summary lists
@@ -17,8 +18,8 @@ name: Next Node major preview
 #     week), on demand, and on a PR that changes this file or the pin test, so neither can rot unnoticed.
 #   * On a push, schedule or dispatch the job is NOT continue-on-error: `gh run list` then tells the truth
 #     about Node 26. Only on the PR trigger is it, so that proving this file works does not leave that PR red.
-# WHAT IT DOES NOT PROVE: the production image (Alpine/musl native modules, the ffmpeg and MediaMTX children, the
-# HEALTHCHECK, memory over days) is #751 step 2, a staging container on node:26-alpine. Coverage thresholds stay
+# WHAT IT DOES NOT PROVE: the Node 26 image's Alpine/musl native modules, ffmpeg and MediaMTX children,
+# HEALTHCHECK or memory over days. #751 step 2 checks these through the staging SOAK. Coverage thresholds stay
 # on the supported Node only: they say nothing about the runtime, and the numbers can differ between versions.
 on:
   push:
@@ -48,7 +49,7 @@ jobs:
     timeout-minutes: 30
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '26'
@@ -98,7 +99,7 @@ jobs:
     timeout-minutes: 30
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '26'

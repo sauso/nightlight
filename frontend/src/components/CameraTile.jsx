@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, Settings, PictureInPicture2, Volume2, VolumeX, Radio, GripVertical, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Mic, Thermometer, Droplet, Zap, AudioLines, Bell, Square, Play, RotateCcw, Power, BellOff } from 'lucide-react';
+import { usesCameraClimate } from '../lib/nightlightSensors.js';
 import { useNavigate } from 'react-router-dom';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { startTalk } from '../lib/twoWayTalk.js';
@@ -56,6 +57,21 @@ export function readingParts(mqtt, tempUnit) {
     parts.push({ key: 'humidity', Icon: Droplet, text: `${Math.round(mqtt.humidity)}%` });
   }
   return parts;
+}
+
+// The chips on a tile. A Nightlight Camera whose own sensors are on shows ITS temperature and humidity when its climate
+// switch is on (the server then ignores that camera's MQTT readings, so MQTT's chips would be stale or wrong), each hidden
+// unless the server said the reading was ok and fresh (liveSensors in the backend returns only those). The radar's
+// presence, heart rate and breathing rate are deliberately NOT on the tile (owner, 2026-11-20: five chips made it a tall
+// stack, and a heart-rate number on a glance-at-it tile is an unvalidated estimate): they are on the camera's Sensors
+// screen and, for a night, on the sleep card and timeline. Any other camera: exactly readingParts(mqtt).
+export function cameraReadingParts(camera, tempUnit) {
+  const live = camera?.nightlight_sensors;
+  if (!live || camera?.sensor_source !== 'nightlight-api') return readingParts(camera?.mqtt, tempUnit);
+  const m = live.metrics || {};
+  return usesCameraClimate(camera)
+    ? readingParts({ temperature: m.temperature, humidity: m.humidity }, tempUnit)
+    : readingParts(camera.mqtt, tempUnit);
 }
 
 // MM:SS for the running recording timer.
@@ -1121,6 +1137,8 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
           </div>
         </div>
+        {/* Every camera's chips stack in the same right-hand column, a Nightlight Camera's too (owner screenshot
+            2026-11-20: its side-by-side chips did not match the others). */}
         <div className="status-row">
           {snoozedUntil && (
             <span className="camera-tile__reading" title={`Alerts muted until ${snoozeText}`}>
@@ -1128,8 +1146,8 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               {snoozeLabel}
             </span>
           )}
-          {readingParts(camera.mqtt, settings.temp_unit).map(({ key, Icon, text }) => (
-            <span key={key} className="camera-tile__reading">
+          {cameraReadingParts(camera, settings.temp_unit).map(({ key, Icon, text, title }) => (
+            <span key={key} className="camera-tile__reading" title={title}>
               <Icon size={16} className="camera-tile__reading-icon" aria-hidden="true" />
               {text}
             </span>

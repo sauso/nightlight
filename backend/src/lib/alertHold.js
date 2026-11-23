@@ -3,7 +3,8 @@ import { logger } from './logger.js';
 import { childTracksSleep, childWindowKeyNow } from './sleepAnalysis.js';
 import { isChildAsleep } from './wakeWatcher.js';
 
-// #919: owner/design choice, not measured. The watcher's existing onset needs 15 quiet minutes.
+// #919: owner/design choice, not measured. The watcher can arm from two persistent live-onset
+// computes on the analysis camera or 15 observed quiet minutes; this cap still bounds the hold.
 export const HOLD_CAP_MS = 45 * 60 * 1000;
 const firstHeld = new Map(); // child id -> { key, firstAt, expired }
 

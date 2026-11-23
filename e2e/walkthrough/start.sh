@@ -7,8 +7,9 @@ set -eu
 export DATA_DIR=/app/data
 export DEMO_ASSET_DIR=/app/demo
 # The seed lays out "last night" in this zone; UTC is the default install's zone, so the captures show
-# what a fresh install shows.
-export DEMO_TIMEZONE=UTC
+# what a fresh install shows. run.sh passes another fixed-offset zone only when the clock is near the 19:00-07:00
+# sleep window, so the child page reads "Last night" whatever time of day the screenshots are taken.
+export DEMO_TIMEZONE=${WALKTHROUGH_TZ:-UTC}
 # Only read by the seed (the 14 fictional nights end now). DEMO_MODE is deliberately NOT set: the app runs
 # as an ordinary install so the captures can show saving, the review screen and a caregiver's view.
 DEMO_ENDS_AT=$(node -e 'console.log(new Date(Date.now() + 3600e3).toISOString())')

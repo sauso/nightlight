@@ -11,6 +11,7 @@ import { useHomeTime } from '../lib/useHomeTime.js';
 import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import WakeClipPlayerModal from '../components/WakeClipPlayerModal.jsx';
 import { ProtectedBadge } from '../components/ClipProtection.jsx';
+import { audioLabelText } from '../lib/audioLabel.js';
 
 // Admin Clip management: browse every recorded clip, filter by day, and bulk-select + delete. Deleting
 // removes the video only — the alert and its snapshot stay. Reachable from Settings (admin).
@@ -193,6 +194,7 @@ export default function ClipManagement() {
             const isWake = kind === 'wake';
             const when = parseUtc(clip.created_at);
             const label = isWake ? 'Wake-up clip' : (TYPE[clip.type]?.label || clip.type);
+            const audioLabel = !isWake && clip.type === 'sound' ? audioLabelText(clip.audio_label) : null;
             const thumbPath = isWake ? `/recordings/${clip.id}/thumb` : `/cameras/alerts/${clip.id}/snapshot`;
             const size = isWake ? clip.bytes : clip.clip_bytes;
             return <div key={`${kind}-${clip.id}`} className="clip-row">
@@ -205,7 +207,7 @@ export default function ClipManagement() {
               </button>
               <div className="clip-row__body" onClick={() => setPlaying({ kind, clip })}>
                 <div className="clip-row__name">{clip.camera_name}</div>
-                <div className="clip-row__meta"><ProtectedBadge /> {label}{isWake && clip.child_name ? ` · ${clip.child_name}` : ''}
+                <div className="clip-row__meta"><ProtectedBadge /> {label}{audioLabel && <span className="clip-protected-badge">{audioLabel}</span>}{isWake && clip.child_name ? ` · ${clip.child_name}` : ''}
                   {' · '}{home.dateTime(when)}{size ? ` · ${fmtBytes(size)}` : ''}</div>
               </div>
             </div>;
@@ -251,6 +253,7 @@ export default function ClipManagement() {
                   const Icon = t.Icon;
                   const when = parseUtc(c.created_at);
                   const checked = !c.protected && selected.has(c.id);
+                  const audioLabel = c.type === 'sound' ? audioLabelText(c.audio_label) : null;
                   return (
                     <div key={c.id} className={`clip-row${checked ? ' clip-row--sel' : ''}`}>
                       <label className="clip-row__check">
@@ -269,6 +272,7 @@ export default function ClipManagement() {
                         <div className="clip-row__meta">
                           <Icon size={13} className="alert-item__ico" aria-hidden="true" />
                           {t.label} · {home.time(when, { hour: '2-digit', minute: '2-digit' })}
+                          {audioLabel && <span className="clip-protected-badge">{audioLabel}</span>}
                           {c.clip_duration_s ? ` · ${c.clip_duration_s}s` : ''}{c.clip_bytes ? ` · ${fmtBytes(c.clip_bytes)}` : ''}
                            {!!c.protected && <ProtectedBadge />}
                         </div>

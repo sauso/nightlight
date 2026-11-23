@@ -176,6 +176,8 @@ const ROUTE_GATES = {
   'GET /api/cameras/clips/protected': ADMIN,
   'GET /api/cameras/:id/sensor-history': SIGNED_IN,
   'GET /api/cameras/:id/activity-history': SIGNED_IN,
+  'GET /api/cameras/:id/nightlight': ADMIN, //                  Nightlight Camera sensors: asks the camera now (a server-side request to its address)
+  'PUT /api/cameras/:id/nightlight': ADMIN, //                  switches its sensors on or off, per group; on re-asks the camera
   'GET /api/cameras/:id/recording-readiness': ADMIN, //        #394: read-only status for the camera settings page, which is admin-only
   'POST /api/cameras/clips/delete': ADMIN,
   'PUT /api/cameras/reorder': SIGNED_IN, //                     #675 (was ADMIN, #552): arranging the tiles is day-to-day; a non-admin's reorder that would change a tracked child's sleep camera is refused IN THE HANDLER (409, see header)

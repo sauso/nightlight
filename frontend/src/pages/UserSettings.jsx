@@ -275,7 +275,8 @@ function UserSettingsForm() {
           </>
         ) : (
           <form onSubmit={save}>
-            {error && <div className="error-banner">{error}</div>}
+            {/* #1093, Codex plan review 2026-11-17: re-issue/revoke failures need the same announcement as the invite panel. */}
+            {error && <div className="error-banner" role="alert">{error}</div>}
             {unsaved && (
               <UnsavedNotice restored={restored} onDiscard={discardDraft}
                 note={(isNew && !inviteMode) || form.password ? 'The password is not kept if this page reloads; enter it again.' : ''} />

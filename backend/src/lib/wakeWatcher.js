@@ -1,7 +1,8 @@
 import db from '../db.js';
 import { logger } from './logger.js';
 import { onMinuteFlushed } from './activityTracker.js';
-import { SLEEP_THRESHOLDS, childTracksSleep, childWindowActiveNow, childWindowKeyNow } from './sleepAnalysis.js';
+import { SLEEP_THRESHOLDS, childTracksSleep, childWindowActiveNow, childWindowKeyNow, currentNightDate, computeNight } from './sleepAnalysis.js';
+import { primaryCameraRowFor } from './primaryCamera.js';
 import { holdRing, releaseRing, isSegmenterRunning, ringOldestStartMs, ringHasFootageFor, clipCoverStartMs } from './clipRecorder.js';
 import { RING_OWNER, wakeCaptureHoldOwner } from './ringHolds.js';
 import { captureWakeClip, pruneWakeClips, getWakeClipSettings, WAKE_CLIP_LEAD_SEC } from './recordings.js';
@@ -19,9 +20,23 @@ import { captureWakeClip, pruneWakeClips, getWakeClipSettings, WAKE_CLIP_LEAD_SE
 // equal (#358): this is a streaming approximation, so the timeline can show a wake that has no clip.
 // What differs, read from sleepAnalysis.js (the nightly rule can use hindsight, this one cannot):
 //   * nightly, a minute is also active on motion OUTSIDE the bed (motion_out_peak); here it is not;
-//   * nightly scores ONE camera, the child's primary; this tracks every camera assigned to the child;
-//   * nightly applies the put-down/occupancy onset rules and the sound-witness rules around onset
-//     (SETTLING_WITNESS_MIN_QUIET, POST_ONSET_SOUND_WITNESS_MIN); this has only the ONSET_QUIET_MIN gate.
+//   * nightly scores ONE analysis camera; this tracks every camera assigned to the child;
+//   * that analysis camera arms after the current night's onset persists on two consecutive minute
+//     computes. Other cameras still need ONSET_QUIET_MIN observed quiet minutes.
+// Replayed with the real watcher code over stored minute rows from 60 staging / 62 production
+// child-nights: 60/60 and 62/62 armed (old 51/60 and 53/62); arm minus today's onset median
+// 16 min (old 36), p90 24 (old 333 / 173). Four nights in each database exceeded 30 min (old
+// 28 / 29): three onsets predated the window and one live onset was visible only in hindsight.
+// No live-onset arm preceded the owner's onset. Wakes with a clip: 330 to 385 staging, 341 to
+// 390 production; clips not near a wake: +53 / +47. Wakes starting before arm or on an unarmed
+// night: 171 to 9 / 159 to 9; 3 / 4 counted wakes were underway at arm, missing their opening.
+// Replay used today's window/camera settings, one camera per child, minute-end clip anchors,
+// no simulated restarts, and saw one cry event. Live clips can start ~57 s earlier. On a
+// development PC a compute took 2 ms median, 8 ms p95, ~250 ms worst; server cost unmeasured.
+// A live onset can be withdrawn; once armed this latch stays armed until the window key changes (#922).
+// Live computation lacks the completed night's
+// 150-minute occupancy guard (fails open past now) and microphone discount (#904, until 480
+// timeline minutes). Two results reduce, but cannot eliminate, a false early arm.
 // What this watcher itself does:
 //   * a minute is ACTIVE if in-bed motion or sound crosses its threshold;
 //   * a run of active minutes, bridging quiet gaps up to WAKE_GAP_MIN, is a WAKE once it contains
@@ -72,7 +87,7 @@ const SWEEP_INTERVAL_MS = 60 * 1000;
 const RESTART_LOG_MS = 15 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-// camera_id -> { asleep, latched, quietRun, run, lastAt, restartLogAt, restartsUnlogged, restartsLongest }
+// camera_id -> { window, asleep, latched, latchedWindow, pendingClearKey, quietRun, run, lastAt, restartLogAt, restartsUnlogged, restartsLongest }
 // run = { startMs, activeCount, lastActiveMs, captured, holding, holdFromMs }
 //   startMs = the clip's anchor (#412: first active frame, clamped to the ring); lastActiveMs = the END label of
 //   the last active minute (the bridge arithmetic and the stale-run sweep read it, so it is NOT the anchor)
@@ -101,7 +116,7 @@ let captureSeq = 0;
 function slot(cameraId) {
   let st = state.get(cameraId);
   if (!st) {
-    st = { asleep: false, latched: false, quietRun: 0, run: null, lastAt: null, restartLogAt: null, restartsUnlogged: 0, restartsLongest: 0 };
+    st = { window: null, asleep: false, latched: false, latchedWindow: null, pendingClearKey: null, quietRun: 0, onsetWindow: null, onsetLastAt: null, onsetLastComputeAt: null, onsetRun: 0, run: null, lastAt: null, restartLogAt: null, restartsUnlogged: 0, restartsLongest: 0 };
     state.set(cameraId, st);
   }
   return st;
@@ -124,7 +139,13 @@ function endRun(cameraId, st, why) {
 function resetMemory(cameraId, st) {
   endRun(cameraId, st, null);
   st.asleep = false;
+  // #922: forget the old key with the run, while retaining any failed persisted-row clear for retry.
+  st.window = null;
   st.quietRun = 0;
+  st.onsetWindow = null;
+  st.onsetLastAt = null;
+  st.onsetLastComputeAt = null;
+  st.onsetRun = 0;
   st.lastAt = null;
   st.restartLogAt = null;
   st.restartsUnlogged = 0;
@@ -139,6 +160,8 @@ const setLatchQ = db.prepare(`INSERT INTO wake_asleep_latch (camera_id, child_id
   VALUES (?, ?, ?, ?) ON CONFLICT(camera_id) DO UPDATE SET child_id = excluded.child_id,
   window_start_ms = excluded.window_start_ms, asleep_at = excluded.asleep_at`);
 const clearLatchQ = db.prepare('DELETE FROM wake_asleep_latch WHERE camera_id = ?');
+// #922: a retry for yesterday must not erase a latch saved under today's key.
+const clearLatchByKeyQ = db.prepare('DELETE FROM wake_asleep_latch WHERE camera_id = ? AND window_start_ms = ?');
 let lastLatchErrorAt = -Infinity;
 const latchWrites = { set: 0, clear: 0 }; // #1037: named test counter; no statement spying.
 
@@ -150,9 +173,10 @@ function latchError(message) {
   }
 }
 
-function clearLatch(cameraId) {
+function clearLatch(cameraId, key = state.get(cameraId)?.latchedWindow) {
   try {
-    clearLatchQ.run(cameraId);
+    if (key == null) clearLatchQ.run(cameraId);
+    else clearLatchByKeyQ.run(cameraId, key);
     latchWrites.clear++;
     return true;
   } catch (err) {
@@ -162,18 +186,64 @@ function clearLatch(cameraId) {
 }
 
 function reset(cameraId, st) {
+  const latchedKey = st.latchedWindow;
   resetMemory(cameraId, st);
   // #1037: only a successful clear forgets the persisted latch; repeated resets retry failures.
   if (st.latched && clearLatch(cameraId)) st.latched = false;
+  if (!st.latched) {
+    st.latchedWindow = null;
+    if (st.pendingClearKey === latchedKey) st.pendingClearKey = null;
+  } else st.pendingClearKey = latchedKey;
+}
+
+function retryPendingClear(cameraId, st) {
+  if (st.pendingClearKey == null) return;
+  const key = st.pendingClearKey;
+  // #922: retry the old row without resetting this window's quiet/onset progress.
+  if (clearLatch(cameraId, key)) {
+    st.pendingClearKey = null;
+    if (st.latchedWindow === key) { st.latched = false; st.latchedWindow = null; }
+  }
 }
 
 const cameraQ = db.prepare('SELECT id, name, child_id, disabled FROM cameras WHERE id = ?');
 const childCamerasQ = db.prepare('SELECT id FROM cameras WHERE child_id = ? AND disabled = 0');
 
-// #919: consult today's gate, since a stale asleep latch can survive briefly after a window closes.
+// One result per child, latch-window key and payload minute. Only the sleep camera asks for it;
+// a repeated label can reuse it, while a clock step or #922 window change cannot.
+const liveNightCache = new Map();
+const liveNightErrors = new Map();
+let liveNightProviderForTest = null;
+let failNextLiveNight = false;
+export function _setLiveNightProviderForTest(fn) { liveNightProviderForTest = fn; liveNightCache.clear(); }
+export function failNextLiveNightForTest() { failNextLiveNight = true; }
+
+function liveNightFor(childId, windowStart, at) {
+  const cached = liveNightCache.get(childId);
+  if (cached?.windowStart === windowStart && cached.at === at) return cached.night;
+  let night = null;
+  try {
+    const date = currentNightDate(childId);
+    if (date !== null) {
+      if (failNextLiveNight) { failNextLiveNight = false; throw new Error('test fault'); }
+      night = liveNightProviderForTest ? liveNightProviderForTest(childId, date, at) : computeNight(childId, date);
+    }
+  } catch {
+    if (liveNightErrors.get(childId) !== windowStart) {
+      logger.error(`[wake] live night unavailable for window starting ${new Date(windowStart).toISOString()}; using quiet rule`);
+      liveNightErrors.set(childId, windowStart);
+    }
+  }
+  liveNightCache.set(childId, { windowStart, at, night });
+  return night;
+}
+
+// #919/#922: consult today's gate and key, since a stale latch can survive a closure or a silent key flip.
 export function isChildAsleep(childId) {
   if (!childTracksSleep(childId) || !childWindowActiveNow(childId)) return undefined;
-  return childCamerasQ.all(childId).some(({ id }) => state.get(id)?.asleep === true);
+  const key = childWindowKeyNow(childId);
+  // #922: a silent camera can keep memory until the next sweep, but cannot release this night's hold.
+  return childCamerasQ.all(childId).some(({ id }) => state.get(id)?.asleep === true && state.get(id)?.window === key);
 }
 
 // 'YYYY-MM-DD HH:MM:00' (UTC, from activityTracker) -> epoch ms of the minute's START.
@@ -247,6 +317,15 @@ export function handleMinute(payload) {
     reset(cameraId, st);
     return null;
   }
+
+  const key = childWindowKeyNow(camera.child_id);
+  const changedWindow = st.window != null && st.window !== key;
+  if (changedWindow) {
+    // #922: the gate can remain open across nights; its key, not gate closure, ends the latch.
+    reset(cameraId, st);
+  }
+  st.window = key;
+  if (!changedWindow) retryPendingClear(cameraId, st);
 
   // ★ THE MINUTE IS HEARD AT ITS END (#447, resolved for the clip by #412). activityTracker labels a minute
   // by when its samples arrived and hands it over at that minute's END, within ~1 s (its flush tick). So
@@ -371,17 +450,8 @@ export function handleMinute(payload) {
     // issue: "time spent in a gap cannot count toward the 15 minutes"). Before, quietRun counted CALLBACKS, so
     // 14 quiet minutes, a 40-minute outage and 1 more quiet minute read as "15 quiet minutes" and armed the
     // watcher on a child whose last 40 minutes nobody saw. A hole restarts the count.
-    // ⚠️ Deliberately STRICTER than the nightly onset rule (sleepAnalysis.js), which accepts a 15-minute window
-    // with no active minute and >= ONSET_QUIET_MIN * MIN_COVERAGE_FRAC (8) confirmed-quiet minutes, because
-    // requiring a fully observed window regressed flaky cameras to `no_sleep` (#442). The live gate's only job
-    // is to keep bedtime settling OUT of the recorder, so the safe error here is arming LATE (a missed clip,
-    // never an alert). The price, stated: a camera that drops a minute more often than about every 15 minutes
-    // never arms. ANY hole restarts the count, even one missing minute (most holes are single minutes): on the
-    // saved 30-day snapshots of two cameras in one house that is roughly 20-25 holes per camera per month on one
-    // database and 45-50 on the other. What shows a night is rarely delayed is the old-vs-new replay of those 30
-    // days (#448 review): arming differed on exactly one night in four camera-months, 8 minutes later. Unknown on
-    // any other install. KNOWN-ISSUES.md says the same. If that is too strict, the nightly 8-of-15 rule is one
-    // function away; no new number needed.
+    // The quiet rule remains a fallback for null or failed live computes, margins and secondary
+    // cameras. A hole restarts this count, and also breaks the live-onset streak below.
     // #590: what this hole is about to cost, read BEFORE the count is reset. Only a hole that took real progress
     // away counts: with no quiet minutes yet there was nothing to lose, and an ACTIVE minute zeroes the count
     // on its own, so the hole is not what cost the progress then.
@@ -390,10 +460,9 @@ export function handleMinute(payload) {
     st.quietRun = active ? 0 : st.quietRun + 1;
     // ★ #590: the restart is announced AFTER the count changed (the order the `settled` line below uses), and
     // writes nothing the decisions read, so when the watcher arms is exactly what it was without this line.
-    // Why it exists: the strict rule above means a camera that drops a minute more often than about every
-    // 15 minutes never arms and records no wake clips, and until now that was SILENT: it looked the same in the
-    // log as a child who never settled. This line, repeating without a `settled` after it, is the evidence for
-    // whether the strict rule is too strict (KNOWN-ISSUES.md). Worded "readings N min apart" like the
+    // Why it exists: holes can prevent the quiet fallback from arming, especially on a secondary camera.
+    // This line, repeating without a `settled` after it, is evidence for that limit (KNOWN-ISSUES.md).
+    // Worded "readings N min apart" like the
     // `run ended` line: a forward clock jump is indistinguishable from a hole in the labels.
     // Rate limit (RESTART_LOG_MS) on the labels; `at < restartLogAt` lets a backward clock step through, or the
     // line would stay silent for as long as the step is deep. A label EQUAL to the last line's is held back
@@ -421,21 +490,51 @@ export function handleMinute(payload) {
         st.restartsLongest = Math.max(st.restartsLongest, lostMin);
       }
     }
-    if (st.quietRun >= ONSET_QUIET_MIN) {
+    const windowStart = key;
+    if (st.onsetWindow !== windowStart) {
+      st.onsetWindow = windowStart;
+      st.onsetLastAt = null;
+      st.onsetLastComputeAt = null;
+      st.onsetRun = 0;
+    }
+    let liveOnset = false;
+    let computedAt = null;
+    // The scoring camera is resolved by the same helper as computeNight. Secondary cameras
+    // keep the quiet rule without paying for a full live night every minute.
+    if (windowStart !== null && st.quietRun < ONSET_QUIET_MIN &&
+        primaryCameraRowFor(camera.child_id, { tieBreak: 'id' })?.id === cameraId) {
+      const night = liveNightFor(camera.child_id, windowStart, at);
+      // #922: a 24-hour window's new lead still computes the previous night until its start.
+      const nightStart = night?.window_start == null ? NaN : Date.parse(
+        night.window_start.includes('T') ? night.window_start : `${night.window_start.replace(' ', 'T')}Z`);
+      liveOnset = night?.in_progress === true && night.analysis_camera_id === cameraId &&
+        night.onset_at != null && nightStart === st.window;
+      // The minute labels can be delivered in one event-loop tick after a stall. Require
+      // the live calculation's own clock to advance too; as_of is UTC SQL time.
+      const asOfMs = night?.as_of == null ? Date.now() : Date.parse(
+        night.as_of.includes('T') ? night.as_of : `${night.as_of.replace(' ', 'T')}Z`);
+      computedAt = Number.isFinite(asOfMs) ? asOfMs : Date.now();
+    }
+    st.onsetRun = liveOnset ? (st.onsetLastAt === at - MINUTE_MS && elapsedMin === 1 &&
+      computedAt - (st.onsetLastComputeAt ?? -Infinity) >= MINUTE_MS - 1000 ? st.onsetRun + 1 : 1) : 0;
+    st.onsetLastAt = at;
+    st.onsetLastComputeAt = liveOnset ? computedAt : null;
+    if (st.quietRun >= ONSET_QUIET_MIN || st.onsetRun >= 2) {
+      const liveRule = st.onsetRun >= 2;
       st.asleep = true;
       st.quietRun = 0;
       // #1037: the window start is the latch's identity. Keep the in-memory decision even if
       // the window changes at this instant or SQLite fails; only a successful write arms clearing.
       try {
-        const windowStart = childWindowKeyNow(camera.child_id);
         if (windowStart === null) latchError('save skipped: no open window');
         else {
           setLatchQ.run(cameraId, camera.child_id, windowStart, Date.now());
           latchWrites.set++;
           st.latched = true;
+          st.latchedWindow = windowStart;
         }
       } catch (err) { latchError(`save failed: ${err.message}`); }
-      logger.info(`[wake] "${camera.name}" settled — watching for wakes`);
+      logger.info(`[wake] "${camera.name}" settled — watching for wakes${liveRule ? " (night's onset)" : ''}`);
     }
     return null;
   }
@@ -623,6 +722,15 @@ export function sweepStaleRuns(now = Date.now()) {
     if (!watchedNow(cameraQ.get(cameraId))) {
       reset(cameraId, st);
     }
+    const camera = cameraQ.get(cameraId);
+    const watched = watchedNow(camera);
+    const changedWindow = watched && st.window != null && st.window !== childWindowKeyNow(camera.child_id);
+    if (changedWindow) {
+      // #922: a silent camera needs the same new-night reset as a reporting camera.
+      reset(cameraId, st);
+      st.window = childWindowKeyNow(camera.child_id);
+    }
+    if (watched && !changedWindow) retryPendingClear(cameraId, st);
   }
   return swept;
 }
@@ -655,6 +763,8 @@ export function startWakeWatcher() {
       const st = slot(row.camera_id);
       st.asleep = true;
       st.latched = true;
+      st.window = row.window_start_ms;
+      st.latchedWindow = row.window_start_ms;
       const iso = (value) => Number.isSafeInteger(value) && Number.isFinite(new Date(value).getTime())
         ? new Date(value).toISOString() : 'invalid time';
       logger.info(`[wake] resumed asleep latch for "${camera.name}" (window starting ${iso(row.window_start_ms)}, saved ${iso(row.asleep_at)})`);
@@ -687,6 +797,10 @@ export function stopWakeWatcher() {
   // #1037: stopping is a restart path; clearing the database here would recreate the alert hold.
   for (const [cameraId, st] of state) resetMemory(cameraId, st);
   state.clear();
+  liveNightCache.clear();
+  liveNightErrors.clear();
+  liveNightProviderForTest = null;
+  failNextLiveNight = false;
 }
 
 /** Test seam: current per-camera watcher state. */

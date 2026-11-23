@@ -9,7 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **Protected clips** | An admin protects an alert or wake clip | As for the original clip | Never removed automatically | In the protected clips list |
-| **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page (the newest three, then **See all recordings**) |
+| **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page (the newest three, then **See all recordings** and **Show older recordings**) |
 | **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The **Room activity** list in the night's sleep detail, under a row you open (signed-in users only) |
 
 All three are configured under **Settings → Camera and recording → Recording** (admin only), and all three write to the same
@@ -40,6 +40,7 @@ because a straight copy can only cut on a keyframe and the clip has to be exactl
 |---|---|---|---|
 | Pre-roll (seconds) | 5 | 0–30 | How much *before* the trigger is included |
 | Post-roll (seconds) | 15 | 5–120 | How much *after* the trigger is included |
+| Listen for crying, coughing and talking in alert clips | On (1) | 0 or 1 | Analyses saved alert clips on this device; nothing leaves it. Sound alerts can show a Crying, Coughing or Talking badge, in the alert lists, the Clips page and the wake-ups on a night's sleep page; other results show no badge. Older alerts, from before this analysis was added, have no badge. Labels are best-effort, particularly coughing and talking. Only crying can affect the nightly sleep figures. Turning it off also makes sleep analysis ignore labels already saved. |
 | Keep clips for (days) | 14 | 0–365 | Sets the day limit for unprotected alert videos; 0 turns that limit off. Whatever this is set to, Recent alerts keeps at most 30 days and 2,000 unprotected entries: older unprotected alerts, with their clips and pictures, are removed as new alerts are recorded. Protected alerts are kept. |
 | Storage cap (GB) | 5 | 0–2000 | 0 = no size limit; oldest deleted first |
 
@@ -151,12 +152,23 @@ that gap without making alerts noisier.
 **What is and isn't recorded**
 
 - Only for children with **Track sleep** on (per child, under the child's settings).
-- Only **once your child is actually asleep** — settling at bedtime is never recorded. "Asleep" here
-  means **15 quiet minutes in a row that the camera actually reported**; a minute the camera reported
-  nothing for starts the count again, and so does a minute with sound but no video when the camera's video
-  has stalled (such a minute is not counted as seen, as on the sleep timeline). That is stricter than the
-  sleep timeline's own rule, so after an outage in the evening recording can start later than the
-  timeline's bedtime (a camera that drops a minute more often than about every 15 minutes never starts).
+- Only once the watcher has detected sleep. The child's sleep camera can start from the current night's
+  onset after it persists on two consecutive minute calculations; every camera can also start after
+  **15 quiet minutes in a row that the camera actually reported**. A missing minute or a video stall
+  breaks that quiet count. The live-onset path can cover wakes during a restless settle; in a replay
+  with the real watcher code over stored minute rows from 60 staging and 62 production
+  child-nights, wakes with a clip rose from 330 to 385 and 341 to 390. Clips not near a wake
+  rose by 53 and 47. All 60 and 62 nights armed (previously 51 and 53); the arm was 16 minutes
+  after today's onset at the median (previously 36), 24 minutes at the 90th percentile
+  (previously 333 and 173). Four nights in each database took over 30 minutes (previously
+  28 and 29): three onsets predated the window, and one was visible only in hindsight.
+  No live-onset arm preceded the owner's onset. Wakes beginning before an arm or on an unarmed
+  night fell from 171 to 9 and 159 to 9; 3 and 4 counted wakes were already underway at the
+  arm, missing their opening. The replay used today's window and camera settings for every
+  night, one camera per child, minute-end clip anchors (live clips can start about 57 seconds
+  earlier), no simulated restarts and contained one cry event. A live-night calculation took
+  2 ms median, 8 ms at the 95th percentile and up to about 250 ms on a development PC;
+  server hardware was not measured. Results have not been measured on other installations.
   Once started, a gap does not stop it. If the server restarts during that sleep window, the saved
   asleep result lets wake-clip recording resume at once, which may mean more wake clips after a restart.
 - Only for a real wake-up: a brief **stir is ignored**, using the same threshold the sleep timeline
@@ -168,7 +180,7 @@ that gap without making alerts noisier.
   exactly as on the timeline. This applies to a camera that has delivered video since the server started; a
   camera with no video at all keeps using its sound. The numbers (3 minutes, 5 active minutes, 15 quiet
   minutes) are fixed, not settings, are the sleep timeline's own, and were tuned on nights from two cameras in
-  one house (not validated elsewhere). See "A wake recording does not bridge a gap in the readings" in
+  one house (not validated elsewhere). See "A wake recording does not bridge a long gap in the readings" in
   [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 - The clip starts at the **beginning** of the wake-up, not when it was confirmed — the opening is the
   part that explains why. Precisely: it starts about 2 to 3 seconds before the first frame that showed movement or
@@ -191,7 +203,9 @@ have no clip and a clip can sit where the timeline shows no wake. The two apply 
 not the same rules: the nightly analysis also counts movement **outside the bed** as activity (the live
 watcher sees only bed motion and sound), scores **one camera** (the child's primary), and applies the
 put-down and onset rules (including how it treats sound around bedtime and just after falling asleep)
-that the live watcher does not have. The live watcher tracks **every camera assigned to the child**.
+that the live watcher does not have. The live watcher tracks **every camera assigned to the child**,
+but only the sleep camera can arm from the night's onset. Once armed, a withdrawn onset does
+not stop recording for that window.
 
 **Settings → Camera and recording → Recording → Wake clips**
 
@@ -302,8 +316,8 @@ pressing Save successfully or pressing **Discard changes** removes it. The draft
 device only and is never sent anywhere.
 
 Recordings appear in the **Recordings** card on the child's page, listed like the **Recent alerts** card beside it: the newest
-three, each with a thumbnail, the camera and the time, and a **See all recordings** button for the rest (which becomes
-**Show fewer**). **They are never deleted
+three, each with a thumbnail, the camera and the time, and a **See all recordings** button for the loaded rows (which becomes
+**Show fewer**). Past the newest 50, **Show older recordings** loads 50 more at a time; an exact last page of 50 takes one more tap to confirm the end. New recordings appear at the top on refresh, not inside older pages. **They are never deleted
 automatically** — unlike the other two kinds, these are keepsakes someone chose to keep, so deleting
 one is the only way to reclaim its space. **Only an admin can delete one**; anyone signed in, caregivers
 included, can record, watch and download (see [Who can delete](#who-can-delete)).

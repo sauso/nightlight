@@ -37,7 +37,7 @@ let delSpy;
 function mockApi({ users = USERS, sessions = [], usersFails = null } = {}) {
   vi.spyOn(api, 'get').mockImplementation((path) => {
     if (path === '/auth/users') return usersFails ? Promise.reject(new Error(usersFails)) : Promise.resolve(users);
-    if (path === '/auth/sessions/all') return Promise.resolve(sessions);
+    if (path === '/auth/sessions/all') return Promise.resolve(typeof sessions === 'function' ? sessions() : sessions);
     return Promise.resolve(null);
   });
   postSpy = vi.spyOn(api, 'post').mockResolvedValue({});
@@ -123,13 +123,29 @@ describe('the caregiver list', () => {
     // ⚠️ These timestamps are what the API actually sends: SQLite datetimes with NO timezone marker,
     // which the component reads as UTC by appending 'Z'. Built as offsets from now so they cannot rot.
     const agoIso = (ms) => new Date(Date.now() - ms).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-    // Two accounts' sessions, the first account with TWO so its count is not 1. The API names the owner by
-    // `username` only (no user id), which is what the page joins on.
+    // #1093, Codex plan review 2026-11-17: two accounts' sessions, with two for the first owner.
+    // The API carries the stable owner id alongside its existing username.
     const SESSIONS = [
-      { id: 's1', username: 'nacho', device: 'Chrome on Windows', is_current: true, last_seen_at: agoIso(30 * 1000) },
-      { id: 's2', username: 'nanny', device: 'Safari on iPhone', is_current: false, last_seen_at: agoIso(3 * 3600 * 1000) },
-      { id: 's3', username: 'nacho', device: 'Firefox on Linux', is_current: false, last_seen_at: agoIso(2 * 24 * 3600 * 1000) },
+      { id: 's1', user_id: ME.id, username: 'nacho', device: 'Chrome on Windows', is_current: true, last_seen_at: agoIso(30 * 1000) },
+      { id: 's2', user_id: NANNY.id, username: 'nanny', device: 'Safari on iPhone', is_current: false, last_seen_at: agoIso(3 * 3600 * 1000) },
+      { id: 's3', user_id: ME.id, username: 'nacho', device: 'Firefox on Linux', is_current: false, last_seen_at: agoIso(2 * 24 * 3600 * 1000) },
     ];
+
+    test('#1093 sessions follow user_id across a rename race and username collision', async () => {
+      // #1093, Codex plan review 2026-11-17: stale and colliding usernames must not move a session to another row.
+      const renamedUsers = [{ ...ME, username: 'renamed' }, NANNY];
+      const staleSessions = [
+        { ...SESSIONS[0], username: 'nacho' },
+        { ...SESSIONS[1], username: 'renamed' },
+      ];
+      mockApi({ users: renamedUsers, sessions: staleSessions });
+      const { user } = mountList();
+      await user.click(await waitForToggle('Nacho Leone'));
+      expect(screen.getByText('Chrome on Windows (this device)')).toBeVisible();
+      expect(screen.getByText('Safari on iPhone')).not.toBeVisible();
+      await user.click(await waitForToggle('Nanny McPhee'));
+      expect(screen.getByText('Safari on iPhone')).toBeVisible();
+    });
 
     // The down arrow of an account, found by its accessible name (the count is part of it).
     const toggleFor = (name) => screen.getByRole('button', { name: new RegExp(`^Show sessions for ${name}, \\d+ active$`) });
@@ -319,6 +335,38 @@ describe('the caregiver list', () => {
       await waitFor(() => expect(api.get).toHaveBeenCalledTimes(4)); // the initial pair, then the reload
     });
 
+    test('#1093 signing out a last session returns focus to that user row after its arrow disappears', async () => {
+      // Codex plan review 2026-11-17: the reload must actually remove the clicked button and its arrow.
+      let remaining = [...SESSIONS];
+      mockApi({ sessions: () => remaining });
+      delSpy.mockImplementation(async (path) => { remaining = remaining.filter((s) => path !== `/auth/sessions/${s.id}`); });
+      const { user } = mountList();
+      const row = await sessionRow(user, 'Nanny McPhee', 'Safari on iPhone');
+      const signOut = within(row).getByRole('button', { name: 'Sign out' });
+      await user.click(signOut);
+      await waitFor(() => expect(signOut).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByRole('button', { name: /Show sessions for Nanny McPhee/ })).not.toBeInTheDocument());
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByText('Nanny McPhee').closest('.user-row__open')));
+    });
+
+    test('#1093 a second sign-out on the same user returns focus again', async () => {
+      // Codex plan review 2026-11-17: a pending key left set would make the second focus effect a no-op.
+      const extra = { ...SESSIONS[1], id: 's4', device: 'Second device' };
+      let remaining = [...SESSIONS, extra];
+      mockApi({ sessions: () => remaining });
+      delSpy.mockImplementation(async (path) => { remaining = remaining.filter((s) => path !== `/auth/sessions/${s.id}`); });
+      const { user } = mountList();
+      const first = await sessionRow(user, 'Nanny McPhee', 'Safari on iPhone');
+      const openControl = screen.getByText('Nanny McPhee').closest('.user-row__open');
+      await user.click(within(first).getByRole('button', { name: 'Sign out' }));
+      await waitFor(() => expect(first).not.toBeInTheDocument());
+      await waitFor(() => expect(document.activeElement).toBe(openControl));
+      const second = screen.getByText('Second device').closest('.list-row');
+      await user.click(within(second).getByRole('button', { name: 'Sign out' }));
+      await waitFor(() => expect(second).not.toBeInTheDocument());
+      await waitFor(() => expect(document.activeElement).toBe(openControl));
+    });
+
     test('★ signing out your OWN session logs you out locally instead of reloading', async () => {
       // The session is gone server-side, so every request the reload makes would 401 and the app
       // would sit on a broken screen until something noticed. Logging out is the honest response.
@@ -362,6 +410,15 @@ describe('adding and editing a caregiver', () => {
   beforeEach(() => mockApi());
 
   describe('editing', () => {
+    test('#1093: a failed invite re-issue is announced as an alert', async () => {
+      // Codex plan review 2026-11-17: the banner was visible but had no live alert role on the edit form.
+      mockApi({ users: [ME, { ...NANNY, password_set: false, invite_expires_at: null }] });
+      postSpy.mockRejectedValue(new Error('Could not issue invite'));
+      const { user } = mountEdit();
+      await user.click(await screen.findByRole('button', { name: 'Show a new invite' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('Could not issue invite');
+    });
+
     test('loads the caregiver into the form, with the password box empty', async () => {
       mountEdit();
       expect((await screen.findByLabelText('First name')).value).toBe('Nanny');

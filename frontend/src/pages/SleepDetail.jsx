@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { Calendar, SlidersHorizontal, ChevronDown, Moon, DoorOpen, Sunrise, Thermometer, Sparkles, Zap, AudioLines, Play, Video, HeartPulse, Wind } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -11,6 +11,7 @@ import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
 import WakeClipPlayerModal from '../components/WakeClipPlayerModal.jsx';
 import { ProtectedBadge } from '../components/ClipProtection.jsx';
+import { audioLabelText } from '../lib/audioLabel.js';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
@@ -24,6 +25,7 @@ import { addDays, nightDetailPath, describeSettings } from '../lib/nightView.js'
 import { timelineDrawingSegments } from '../lib/timelineDrawing.js';
 import { splitMorningWake } from '../lib/nightWakes.js';
 import { markerLeft, tickLabelAlign } from '../lib/timelineEdges.js';
+import SimulatedBadge from '../components/SimulatedBadge.jsx';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -863,6 +865,9 @@ export function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
 // thumbnail becomes a play button that opens the same clip player used in the alert feed.
 function AlertRow({ a, fmtTime, onPlay }) {
   const hasClip = a.clip_status === 'ready';
+  // Same rule as the alert lists (#1159): only a sound alert shows what the clip's audio was heard to be. The alert query
+  // returns the stored label on any row, so the type check lives here, as it does in AlertList and RecentAlerts.
+  const heard = a.type === 'sound' ? audioLabelText(a.audio_label) : null;
   const thumb = a.snapshot ? (
     <img className="sleep-wakes__thumb" src={api.url(`/cameras/alerts/${a.id}/snapshot`)} alt="" loading="lazy" />
   ) : (
@@ -880,7 +885,7 @@ function AlertRow({ a, fmtTime, onPlay }) {
         <span className="sleep-wakes__thumbwrap">{thumb}</span>
       )}
       <div className="sleep-wakes__alert-body">
-        <span className="sleep-wakes__alert-label">{alertLabel(a.type)}{a.clip_status === 'pending' ? ' · recording…' : ''}{hasClip && !!a.protected && <ProtectedBadge />}</span>
+        <span className="sleep-wakes__alert-label">{alertLabel(a.type)}{a.clip_status === 'pending' ? ' · recording…' : ''}{hasClip && !!a.protected && <ProtectedBadge />}{heard && <span className="clip-protected-badge">{heard}</span>}</span>
         <span className="sleep-wakes__alert-meta">
           {fmtTime(a.created_at)}{a.camera_name ? ` · ${a.camera_name}` : ''}{a.detail ? ` · ${a.detail}` : ''}
         </span>
@@ -969,7 +974,9 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
   // Hover bubble: as the cursor (or a finger) moves across the bar, show the time under it, the sleep
   // status at that moment, and — if the room had a sensor — the temperature then. `null` = not hovering.
   const barRef = useRef(null);
+  const tipRef = useRef(null);
   const [hover, setHover] = useState(null);
+  const [tipLeft, setTipLeft] = useState(null);
   const [barWidth, setBarWidth] = useState(0);
   // The side gaps need actual screen space. Eight pixels leaves a visible block after both 2px gaps;
   // it is a drawing threshold, unrelated to the minutes used for sleep analysis.
@@ -1034,6 +1041,18 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
     setHover({ pct: f * 100, time: fmtMs(ms), status: labelFor(stateAt(ms)), temp: tempAt(ms), hr: vitalAt(ms, 'hr'), rr: vitalAt(ms, 'rr') });
   }
 
+  useLayoutEffect(() => {
+    if (!hover || !tipRef.current || !barRef.current) return;
+    const width = barRef.current.getBoundingClientRect().width;
+    const tipWidth = tipRef.current.getBoundingClientRect().width;
+    if (!width || !tipWidth) return;
+    // #1093, Codex plan review 2026-11-17: clamp the bubble's centre, while the cursor keeps the true minute.
+    const half = Math.min(tipWidth, width) / 2;
+    setTipLeft(Math.max(half, Math.min(width - half, width * hover.pct / 100)));
+    // `barWidth` (the ResizeObserver's state, above) is a dependency so a bar that narrows while a bubble is open
+    // re-clamps it (Codex code review of #1154, P2) instead of leaving the old pixel position.
+  }, [hover, barWidth]);
+
   // A night still running: the bar is drawn from the start to NOW (display_end is clipped to the analysed minutes), so the
   // window's configured end (7 am) is not where the bar ends. The owner saw "7:00 pm ... 7:00 am" under a bar that stopped at
   // 8:31 pm (2026-11-14). Finished nights are left exactly as they were.
@@ -1047,11 +1066,12 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
     // directly above "7:00 pm" read as a repeat.
     const every = live && totalMs <= 4 * 3600000 ? 1 : 2;
     let ms = Math.ceil(startMs / 3600000) * 3600000;
-    let n = 0;
-    for (; ms <= endMs; ms += 3600000, n++) {
+    let eligible = 0;
+    for (; ms <= endMs; ms += 3600000) {
       const pct = ((ms - startMs) / totalMs) * 100;
       const onEnd = live && (pct < 1 || pct > 99);
-      out.push({ pct, label: n % every === 0 && !onEnd ? shortHour(ms, tz) : null });
+      // #1093, Codex plan review 2026-11-17: skipped end ticks do not consume label parity.
+      out.push({ pct, label: !onEnd && eligible++ % every === 0 ? shortHour(ms, tz) : null });
     }
     return out;
   }, [startMs, endMs, totalMs, tz, live]);
@@ -1114,7 +1134,7 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
           {nowPct != null && <span className="sleep-tl__now" style={{ left: `${nowPct}%` }} title="as of now" />}
         </div>
         {hover && (
-          <div className="sleep-tl__tip" style={{ left: `${hover.pct}%` }} aria-hidden="true">
+          <div className="sleep-tl__tip" ref={tipRef} style={{ left: tipLeft == null ? `${hover.pct}%` : `${tipLeft}px` }} aria-hidden="true">
             <span className="sleep-tl__tip-time">{hover.time}</span>
             <span className="sleep-tl__tip-status">{hover.status}</span>
             {hover.temp && <span className="sleep-tl__tip-temp"><Thermometer size={11} aria-hidden="true" />{hover.temp}</span>}
@@ -1180,6 +1200,11 @@ function LineTrack({ points, startMs, endMs, color, icon, label, caption, format
     .filter((run) => run.length > 1)
     .map((run) => `${runPath(run)} L${run[run.length - 1].x.toFixed(2)} ${H} L${run[0].x.toFixed(2)} ${H} Z`)
     .join(' ');
+  // A hole in the data is bridged by a DASHED straight line from the last reading before it to the first after it, so the
+  // track reads as one continuous trace instead of scattered pieces (owner, 2026-11-19). The dashes are the statement that
+  // nothing was measured there: the solid line above stays real readings only, and the vitals note says what dashes mean.
+  // Never drawn before the first or after the last reading (nothing to join), and never filled like the area.
+  const bridges = runs.slice(1).map((run, i) => `M${at(runs[i][runs[i].length - 1])} L${at(run[0])}`).join(' ');
 
   return (
     <div className={`sleep-climate${className ? ` ${className}` : ''}`}>
@@ -1192,6 +1217,12 @@ function LineTrack({ points, startMs, endMs, color, icon, label, caption, format
           <path d={area} fill={color} opacity="0.12" />
           <path d={d} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke"
             strokeLinejoin="round" strokeLinecap="round" />
+          {bridges && (
+            // Third <path>, after the solid stroke, so the stroke stays the second path of the svg (the tests and the
+            // area/stroke order rely on it). Dashes are in screen pixels because of the non-scaling stroke.
+            <path className="sleep-climate__bridge" d={bridges} fill="none" stroke={color} strokeWidth="1.5" strokeDasharray="3 3"
+              opacity="0.7" vectorEffect="non-scaling-stroke" strokeLinecap="butt" />
+          )}
         </svg>
         <span className="sleep-climate__hi">{format(labelsFromData ? dataMax : max)}</span>
         <span className="sleep-climate__lo">{format(labelsFromData ? dataMin : min)}</span>
@@ -1226,7 +1257,8 @@ function ClimateTrack({ night, startMs, endMs, tempUnit }) {
 
 // The radar sensor's heart rate and breathing across the same axis, as two thin tracks under the temperature one (`night.vitals`,
 // from the server; the 5-minute series only comes with the detail read). Each needs two points, else nothing is drawn. A hole in
-// the data is a hole in the line (VITALS_GAP_MS), never a line drawn through it. The caption is the server's summary, which is over
+// the data is a hole in the SOLID line (VITALS_GAP_MS); since 2026-11-19 a dashed bridge joins the two sides and a legend says it is
+// an estimate, so the solid line never claims a reading that was not taken. The caption is the server's summary, which is over
 // the time asleep (onset to wake), while the tracks show the whole timeline: a settling child or a parent at the bed can be on the
 // line but is not in the average. ⚠️ A SENSOR ESTIMATE, not a medical measurement: the sleep page says so under the tracks, and
 // nothing here is coloured as a warning.
@@ -1239,6 +1271,9 @@ function VitalsTracks({ night, startMs, endMs }) {
   const rr = pointsOf('rr');
   const showHr = hr.length >= 2;
   const showRr = rr.length >= 2;
+  // The same test LineTrack uses to start a new run, so the legend appears exactly when a dashed bridge is drawn. A track that
+  // is not shown (under two points) has no bridge, so it must not trigger the legend either.
+  const hasHole = (pts) => pts.length >= 2 && pts.some((p, i) => i > 0 && p.ms - pts[i - 1].ms > VITALS_GAP_MS);
   if (!showHr && !showRr) return null;
   // "avg 82 bpm · 71–103" from the summary when the server sent one for that role. With NO summary (valid readings in the
   // display span but none between onset and wake, so the track draws and its caption used to be blank) the range of the
@@ -1260,7 +1295,18 @@ function VitalsTracks({ night, startMs, endMs }) {
           className={`sleep-climate--rr${showHr ? ' sleep-climate--next' : ''}`} icon={<Wind size={13} aria-hidden="true" />} label="Breathing"
           caption={captionOf(vitals.rr, '/min', rr)} format={(v) => String(Math.round(v))} />
       )}
-      <div className="sleep-vitals__note">Sensor estimates from the radar, not for medical use.</div>
+      <div className="sleep-vitals__note">
+        Sensor estimates from the radar, not for medical use.
+        {/* Only when a used minute came from a camera running invented bench data (the server adds the flag then and only then). */}
+        {vitals.simulated === true && <> <SimulatedBadge /></>}
+      </div>
+      {/* Only when a dashed bridge is actually drawn on one of the tracks. */}
+      {(hasHole(hr) || hasHole(rr)) && (
+        <div className="sleep-vitals__legend">
+          <svg width="22" height="6" viewBox="0 0 22 6" aria-hidden="true"><path d="M0 3 L22 3" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 3" fill="none" /></svg>
+          <span>Estimated: no data was available</span>
+        </div>
+      )}
     </>
   );
 }
@@ -1320,6 +1366,20 @@ function SleepInsights({ childId, tempUnit, childName }) {
     );
   }
 
+  // Owner decision 2026-11-17 (#365, Codex plan review): a single-night-sensitive hint is not
+  // a headline. The server supplies its direction; showing averages here would imply a firm result.
+  if (ins.verdict === 'unstable') {
+    return (
+      <div className="card sleep-insight">
+        <div className="sleep-insight__title"><Sparkles size={15} aria-hidden="true" /> Sleep &amp; room temperature</div>
+        <div className="sleep-insight__body">
+          There is a hint that warmer nights go with {ins.direction === 'fewer' ? 'fewer' : 'more'} wake-ups for {name}, but it does not hold up if a single night is left out, so it is not reported as a pattern yet.
+        </div>
+        <div className="sleep-insight__foot">Based on {ins.nights_analyzed} tracked nights ({cool?.nights ?? 0} cooler, {warm?.nights ?? 0} warmer).</div>
+      </div>
+    );
+  }
+
   let headline;
   if (ins.verdict === 'warm_more_wakes') headline = `Warmer nights tend to mean more wake-ups for ${name}.`;
   else if (ins.verdict === 'warm_fewer_wakes') headline = `Warmer nights actually saw fewer wake-ups for ${name}.`;
@@ -1347,7 +1407,7 @@ function SleepInsights({ childId, tempUnit, childName }) {
         </div>
       )}
       <div className="sleep-insight__foot">
-        Based on {ins.nights_analyzed} tracked nights{ins.overall?.avg_humidity != null ? ` · ${ins.overall.avg_humidity}% avg humidity` : ''}.
+        Based on {ins.nights_analyzed} tracked nights ({cool?.nights ?? 0} cooler, {warm?.nights ?? 0} warmer).{ins.overall?.avg_humidity != null ? ` ${ins.overall.avg_humidity}% avg humidity.` : ''}
         A pattern, not a cause — lots of things affect sleep.
       </div>
     </div>

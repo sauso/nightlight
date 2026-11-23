@@ -5,6 +5,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import ClipPlayerModal from './ClipPlayerModal.jsx';
 import { ProtectedBadge } from './ClipProtection.jsx';
+import { audioLabelText } from '../lib/audioLabel.js';
 
 // A child's "Recent alerts" card (UI refresh PR D, the approved design): one row per alert with a snapshot thumbnail, the kind
 // (icon + word) and the CLOCK TIME it happened, in the home timezone. It used to say "3h ago"; a parent reading the page
@@ -59,6 +60,7 @@ export default function AlertList({ alerts, onChanged, title, previewCount = Inf
           const hasTime = !Number.isNaN(when.getTime());
           const hasClip = ev.clip_status === 'ready';
           const clipPending = ev.clip_status === 'pending';
+          const audioLabel = ev.type === 'sound' ? audioLabelText(ev.audio_label) : null;
           const Thumb = ev.snapshot ? (
             <img className="alert-item__thumb" src={api.url(`/cameras/alerts/${ev.id}/snapshot`)} alt="" loading="lazy" />
           ) : (
@@ -74,6 +76,7 @@ export default function AlertList({ alerts, onChanged, title, previewCount = Inf
                 <span className="alert-item__name">
                   <Icon size={16} className="alert-item__ico" aria-hidden="true" />
                   <span className="alert-item__nametext">{t.label}</span>
+                  {audioLabel && <span className="clip-protected-badge">{audioLabel}</span>}
                   {clipPending && (
                     <span className="rec-badge" title="Recording clip…">
                       <span className="rec-dot" aria-hidden="true" />REC
