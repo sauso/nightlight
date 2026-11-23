@@ -5,7 +5,7 @@
 # Why a script of its own: the JS catalogue (scripts/mutants.json, scripts/mutate.mjs) only mutates JS, and the test
 # is skipped on Windows (NTFS has no POSIX modes), where it would report every mutant as surviving. So this runs on
 # Linux only, as an unprivileged user: in CI (.github/workflows/test.yml, the `unit` job, next to the same test run
-# inside node:24-alpine for BusyBox), or by hand: `bash scripts/entrypoint-umask.mutants.sh`.
+# inside node:26-alpine for BusyBox), or by hand: `bash scripts/entrypoint-umask.mutants.sh`.
 #
 # Mutants run from a temp copy (ENTRYPOINT_UNDER_TEST), never in place. A mutant that does not PARSE (sh -n) is an
 # ERROR, never a "kill": a broken script fails every test for the wrong reason (the rule the gate's mutants follow).

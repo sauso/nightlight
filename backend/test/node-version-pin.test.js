@@ -159,6 +159,32 @@ test('every workflow that sets up Node uses that major', () => {
   }
 });
 
+// A scan that only checks the pins it FINDS lets a `setup-node` step with no `node-version` through: that step runs the
+// runner's default Node and nothing here notices (found by the review of the #751 move to 26, by deleting one pin from
+// test.yml in memory: both tests above still passed). So each workflow must have exactly as many `node-version` pins as
+// it has `setup-node` steps (comments ignored).
+export function countSetupNodeSteps(text) {
+  return text.split(/\r?\n/).filter((l) => !/^\s*#/.test(l) && /\buses:\s*actions\/setup-node@/.test(l)).length;
+}
+
+test('the setup-node step counter ignores comments and counts each step', () => {
+  assert.equal(countSetupNodeSteps('      - uses: actions/setup-node@abc # v7\n'), 1);
+  assert.equal(countSetupNodeSteps('# `Post Run actions/setup-node@v7 -> skipped`\n  - uses: actions/setup-node@abc\n  - uses: actions/setup-node@def\n'), 2);
+  assert.equal(countSetupNodeSteps('      - uses: actions/checkout@abc\n'), 0);
+});
+
+test('every setup-node step in a workflow has its own node-version pin', () => {
+  const dir = path.join(REPO, '.github', 'workflows');
+  let steps = 0;
+  for (const f of fs.readdirSync(dir).filter((n) => /\.ya?ml$/.test(n))) {
+    const text = fs.readFileSync(path.join(dir, f), 'utf8');
+    const n = countSetupNodeSteps(text);
+    steps += n;
+    assert.equal(scanNodeVersions(text).length, n, `${f} has ${n} setup-node step(s) but ${scanNodeVersions(text).length} node-version pin(s): a step without one runs the runner's default Node`);
+  }
+  assert.ok(steps >= 1, 'no setup-node step found in any workflow: this test would pass for nothing');
+});
+
 // The CI containers that test the entrypoint (BusyBox sh, find, stat, chmod) run in a node:<major>-alpine image, which is
 // the image base too. They were node:24-alpine while the image soaked on 26 and are 26 now; a hand-edit that leaves one
 // behind would test a different userland from the one that ships, so every `node:<major>-alpine` named in a workflow
