@@ -51,7 +51,7 @@ jobs:
           # Opus review of #972 (verified by running): a script that ran `tar -t` BEFORE the digest check still passed
           # this step (non-zero exit, marker, empty /out). A `tar` shim that announces itself and fails makes the
           # ordering observable: it must never be called on bytes whose digest did not match.
-          if docker run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP/tailscale-digest:/out" node:24-alpine \
+          if docker run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP/tailscale-digest:/out" node:26-alpine \
             sh -c 'apk add --no-cache wget >/dev/null && mkdir /shim && printf "#!/bin/sh\necho TAR_CALLED >&2\nexit 99\n" > /shim/tar && chmod +x /shim/tar && PATH=/shim:$PATH sh /repo/scripts/fetch-tailscale.sh amd64 1.104.5 "$1" /out' sh \
               0000000000000000000000000000000000000000000000000000000000000000 \
               > "$RUNNER_TEMP/tailscale-digest.log" 2>&1; then
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24'
+          node-version: '26'
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - name: Install backend dependencies
@@ -85,8 +85,8 @@ jobs:
       # #549: entrypoint.sh's file-mode block is shell, so neither the JS mutation catalogue nor a Windows dev
       # machine can exercise it (entrypoint-umask.test.js is skipped where there are no POSIX modes). This step is
       # where it gets its evidence:
-      #   1. the same test inside node:24-alpine, as its unprivileged `node` user: BusyBox sh,
-      #      find, stat and chmod are checked here; #751 SOAK uses node:26-alpine as the image base.
+      #   1. the same test inside node:26-alpine, as its unprivileged `node` user: BusyBox sh,
+      #      find, stat and chmod are checked here; node:26-alpine is also the image base.
       #      Production also uses BusyBox (`npm test` above used Ubuntu's dash and GNU tools).
       #      A run that skipped anything proves nothing, hence the check on the TAP summary;
       #   2. scripts/entrypoint-umask.mutants.sh: every named mutation of the block must turn the test red.
@@ -103,51 +103,51 @@ jobs:
       #      needs the host's better-sqlite3 (musl cannot load it), so it runs in `npm run test:core` above only.
       - name: Entrypoint file modes and ownership on BusyBox, and the shell mutants (#549, #567)
         run: |
-          docker run --rm --user node -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
+          docker run --rm --user node -v "$PWD/backend:/w:ro" -w /w node:26-alpine \
             node --test --test-reporter=tap test/entrypoint-umask.test.js test/entrypoint-media-isolation.test.js test/entrypoint-private-layout.test.js > "$RUNNER_TEMP/busybox.tap" \
             || { cat "$RUNNER_TEMP/busybox.tap"; exit 1; }
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox.tap" \
             || { cat "$RUNNER_TEMP/busybox.tap"; echo "::error::the BusyBox run skipped tests"; exit 1; }
           tail -9 "$RUNNER_TEMP/busybox.tap"
-          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
+          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:26-alpine \
             node --test --test-reporter=tap test/entrypoint-chown.test.js > "$RUNNER_TEMP/busybox-chown.tap" \
             || { cat "$RUNNER_TEMP/busybox-chown.tap"; exit 1; }
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-chown.tap" \
             || { cat "$RUNNER_TEMP/busybox-chown.tap"; echo "::error::the BusyBox chown run (as root) skipped tests"; exit 1; }
           tail -9 "$RUNNER_TEMP/busybox-chown.tap"
-          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
+          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:26-alpine \
             sh -c 'apk add --no-cache setpriv >/dev/null && node --test --test-reporter=tap test/entrypoint-media-isolation-real.test.js' \
             > "$RUNNER_TEMP/busybox-media.tap" \
             || { cat "$RUNNER_TEMP/busybox-media.tap"; exit 1; }
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-media.tap" \
             || { cat "$RUNNER_TEMP/busybox-media.tap"; echo "::error::the media isolation run (as root) skipped tests"; exit 1; }
           tail -9 "$RUNNER_TEMP/busybox-media.tap"
-          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
+          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:26-alpine \
             sh -c 'apk add --no-cache setpriv >/dev/null && node --test --test-reporter=tap test/app-exec-real.test.js' \
             > "$RUNNER_TEMP/busybox-app.tap" \
             || { cat "$RUNNER_TEMP/busybox-app.tap"; exit 1; }
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-app.tap" \
             || { cat "$RUNNER_TEMP/busybox-app.tap"; echo "::error::the app wrapper run (as root) skipped tests"; exit 1; }
           tail -9 "$RUNNER_TEMP/busybox-app.tap"
-          docker run --rm --user root -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+          docker run --rm --user root -v "$PWD:/repo:ro" -w /repo node:26-alpine \
             sh -c 'apk add --no-cache setpriv >/dev/null && sh scripts/app-exec.mutants.sh'
           bash scripts/entrypoint-umask.mutants.sh
           # Opus plan review of #967: sysfs fixtures cannot prove the detector sees
           # real Docker namespaces. These three modes gate on the measured codes.
-          docker run --rm --network host -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+          docker run --rm --network host -v "$PWD:/repo:ro" -w /repo node:26-alpine \
             node scripts/host-network-probe.mjs host
-          docker run --rm -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+          docker run --rm -v "$PWD:/repo:ro" -w /repo node:26-alpine \
             node scripts/host-network-probe.mjs bridge
           helper="nightlight-listener-$RANDOM"
-          docker run -d --name "$helper" node:24-alpine \
+          docker run -d --name "$helper" node:26-alpine \
             node -e "require('net').createServer().listen(4567, '127.0.0.1')"
           trap 'docker rm -f "$helper" >/dev/null 2>&1 || true' EXIT
           sleep 2
-          docker run --rm --network "container:$helper" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+          docker run --rm --network "container:$helper" -v "$PWD:/repo:ro" -w /repo node:26-alpine \
             node scripts/host-network-probe.mjs shared
           user_bridge="nightlight-probe-bridge-$RANDOM"
           docker network create -d bridge "$user_bridge"
-          docker run --rm --network "$user_bridge" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+          docker run --rm --network "$user_bridge" -v "$PWD:/repo:ro" -w /repo node:26-alpine \
             node scripts/host-network-probe.mjs bridge
           docker network rm "$user_bridge" >/dev/null
           parent="$(ip route show default 2>/dev/null | awk '{print $5; exit}' || true)"
@@ -157,7 +157,7 @@ jobs:
               # Opus fix review of #967: an optional driver may be unavailable
               # on a runner. Once created, a wrong detector result (exit 42)
               # must fail this step; a container launch failure is reported.
-              if docker run --rm --network "$network" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+              if docker run --rm --network "$network" -v "$PWD:/repo:ro" -w /repo node:26-alpine \
                 node scripts/host-network-probe.mjs bridge; then
                 echo "$driver probe passed"
               else
@@ -181,7 +181,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24'
+          node-version: '26'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install front-end dependencies
@@ -214,7 +214,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24'
+          node-version: '26'
       # No dependencies and no install step - it reads one file. Checks structure only: one heading
       # per type per version, Keep a Changelog order, released sections dated, no version listed
       # twice. It has no opinion about wording and never rewrites the file.

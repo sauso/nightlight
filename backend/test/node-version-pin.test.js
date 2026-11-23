@@ -1,12 +1,13 @@
-// The supported Node version is pinned in .nvmrc, both packages and CI (issue #565).
-// #751 SOAK: the Docker image may temporarily run the next-major preview version.
+// The supported Node version is pinned in .nvmrc, both packages, CI and the Docker image (issue #565, #751).
 //
 // Before this, nothing stated it: CI ran Node 24, `engines` and `.nvmrc` did not exist, and a contributor on
 // Node 22 got a red backend suite with no hint why. Stating it once is not enough, because the image, CI and
-// the two package files each move on their own. During #751, the image has one explicit, whole-image exception.
+// the two package files each move on their own. For a week (2026-11-16 to 2026-11-23, #751) the image ran Node 26
+// while the rest stayed on 24, under one explicit exception; that soak ended clean, the whole repository moved to 26
+// (release 0.50.0 shipped the image on 26) and the exception is gone: every place below must now say the same major.
 //
 // ⚠️ Reads the real files, no fixture: the claim is about THIS repository's configuration. `.nvmrc` is the
-// reference for support; the preview workflow supplies the only allowed image soak major.
+// reference for support.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -62,66 +63,50 @@ export function assertDockerNodeStages(text, supported, preview) {
   }
   const versions = new Set(stages.map((s) => s.major));
   assert.equal(versions.size, 1, `Dockerfile Node stages are mixed: ${[...versions].join(', ')}`);
-  assert.ok(versions.has(supported) || versions.has(preview),
-    `all four Dockerfile Node stages must use supported Node ${supported} or preview Node ${preview}`);
+  assert.ok(versions.has(supported),
+    `all four Dockerfile Node stages must use the supported Node ${supported} (.nvmrc), not ${[...versions].join(', ')}`);
   return stages[0].major;
 }
 
-function previewMajor() {
-  const pins = workflowNodeVersions().filter((e) => e.file === PREVIEW_WORKFLOW && e.key === 'node-version');
-  const versions = new Set(pins.map((e) => Number(e.raw.replace(/['"]/g, ''))));
-  assert.equal(versions.size, 1, `${PREVIEW_WORKFLOW} must pin exactly one preview major`);
-  return [...versions][0];
-}
-
-test('every Dockerfile Node stage runs either the supported or preview major', () => {
-  assertDockerNodeStages(read('Dockerfile'), major, previewMajor());
+test('every Dockerfile Node stage runs the supported major', () => {
+  assertDockerNodeStages(read('Dockerfile'), major);
 });
 
 test('Dockerfile scan includes --platform and rejects mixed stages or a non-Node final stage', () => {
   const fixture = `FROM node:24-alpine AS frontend-build\nFROM bluenviron/mediamtx:1 AS mediamtx-binary\nFROM scratch AS yamnet-model\nFROM node:24-alpine AS backend-deps\nFROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries\nFROM node:24-alpine\n`;
   assert.equal(scanDockerNodeStages(fixture)[4].major, 24);
-  assert.equal(assertDockerNodeStages(fixture, 24, 26), 24);
-  assert.throws(() => assertDockerNodeStages(fixture.replace('node:24-alpine AS tailscale-binaries', 'node:26-alpine AS tailscale-binaries'), 24, 26), /mixed/);
-  assert.throws(() => assertDockerNodeStages(fixture.replace(/FROM node:24-alpine\n$/, 'FROM alpine:3.24\n'), 24, 26), /final stage/);
+  assert.equal(assertDockerNodeStages(fixture, 24), 24);
+  assert.throws(() => assertDockerNodeStages(fixture.replace('node:24-alpine AS tailscale-binaries', 'node:26-alpine AS tailscale-binaries'), 24), /mixed/);
+  assert.throws(() => assertDockerNodeStages(fixture.replace(/FROM node:24-alpine\n$/, 'FROM alpine:3.24\n'), 24), /final stage/);
 });
 
 // #751, PR #1121 round 1: guard the exact image family and stage graph, including non-Node stages.
 const dockerStagesFixture = `FROM node:24-alpine AS frontend-build\nFROM bluenviron/mediamtx:1 AS mediamtx-binary\nFROM scratch AS yamnet-model\nFROM node:24-alpine AS backend-deps\nFROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries\nFROM node:24-alpine\n`;
 
 test('Dockerfile rejects a bare Node tag', () => {
-  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replaceAll('node:24-alpine', 'node:26-alpine').replace('node:26-alpine AS frontend-build', 'node:26 AS frontend-build'), 24, 26));
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replaceAll('node:24-alpine', 'node:26-alpine').replace('node:26-alpine AS frontend-build', 'node:26 AS frontend-build'), 26));
 });
 
 test('Dockerfile rejects a different Node distro', () => {
-  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replaceAll('node:24-alpine', 'node:26-alpine').replace('node:26-alpine AS frontend-build', 'node:26-bookworm AS frontend-build'), 24, 26));
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replaceAll('node:24-alpine', 'node:26-alpine').replace('node:26-alpine AS frontend-build', 'node:26-bookworm AS frontend-build'), 26));
 });
 
 test('Dockerfile rejects an extra non-Node stage', () => {
-  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM node:24-alpine\n', 'FROM scratch AS extra\nFROM node:24-alpine\n'), 24, 26));
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM node:24-alpine\n', 'FROM scratch AS extra\nFROM node:24-alpine\n'), 24));
 });
 
 test('Dockerfile rejects a missing model stage', () => {
-  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM scratch AS yamnet-model\n', ''), 24, 26));
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM scratch AS yamnet-model\n', ''), 24));
 });
 
 test('Dockerfile rejects a missing non-Node stage', () => {
-  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM bluenviron/mediamtx:1 AS mediamtx-binary\n', ''), 24, 26));
+  assert.throws(() => assertDockerNodeStages(dockerStagesFixture.replace('FROM bluenviron/mediamtx:1 AS mediamtx-binary\n', ''), 24));
 });
 
-test('the preview-major Dockerfile announces the #751 SOAK', () => {
-  const dockerfile = read('Dockerfile');
-  if (assertDockerNodeStages(dockerfile, major, previewMajor()) === previewMajor()) {
-    assert.ok(dockerfile.includes('SOAK') && dockerfile.includes('#751'),
-      'preview-major Dockerfile must announce SOAK and #751');
-  }
-});
-
-// ONE named CI exception (#751 step 1): the preview workflow runs the suites on the NEXT major, beside the supported one,
-// so that what breaks on the move is known before anyone makes it. It is a preview, not a gate: it may pin a major
-// ABOVE .nvmrc's and no other workflow may. A second exception, or this one pinning the supported major or something older,
-// is a mistake and must fail here.
-const PREVIEW_WORKFLOW = 'node-next.yml';
+// Every workflow pins the supported major, with no exception. From 2026-11-24 there is no "next major" preview workflow
+// (#751: Node 26 became the supported major, and the next one, 27, has no release to preview yet: nodejs.org lists only
+// an alpha). The one that existed, node-next.yml, was the only allowed exception; if a preview workflow comes back for
+// Node 28, this test is where its exception is named again.
 
 // What a workflow's text pins. Two holes the first version of this scan had, found by the review of #884 (the first
 // pre-dates #751): a COMMENT such as `# node-version: 26` counted as a pin, so a workflow could set up Node from
@@ -166,23 +151,29 @@ test('every workflow pins Node by a bare major: no version file, alias or range'
   }
 });
 
-test('every workflow that sets up Node uses that major, except the one next-major preview', () => {
+test('every workflow that sets up Node uses that major', () => {
   const found = workflowNodeVersions().map((e) => [e.file, Number(e.raw.replace(/['"]/g, ''))]);
   assert.ok(found.length >= 1, 'no `node-version:` found in any workflow');
   for (const [f, v] of found) {
-    if (f === PREVIEW_WORKFLOW) continue;
     assert.equal(v, major, `${f} sets up Node ${v}, .nvmrc says ${major}`);
   }
 });
 
-test('the next-major preview workflow exists and pins a major above the supported one', () => {
-  const preview = workflowNodeVersions().filter((e) => e.file === PREVIEW_WORKFLOW && e.key === 'node-version');
-  // Not vacuous: the exemption above must not outlive the file, and a file that stops setting up Node is a rename to notice.
-  assert.ok(preview.length >= 1, `${PREVIEW_WORKFLOW} no longer sets up Node: drop the exemption in this test, or restore the workflow`);
-  for (const e of preview) {
-    const v = Number(e.raw.replace(/['"]/g, ''));
-    assert.ok(v > major, `${e.file} sets up Node ${v}, which must be above the supported ${major} (it is the preview of the NEXT major)`);
+// The CI containers that test the entrypoint (BusyBox sh, find, stat, chmod) run in a node:<major>-alpine image, which is
+// the image base too. They were node:24-alpine while the image soaked on 26 and are 26 now; a hand-edit that leaves one
+// behind would test a different userland from the one that ships, so every `node:<major>-alpine` named in a workflow
+// must be the supported major.
+test('every node:<major>-alpine image a workflow runs is the supported major', () => {
+  const dir = path.join(REPO, '.github', 'workflows');
+  let seen = 0;
+  for (const f of fs.readdirSync(dir).filter((n) => /\.ya?ml$/.test(n))) {
+    const text = fs.readFileSync(path.join(dir, f), 'utf8').split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join('\n');
+    for (const m of text.matchAll(/\bnode:(\d+)-alpine\b/g)) {
+      seen += 1;
+      assert.equal(Number(m[1]), major, `${f} runs node:${m[1]}-alpine, .nvmrc says ${major}`);
+    }
   }
+  assert.ok(seen >= 1, 'no node:<major>-alpine image found in any workflow: this test would pass for nothing');
 });
 
 // WHY A RUNNING-VERSION CHECK TOO (issue #565, the "cause unexplained" half). The five places above say what

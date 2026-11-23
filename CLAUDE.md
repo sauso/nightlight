@@ -106,15 +106,12 @@ configured in either. `backend/` has a unit test suite (Node's built-in runner, 
 `frontend/` has its own (Vitest + Testing Library, coverage-gated in CI). End-to-end
 coverage lives separately in `e2e/` (Playwright, needs Docker).
 
-**Node 24 supported; Node 26 image soak (#751).** CI and `.nvmrc` stay on Node 24, and `engines` in both `package.json`
-files say `>=24` (npm only warns). The Docker image runs Node 26 during the one-week staging SOAK.
-Only 24 is supported and gated until it ends: on Node 22, 16 backend test files fail because its
-module mocks ignore the `exports` option (#565). `backend/test/node-version-pin.test.js` guards the supported pins
-and the whole-image soak exception. One workflow,
-`.github/workflows/node-next.yml`, runs both suites on the NEXT major (26, #751) after merges, weekly and on demand: a
-preview that changes nothing about what is supported, and the only workflow allowed to pin another major.
-HOLD: no dev-to-main release while the soak runs unless the owner says so or the release PR reverts the
-Dockerfile base to `node:24-alpine`.
+**Node 26 supported (#751).** `.nvmrc`, `engines` in both `package.json` files (`>=26`, npm only warns), every
+workflow's `node-version` and the Docker image all say Node 26; `backend/test/node-version-pin.test.js` fails if any of
+them drifts. Node 26 soaked on staging from 2026-11-16 to 2026-11-23 and shipped in release 0.50.0, so the dev-to-main
+release hold that applied during the soak is over. On an older Node, 16 backend test files fail because its module
+mocks ignore the `exports` option (#565). There is no next-major preview workflow right now (Node 27 has only an
+alpha); when one exists, the pin test is where its single exception is named.
 
 **Sandbox with an older Node (the cloud builders came with 22).** Before `npm ci` or any test run, `node -v`;
 if the major is below `.nvmrc`'s, run `. scripts/use-node.sh` (sourced, so it can change PATH). It uses nvm,

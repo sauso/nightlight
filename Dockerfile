@@ -1,17 +1,17 @@
 # #971: the Tailscale version and both verified tarball digests are committed in
 # Stage 4, not fetched as metadata during a build. Bump them only in a reviewed
 # PR; the weekly rebuild must retain the reviewed pin.
-# #751 SOAK: all Node stages run node:26-alpine while .nvmrc and CI stay on Node 24.
-# The stage-1 24.18.1 pin also goes: the image now follows the Node 26 major tag.
-# Node was previously pinned to 24.18.1 to dodge a hard
+# #751: every Node stage runs node:26-alpine, the same major as .nvmrc, `engines` and CI (the pin test,
+# backend/test/node-version-pin.test.js, fails if they drift apart). Node 26 soaked on staging from 2026-11-16 to
+# 2026-11-23 (about fifteen redeploys, no restart, crash or abort) and shipped in release 0.50.0.
+# Node was once pinned to 24.18.1 to dodge a hard
 # abort: 24.19.0 added per-object environment cleanup hooks to node::ObjectWrap
 # (nodejs/node#63642), and better-sqlite3 <= 11 subclassed ObjectWrap, so its wrapped objects
 # registered a cleanup hook whose removal path asserted env != nullptr and abort()ed during our
 # teardown ("RemoveEnvironmentCleanupHook: Assertion failed: (env) != nullptr"). better-sqlite3
 # 13's ground-up N-API rewrite no longer touches node::ObjectWrap, which removes the trigger
-# entirely. The #751 SOAK checks Node 26 shutdown and media behaviour before support moves from 24.
-# The runtime follows node:26-alpine (patch/minor within the 26 major). Previously verified on
-# staging: clean graceful shutdown (exit 0, no abort assertion) on 24.x with sqlite 13.
+# entirely, and the soak showed clean graceful shutdowns on Node 26 with sqlite 13.
+# The runtime follows node:26-alpine (patch/minor within the 26 major).
 # KEEP better-sqlite3 >= 13; a downgrade can bring back the ObjectWrap abort at teardown.
 
 # --- Stage 1: build the React frontend ---
@@ -145,8 +145,8 @@ COPY backend/package.json ./
 
 # Drop the base image's bundled npm. npm is the package manager, not part of the running app
 # (the container runs `node src/index.js`; entrypoint.sh only uses su-exec/node) - but the copy
-# that ships in node:26-alpine adds unused dependencies to the runtime image. The #751 SOAK
-# keeps removing it, as on Node 24, to limit the scanner findings and attack surface.
+# that ships in node:26-alpine adds unused dependencies to the runtime image. Removing it
+# (as on Node 24 before) limits the scanner findings and attack surface.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 COPY backend/src ./src

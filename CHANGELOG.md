@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- Node 26 is now the supported Node version for running and testing Nightlight: `.nvmrc`, `engines` in both `package.json` files (`>=26`), every CI workflow and the CI containers that test the entrypoint all use 26, matching the Docker image that has run it since 0.50.0. The pin test now requires all of them to agree, with no exception. The weekly "next Node major" preview workflow is retired (Node 27 has no release to preview yet). Nothing changes for a running install (#751).
+
 ## [0.50.0] - 2026-11-24
 
 ### Added

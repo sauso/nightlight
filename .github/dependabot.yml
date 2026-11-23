@@ -19,9 +19,9 @@ updates:
     schedule:
       interval: "weekly"
     ignore:
-      # #751 SOAK: Node 24 stays supported in .nvmrc, engines and CI while the Docker image runs 26.
-      # A support-major bump is deliberate after the soak, not a Dependabot PR; keep this ignore.
-      # The node-next.yml preview is not a support statement. Patch/minor updates still come through.
+      # Node 26 is the supported major (#751: .nvmrc, engines, CI and the image all say 26). Moving the supported
+      # major is a deliberate change with a staging soak first, not a Dependabot PR; keep this ignore.
+      # Patch/minor updates still come through.
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
 
