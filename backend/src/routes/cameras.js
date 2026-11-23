@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { readFileSync } from 'fs';
-import { createHash } from 'node:crypto';
 import { join as joinPath } from 'path';
 import { serveMediaFile } from '../lib/mediaFiles.js';
 import { v4 as uuid } from 'uuid';
@@ -760,7 +759,9 @@ const CAPABILITIES_TTL_MS = 60 * 1000;
 async function capabilitiesFor(cam, host, port, live) {
   const login = cameraLogin(cam);
   if (!login || live?.status === 'login_failed') return null;
-  const key = createHash('sha256').update(`${host}|${port}|${login.username}|${login.password}`).digest('hex');
+  // The values themselves, as JSON, compared in memory only (see fingerprint() in lib/cameraSensors.js for why this is
+  // not a hash: the 0.50.0 release scan read the hash as password hashing, and the plaintext is already in `cam`).
+  const key = JSON.stringify([host, port, login.username, login.password]);
   const hit = capabilitiesCache.get(cam.id);
   if (hit && hit.key === key && Date.now() - hit.at < CAPABILITIES_TTL_MS) return hit.value;
   const value = await readCapabilities(host, login, { port });
