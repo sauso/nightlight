@@ -51,8 +51,11 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
   // cog bottom sheet (aria-label "Camera settings"); it holds the Connection mode segmented buttons.
   await tile.getByRole('button', { name: 'Camera settings', exact: true }).click();
   await expect(page.getByRole('group', { name: 'Connection mode' })).toHaveClass(/seg-track/);
-  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCSS('min-height', '56px');
-  await expect(page.getByRole('button', { name: 'Camera settings', exact: true }).last()).toHaveCSS('min-height', '56px');
+  // 48px, not the 56px the two full-width rows had: #1177 (0d4a8625) put Stop and Camera settings on ONE line as two equal
+  // buttons and set `.tile-menu__action` to `min-height: 48px` on purpose. 48px is still over the 44px minimum touch target;
+  // this expectation was left at 56px and failed the release PR's e2e job (CI, 2026-11-23).
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCSS('min-height', '48px');
+  await expect(page.getByRole('button', { name: 'Camera settings', exact: true }).last()).toHaveCSS('min-height', '48px');
   await page.getByRole('button', { name: 'Compatibility', exact: true }).click();
 
   // Confirm the tile is wired to a genuinely LIVE stream: the camera's HLS manifest
