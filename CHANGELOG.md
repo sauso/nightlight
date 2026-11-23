@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-24
+
 ### Added
 
 - A Nightlight Camera added by IP address is recognised: Nightlight can read its room temperature and humidity, radar presence, heart and breathing rate, ambient light and bed pad every 5 seconds, using the camera's own login, with a switch per group under the camera's settings. Temperature and humidity join the existing history; readings the camera marks as simulated are labelled and never used for a night's figures; heart and breathing rate also appear on the night card and timeline, as display only.
@@ -25,7 +27,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - Session lists now include each session's `user_id`, and the Users screen matches sessions to accounts by that id (#1093).
 - The Sleep & room temperature card now compares wake-ups per watched hour, shows the cooler and warmer night counts, and withholds a directional pattern if the shown averages are equal or leaving out one night weakens the correlation or reverses the groups' direction (#365). It still uses stored detector wake totals; a pattern does not establish a cause.
-- The Docker image now runs Node 26 during the #751 staging soak. Node 24 stays supported in CI and `.nvmrc` until the soak ends; releases from dev to main are on hold during it.
+- The Docker image now runs Node 26 (it follows the `node:26-alpine` tag) instead of Node 24. It ran on the staging server for a week (16 to 23 November 2026) with no restarts, crashes or abnormal stops, including about fifteen redeploys. Node 24 stays supported in CI and `.nvmrc` for now (#751).
 - **Routine dependency updates, no behaviour change intended.** Backend: `ws` 8.22.2 → 8.23.0 (the WebSocket library behind two-way talk), `onvif` 0.8.3 → 0.8.5 (camera discovery and motion events), `firebase-admin` 14.5.0 → 14.5.1 (push alerts), `express-rate-limit` 8.7.3 → 8.7.4, `http-proxy-middleware` 4.2.1 → 4.2.2 (stricter checks on a form body and a WebSocket upgrade passing through the proxy). Web app: `lucide-react` 1.70.0 → 1.73.0 (icons). Build and test tooling (not part of the image): `vite` 8.3.6 → 8.3.8, `@vitejs/plugin-react` 6.2.1 → 6.3.0, `@testing-library/user-event` 14.6.8 → 14.6.10, `@playwright/test` 1.65.0 → 1.65.1 together with the end-to-end Playwright image tag.
 
 ### Fixed
