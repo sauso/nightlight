@@ -23,7 +23,6 @@
 //    for: each camera has a generation that any such change bumps, and every write re-reads the camera row and
 //    drops the result unless it still matches (sensor_readings has no foreign key, so a late write would leave an
 //    orphan row).
-import { createHash } from 'node:crypto';
 import db, { deviceReadingRetentionDays } from '../db.js';
 import { logger } from './logger.js';
 import { safeInterval } from './processGuards.js';
@@ -64,9 +63,13 @@ const portOf = (cam) => (Number.isInteger(cam?.sensor_api_port) ? cam.sensor_api
 
 // Which address and login this camera is polled with. A change in either is a new camera as far as a stopped poll
 // is concerned: it is retried at once, and a request still in flight for the old values is dropped.
+// The key is the values themselves (as JSON, so no separator can blur two fields together), compared in memory and
+// never stored or sent. It was a SHA-256 of them until the 0.50.0 release scan (CodeQL js/insufficient-password-hash)
+// read that as password hashing; it was never that, and the plaintext login is already in `cam` and in every request
+// this poller makes, so hashing it bought nothing.
 function fingerprint(cam) {
   const login = cameraLogin(cam);
-  return createHash('sha256').update(`${cameraHost(cam)}|${portOf(cam)}|${login?.username}|${login?.password}`).digest('hex');
+  return JSON.stringify([cameraHost(cam), portOf(cam), login?.username, login?.password]);
 }
 
 function newState(key) {

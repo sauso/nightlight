@@ -145,8 +145,11 @@ test('copies each tag FROM THE DIGEST (never from a tag), reads it back, and cle
 
 // The repair command a failure prints. It is a copy dispatch of docker-publish.yml (registered with GitHub, unlike a
 // new workflow on dev), with no --repo: in a run log the owner's name prints as ***, so a --repo would not paste.
+// The tag is escaped for a RegExp with the full special-character set (CodeQL, 0.50.0 release scan: escaping only the dot
+// left a backslash in a tag unescaped; today's tags are dots and digits, so this changes no result).
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const RECOPY = (tag, force = false) =>
-  new RegExp(`gh workflow run docker-publish\\.yml --ref dev -f copy_tags=${tag.replace(/\./g, '\\.')}${force ? ' -f force=true' : '(?! -f force)'}(\\s|$)`);
+  new RegExp(`gh workflow run docker-publish\\.yml --ref dev -f copy_tags=${escapeRegExp(tag)}${force ? ' -f force=true' : '(?! -f force)'}(\\s|$)`);
 
 test('a copy that reads back as another digest fails with exit 4 and the re-copy command', { skip: skipShell }, (t) => {
   const r = run(t, { env: { DIGEST, TAGS: 'dev', GITHUB_REPOSITORY: 'sauso/nightlight' }, registry: { dev: OLD } });
