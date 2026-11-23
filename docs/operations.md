@@ -217,8 +217,8 @@ then re-run the publish workflow. To check the gate without publishing an image,
 for that branch's push test run (here `dev`), while a `main` push or any release tag run waits for the
 `main` run. `weekly-rebuild.yml` is separate and tests its rebuilt image before moving a tag.
 
-During the #751 staging soak, the `:dev` build uses moving major-version tags for its runtime Node 26
-and MediaMTX 1 base images; `:latest` remains on Node 24 while releases are on hold. These tags are used rather
+The image uses moving major-version tags for its runtime Node 26 and MediaMTX 1 base images (since release
+0.50.0 both `:dev` and `:latest` run Node 26; before it `:latest` ran Node 24). These tags are used rather
 than fixed digests (#555 item 5). This picks up compatible base updates on rebuild, but rebuilding the
 same Nightlight commit later may produce different image contents. The revision label identifies the
 app commit, not identical image bytes; use the published image digest when you need that exact image.
@@ -286,10 +286,10 @@ and says so.
 
 **When the two can differ:**
 
-- **The weekly rebuild, until the next release.** The rebuild copies its new `:latest` and `:dev` to
-  ghcr.io too, but a Monday run uses the workflow file on `main`, and `main` gets the copy step only with
-  the next release. Until then (releases are on hold during the Node 26 soak), ghcr.io's `:latest` and
-  `:dev` can lag Docker Hub's by a week of base-image patches, until the next publish of that tag.
+- **The weekly rebuild.** The rebuild copies its new `:latest` and `:dev` to ghcr.io too. A Monday run uses
+  the workflow file on `main`, which has had the copy step since release 0.50.0; before that release ghcr.io's
+  `:latest` and `:dev` could lag Docker Hub's by a week of base-image patches. A gap now lasts only until the copy
+  job finishes, or until a failed copy is re-run.
   Release tags are never rebuilt. They match once the ghcr.io package is public and the backfill below has copied
   releases that predate the mirror.
 - **Two publishes close together.** Two pushes to `dev` a few minutes apart can leave `:dev` (on either

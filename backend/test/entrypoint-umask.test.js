@@ -7,9 +7,9 @@
 // passing suite with no skipped tests, which would hide the skip from scripts/entrypoint-umask.mutants.sh, and that
 // script refuses to trust a run with skips in it. Where it really runs (.github/workflows/test.yml):
 //   1. `npm test` on Ubuntu: dash + GNU find/stat/chmod;
-//   2. inside node:24-alpine as an unprivileged user: BusyBox sh/find/stat/chmod, the tools
-//      checked here. During the #751 SOAK, production uses node:26-alpine; this CI step still proves
-//      `-perm /077`, `chmod go-rwx` and `stat -L -c %a` on the Node 24 BusyBox base;
+//   2. inside node:26-alpine as an unprivileged user: BusyBox sh/find/stat/chmod, the tools
+//      checked here. Production uses the same node:26-alpine base (#751), so this CI step proves
+//      `-perm /077`, `chmod go-rwx` and `stat -L -c %a` on the BusyBox that ships;
 //   3. scripts/entrypoint-umask.mutants.sh: each named mutation of the block must turn this file red.
 //
 // It runs the REAL script (ENTRYPOINT_UNDER_TEST, default the repo's file; the mutants script points it at a mutated
