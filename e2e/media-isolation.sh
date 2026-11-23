@@ -206,7 +206,17 @@ wait_until() { # seconds, what, command...
   die "timed out after ${t}s waiting for: $what"
 }
 
-logs_have() { docker logs "$1" 2>&1 | grep -qF -- "$2"; } # container, text
+# Is $2 anywhere in container $1's log? The log is read to the END into a variable first and searched afterwards, never
+# piped straight into `grep -q`. The script runs under `set -o pipefail`, and `grep -q` exits at the FIRST match: on a long
+# log `docker logs` is then still writing, gets SIGPIPE (exit 141), and the pipeline reports failure for a text that IS
+# there. That made `logs_have "$c" '[rec] recording '` fail with "no recording was reported" although the line was
+# in the log (CI run 45259811124, job media-isolation, 2026-11-23). `|| true` keeps a docker error from stopping the
+# script under `set -e`; a missing container just gives an empty log, which is "not found".
+logs_have() { # container, text
+  local out
+  out=$(docker logs "$1" 2>&1) || true
+  grep -qF -- "$2" <<<"$out"
+}
 
 ring_has_segments() { # container, how many
   local n
