@@ -141,7 +141,10 @@ async function openBackend(backendDir, dbFile, clockMs, wantRewrite = false) {
   let sa; let db; let rewrite = null;
   try {
     sa = await imp('lib/sleepAnalysis.js');
-    db = (await imp('db.js')).default;
+    // db.js is imported by its PLAIN url (no query) on purpose: that is the very instance sleepAnalysis.js imported just
+    // above, i.e. the connection the scoring really uses. A second instance (a ?replay query) is a different connection:
+    // closing it leaves the real one holding the copy open, and Windows then cannot delete the temp folder.
+    db = (await import(pathToFileURL(path.join(path.resolve(backendDir), 'src', 'db.js')).href)).default;
     if (wantRewrite) {
       if (!fs.existsSync(path.join(path.resolve(backendDir), 'src', 'lib', 'sleepRewrite.js'))) {
         throw new Error(`${backendDir} has no src/lib/sleepRewrite.js: that backend predates "Update past nights"`);
@@ -186,7 +189,18 @@ function computeAll(sa, nights, whole) {
   return out;
 }
 
+// JSON with object keys sorted at every depth: two results with the same content in a different key order are the same
+// result (a backend that builds its object in another order must not read as "changed").
+function stable(value) {
+  const sort = (v) => (Array.isArray(v) ? v.map(sort)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sort(v[k])])) : v);
+  return JSON.stringify(sort(value));
+}
+
 async function compare(a, dbFile, clockMs) {
+  // Each backend directory is loaded once per process (node caches its db.js), so the same directory twice would
+  // quietly share one connection: refuse it instead of printing a comparison of a thing with itself.
+  if (path.resolve(a.args[0]) === path.resolve(a.args[1])) throw new Error('the old and the new backend are the same directory: give two checkouts');
   const oldB = await openBackend(a.args[0], dbFile, clockMs);
   let nights; let labels; let reviews; let before;
   try {
@@ -200,11 +214,11 @@ async function compare(a, dbFile, clockMs) {
   for (const n of nights) {
     const key = `${n.child_id}|${n.night_date}`;
     const x = before.get(key); const y = after.get(key);
-    if (JSON.stringify(x) === JSON.stringify(y)) continue;
+    if (stable(x) === stable(y)) continue;
     changed++;
     const rv = reviews.get(key);
     if (a.whole) {
-      const keys = Object.keys({ ...x, ...y }).filter((k) => JSON.stringify(x[k]) !== JSON.stringify(y[k]));
+      const keys = Object.keys({ ...x, ...y }).filter((k) => stable(x[k]) !== stable(y[k]));
       const moved = x.onset_at !== y.onset_at || x.in_bed_at !== y.in_bed_at;
       if (moved) for (const k of keys) keyCount[k] = (keyCount[k] || 0) + 1; else unmovedButDifferent.push(`${labels.get(n.child_id)} ${n.night_date}: ${keys.join(', ')}`);
       console.log(`${labels.get(n.child_id)} ${n.night_date} differs in: ${keys.join(', ')}${moved ? ' (onset or in-bed moved)' : ''}`);
@@ -248,7 +262,8 @@ async function drift(a, dbFile, clockMs) {
         + `${r?.onset ? ` parent ${localTime(r.onset, a.tz)}` : ''}`);
     }
     console.log(`stored ok nights recomputed: ${n}; fresh wake differs from stored by more than ${a.threshold} min on ${wakeDiff}; fresh onset on ${onsetDiff} (times in ${a.tz})`);
-    for (const l of lines.slice(-a.limit)) console.log(`  ${l}`);
+    // The LAST n lines; slice(-0) is slice(0) (everything), so --limit=0 needs its own bound.
+    for (const l of lines.slice(Math.max(0, lines.length - a.limit))) console.log(`  ${l}`);
   } finally { b.close(); }
 }
 
@@ -263,7 +278,8 @@ async function night(a, dbFile, clockMs) {
     for (const k of ['status', 'onset_at', 'in_bed_at', 'wake_at', 'wake_at_algo', 'wake_at_shadow', 'wake_unconfirmed', 'span_basis', 'wake_at_sensor', 'sensor_rejects']) {
       if (!(k in r)) continue;
       const v = r[k];
-      out[k] = /_at$/.test(k) && typeof v === 'string' ? localTime(v, a.tz) : (k === 'wake_unconfirmed' && v?.at ? { ...v, at: localTime(v.at, a.tz) } : v);
+      // every `*_at` field and its variants (`wake_at_algo`, `wake_at_shadow`, `wake_at_sensor`) is a database time
+      out[k] = /_at(_[a-z]+)?$/.test(k) && typeof v === 'string' ? localTime(v, a.tz) : (k === 'wake_unconfirmed' && v?.at ? { ...v, at: localTime(v.at, a.tz) } : v);
     }
     console.log(`child ${a.child}, night ${a.args[2]} (times in ${a.tz})`);
     console.log(JSON.stringify(out));

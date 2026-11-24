@@ -17,7 +17,14 @@
 //   night prints that night's fields and rejects an unknown child ........... "night ..."
 //   rewrite previews twice (same hash, nothing written) and says what it
 //     skipped; a backend without Update past nights is refused ............. "rewrite ..."
-//   the clock is frozen (timings still work: performance.now, not Date) ..... "rewrite ..." (a real run prints a duration)
+//   the clock is frozen at --clock for the backend replayed ................ "the clock is frozen ..."
+//   the snapshot's -wal is copied with it .................................. "a snapshot's -wal ..."
+//   --whole ignores key order and the rules label ........................... "--whole ignores ..."
+//   no temporary copy is left behind; the same directory twice is refused ... "two identical backends ..."
+//   rewrite on a night it CAN rewrite: nothing written by the preview, apply
+//     equals the preview, undo restores every row, a second run repeats .... "rewrite on a night it can rewrite ..."
+//   --limit=0 prints no night; --limit=1 prints the last .................... "drift ..."
+//   every time field in `night` is converted to the zone asked for ......... "night ..."
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -36,6 +43,7 @@ const RN = await import(new URL('../../scripts/replay-nights.mjs', import.meta.u
 const SCRIPT = fileURLToPath(new URL('../../scripts/replay-nights.mjs', import.meta.url));
 const REAL_BACKEND = fileURLToPath(new URL('..', import.meta.url));
 const { default: db } = await import('../src/db.js');
+const { computeAndStoreNight } = await import('../src/lib/sleepAnalysis.js');
 
 const tmpDirs = [];
 const mkTmp = (p) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), p)); tmpDirs.push(d); return d; };
@@ -119,18 +127,58 @@ before(() => {
   raw.exec('DROP INDEX idx_bed_transitions_cam_time');
   raw.close();
   fixture = { snapDir, snap, pristine: snapState(snapDir, snap) };
+
+  // A SECOND snapshot, taken after the first, holding a night that "Update past nights" can really rewrite: samples from
+  // 15:00 (the 3 h onset look-behind before the 19:30 window is covered), stored through the real backend so its
+  // saved settings are valid, then tampered with (a wrong wake, one asleep minute, written long after the window
+  // closed so it is evidence-final). Alert-audio classification is off so the alert-history check does not apply.
+  const NIGHT_R = '2026-06-28';
+  for (let t = T(NIGHT_R, 15, 0); t < T(NIGHT_R, 18, 20); t += 60000) insertSample.run(KID_FIRST.cam, sqlTime(t), 0.0002, 0.0002);
+  layNight(KID_FIRST.cam, NIGHT_R);
+  db.prepare("UPDATE settings SET classify_alert_audio = 0 WHERE id = 'app'").run();
+  const stored = computeAndStoreNight(KID_FIRST.id, NIGHT_R, { allowDowngrade: true });
+  assert.ok(stored.stored && stored.status === 'ok', `the rewrite fixture night must score ok (got ${stored.status})`);
+  db.prepare("UPDATE sleep_nights SET wake_at = '2026-06-29 03:00:00', asleep_minutes = 1, computed_at = '2026-06-29 12:00:00' WHERE child_id = ? AND night_date = ?").run(KID_FIRST.id, NIGHT_R);
+  const rewriteDir = mkTmp('nightlight-rn-rewrite-');
+  db.prepare('VACUUM INTO ?').run(path.join(rewriteDir, 'babymonitor.db'));
+  fixture.rewriteDir = rewriteDir;
+
+  // A snapshot whose NEWEST row lives only in the -wal beside it (its connection stays open and never checkpoints):
+  // a script that copied the .db alone would not see it.
+  const walDir = mkTmp('nightlight-rn-wal-');
+  const walDb = path.join(walDir, 'src.db');
+  fs.copyFileSync(snap, walDb);
+  const w = new Database(walDb);
+  w.pragma('journal_mode = WAL');
+  w.pragma('wal_autocheckpoint = 0');
+  w.prepare(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status)
+             VALUES (?, '2026-07-09', '2026-07-09 19:30:00', '2026-07-10 07:00:00', 'no_data')`).run(KID_FIRST.id);
+  const walSnap = mkTmp('nightlight-rn-walsnap-');
+  fs.copyFileSync(walDb, path.join(walSnap, 'babymonitor.db'));
+  fs.copyFileSync(`${walDb}-wal`, path.join(walSnap, 'babymonitor.db-wal'));
+  w.close();
+  fixture.walSnap = walSnap;
 });
 
 // A fake backend directory: computeNight answers a constant, the database stub answers the three queries `compare`
 // makes. If --old were ignored the numbers would be the real tree's and the night below would not differ as stated.
-function fakeBackend() {
+// Options: `clock` makes every time the frozen "now" (new Date()), `reverse` builds the result with its keys in the
+// opposite order, `extra` adds literal-source fields (e.g. { scoring_context: "'x'" }).
+function fakeBackend({ clock = false, reverse = false, extra = {} } = {}) {
   const tree = mkTmp('nightlight-rn-fake-');
   const lib = path.join(tree, 'backend', 'src', 'lib');
   fs.mkdirSync(lib, { recursive: true });
   fs.mkdirSync(path.join(tree, 'backend', 'node_modules'), { recursive: true });
   fs.writeFileSync(path.join(tree, 'backend', 'package.json'), '{"type":"module"}\n');
+  const now = "new Date().toISOString().slice(0, 19).replace('T', ' ')";
+  const fields = [
+    ['status', "'ok'"], ['in_bed_at', clock ? now : "'2026-07-01 19:00:00'"], ['onset_at', clock ? now : "'2026-07-01 19:10:00'"],
+    ['wake_at', clock ? now : "'2026-07-02 05:00:00'"], ['asleep_minutes', '500'], ['awake_minutes', '10'], ['wake_count', '2'],
+    ...Object.entries(extra),
+  ];
+  if (reverse) fields.reverse();
   fs.writeFileSync(path.join(lib, 'sleepAnalysis.js'),
-    "export function computeNight() { return { status: 'ok', in_bed_at: '2026-07-01 19:00:00', onset_at: '2026-07-01 19:10:00', wake_at: '2026-07-02 05:00:00', asleep_minutes: 500, awake_minutes: 10, wake_count: 2 }; }\n");
+    `export function computeNight() { return { ${fields.map(([k, v]) => `${k}: ${v}`).join(', ')} }; }\n`);
   fs.writeFileSync(path.join(tree, 'backend', 'src', 'db.js'), [
     `const nights = [{ child_id: '${KID_FIRST.id}', night_date: '2026-07-01' }];`,
     `const kids = [{ id: '${KID_FIRST.id}' }, { id: '${KID_SECOND.id}' }];`,
@@ -172,11 +220,48 @@ describe('arguments and time', () => {
 });
 
 describe('scripts/replay-nights.mjs on a real database', () => {
-  test('compare of a backend with itself differs nowhere, and the snapshot is only read', () => {
-    const r = run(['compare', REAL_BACKEND, REAL_BACKEND, fixture.snap, `--clock=${CLOCK}`]);
+  test('two identical backends differ nowhere; the same directory twice is refused; the snapshot is only read; no copy is left behind', () => {
+    const copies = () => fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('nightlight-replay-')).sort();
+    const before = copies();
+    const r = run(['compare', fakeBackend(), fakeBackend(), fixture.snap, `--clock=${CLOCK}`]);
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /nights compared: 2; changed: 0/);
+    assert.match(r.stdout, /nights compared: 1; changed: 0/);
+    const same = fakeBackend();
+    const dup = run(['compare', same, same, fixture.snap]);
+    assert.equal(dup.code, 2);
+    assert.match(dup.stderr, /same directory/);
+    // The real backend as one side: it opens a COPY of the snapshot, never the snapshot itself (the fixture needs a
+    // migration, so opening it in place would write), and the temp copy is removed (on Windows a second connection to
+    // it, left open, makes the delete fail: found by the review of this change).
+    assert.equal(run(['compare', fakeBackend(), REAL_BACKEND, fixture.snap, `--clock=${CLOCK}`]).code, 0);
     assert.deepEqual(snapState(fixture.snapDir, fixture.snap), fixture.pristine, 'the snapshot or its folder was written');
+    assert.deepEqual(copies(), before, 'a temporary copy of the snapshot was left behind');
+  });
+
+  test('the clock is frozen at --clock for the backend being replayed', () => {
+    // The fake backend reads new Date(): a script that did not freeze the clock would print the real "now".
+    const r = run(['compare', fakeBackend({ clock: true }), fakeBackend(), fixture.snap, `--clock=${CLOCK}`]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout.split('\n')[0]).old.wake, '07-05 02:45');
+  });
+
+  test('a snapshot\'s -wal is copied with it, so its newest rows are replayed', () => {
+    // The newest stored night exists only in the -wal beside the snapshot: copying the .db alone gives 2 nights, not 3.
+    const r = run(['compare', REAL_BACKEND, fakeBackend(), fixture.walSnap, `--clock=${CLOCK}`]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /nights compared: 3;/);
+  });
+
+  test('--whole ignores key order and the rules label, and still sees a real difference', () => {
+    const same = run(['compare', fakeBackend(), fakeBackend({ reverse: true }), fixture.snap, `--clock=${CLOCK}`, '--whole']);
+    assert.equal(same.code, 0, same.stderr);
+    assert.match(same.stdout, /nights compared: 1; changed: 0/, 'the same fields in another key order are not a change');
+    // scoring_context carries the rules label by design: two backends that differ only in it did not change a night.
+    const label = run(['compare', fakeBackend({ extra: { scoring_context: "'x'" } }), fakeBackend({ extra: { scoring_context: "'y'" } }),
+      fixture.snap, `--clock=${CLOCK}`, '--whole']);
+    assert.match(label.stdout, /nights compared: 1; changed: 0/);
+    const real = run(['compare', fakeBackend({ extra: { wake_count: '3' } }), fakeBackend(), fixture.snap, `--clock=${CLOCK}`, '--whole']);
+    assert.match(real.stdout, /child 1 2026-07-01 differs in: wake_count/);
   });
 
   test('compare shows a night only where old and new differ, with the parent\'s time, in the zone asked for', () => {
@@ -232,6 +317,13 @@ describe('scripts/replay-nights.mjs on a real database', () => {
     // (The decoy stored nights are in January and the replay lands in July: about 260,000 minutes apart.)
     assert.match(wide.stdout, /on 0; fresh onset on 0/);
     assert.equal(wide.stdout.trim().split('\n').length, 1, '--limit=0 must print no night lines');
+    // With the default threshold two nights DO differ: --limit=0 must still print none of them (slice(-0) is everything).
+    const none = run(['drift', REAL_BACKEND, fixture.snap, `--clock=${CLOCK}`, '--limit=0']);
+    assert.match(none.stdout, /on 2; fresh onset on 2/);
+    assert.equal(none.stdout.trim().split('\n').length, 1);
+    const one = run(['drift', REAL_BACKEND, fixture.snap, `--clock=${CLOCK}`, '--limit=1']);
+    assert.equal(one.stdout.trim().split('\n').length, 2, '--limit=1 prints exactly the last night');
+    assert.match(one.stdout, /child 1 2026-07-02:/);
   });
 
   test('night prints that night\'s fields and rejects a child that does not exist', () => {
@@ -243,6 +335,13 @@ describe('scripts/replay-nights.mjs on a real database', () => {
     const none = run(['night', REAL_BACKEND, fixture.snap, '2026-07-01', '--child=3']);
     assert.equal(none.code, 2);
     assert.match(none.stderr, /2 child\(ren\); --child=3 does not exist/);
+    // In another zone every time field is converted, the shadow and algo wakes too (a raw database time was left in
+    // wake_at_algo/wake_at_shadow while the heading said "Australia/Melbourne": found by the review of this change).
+    const melb = run(['night', REAL_BACKEND, fixture.snap, '2026-07-01', `--clock=${CLOCK}`, '--tz=Australia/Melbourne']);
+    assert.equal(melb.code, 0, melb.stderr);
+    const fields = melb.stdout.split('\n')[1];
+    assert.match(fields, /"wake_at_shadow"|"wake_at"/);
+    assert.ok(!/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(fields), `a raw database time is left in: ${fields}`);
   });
 
   test('rewrite previews twice with the same hash and nothing written, and says what it skipped', () => {
@@ -253,6 +352,18 @@ describe('scripts/replay-nights.mjs on a real database', () => {
     assert.match(r.stdout, /child 1: changed 0, unchanged 0, skipped \{"no_saved_settings":2\}/);
     assert.match(r.stdout, /nothing was changed, so there is nothing to undo/);
     assert.deepEqual(snapState(fixture.snapDir, fixture.snap), fixture.pristine);
+  });
+
+  test('rewrite on a night it can rewrite: preview wrote nothing, apply equals the preview, undo puts every row back, again is repeatable', () => {
+    const r = run(['rewrite', REAL_BACKEND, fixture.rewriteDir, `--clock=${CLOCK}`]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /same hash twice: true; the preview wrote nothing: true/);
+    assert.match(r.stdout, /would change 1 night\(s\): 1 in their figures, 0 facts only/);
+    assert.match(r.stdout, /2026-06-28 figures .*asleep 1 -> \d{3}/, 'the tampered asleep minute is corrected');
+    assert.match(r.stdout, /apply \d+ ms; changed 1; same as the preview: true/);
+    // The two claims that print true/false are COMPUTED, not asserted by the script: they must be true here.
+    assert.match(r.stdout, /undo restored 1, left \{\}; every stored row is back exactly as in the snapshot: true/);
+    assert.match(r.stdout, /a second update after the undo changed 1 \(the first changed 1\)/);
   });
 
   test('rewrite refuses a backend that predates Update past nights, and a path that is not a backend', () => {
