@@ -80,7 +80,7 @@ and **More about timing** reveals the longer note. Settings save automatically. 
 
 Nightlight works from **any** camera position: put the camera wherever it fits and you will still get sleep tracking and motion alerts. A good position makes them **more reliable**, and nothing more than that.
 
-**The recommended view** is the one Nightlight is developed and tested against. It came from moving a camera in one household, which then read much more reliably. That is one room, so treat it as the best-tested position, not a guarantee, and not a measured comparison.
+**The recommended view** is the one Nightlight is developed and tested against. It came from moving both cameras in one household to this view, after which the nights read much more reliably. Treat it as the best-tested position, not a guarantee and not a measured comparison: it is one household, the cameras were also changed to a different model on the same day, and the sleep scoring itself improved over the same weeks, so the position's own effect has not been separated out.
 
 - **The recommended view:** looking down at the bed from above, at about **45 degrees**, the way most baby monitors are mounted. Have the **whole bed in frame**, and the **doorway or room entry in view as well** if you can: seeing who comes in and goes out makes an entry or exit easier to tell from other movement.
 - **What to avoid:**
