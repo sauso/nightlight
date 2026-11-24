@@ -26,16 +26,44 @@ if (process.env.NIGHTLIGHT_CLOCK_SHIFT_DAYS) await import('../../scripts/clock-s
 // depends on request order or latency; the wrapper does not delay that mock on purpose, because the test must not
 // care. (A first rewrite that kept queued mockResolvedValueOnce values still failed here in CI on 2026-10-19.)
 const LATENCY_MS = Number(process.env.NIGHTLIGHT_TEST_LATENCY_MS) || 0;
+// #1209: the delayed requests still in flight. A test that clicks Save and ends as soon as the request was MADE
+// leaves the page's continuation (refresh, navigate, setBusy(false) in ChildSettings.save) to run after the test,
+// and on a slow runner after Vitest has torn jsdom down: React then reads `window` and throws outside any test.
+// Vitest counts that as an unhandled error and fails the whole weekly run although all 3307 tests passed
+// (runs 45259810790 and 45267609658). The ordinary run settles requests in a microtask, so nothing outlives a test
+// there; this mode is what makes a request outlive it, so this mode is what waits for it (afterEach below).
+const inFlight = new Set();
 if (LATENCY_MS > 0) {
   const realSpyOn = vi.spyOn.bind(vi);
   vi.spyOn = (obj, method, ...rest) => {
     const spy = realSpyOn(obj, method, ...rest);
     if (spy && typeof spy.mockResolvedValue === 'function') {
       spy.mockResolvedValue = (value) =>
-        spy.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(value), LATENCY_MS)));
+        spy.mockImplementation(() => {
+          const p = new Promise((resolve) => setTimeout(() => resolve(value), LATENCY_MS));
+          inFlight.add(p);
+          return p;
+        });
     }
     return spy;
   };
+}
+
+// Waits until the requests a test left in flight have answered AND the code that was waiting on them has run, which
+// may start the next request (save -> refresh): so rounds, each ending on a macrotask, until nothing is left.
+// Skipped under fake timers (their setTimeout never fires on its own, so waiting would hang), and the set is
+// cleared at the end so a request made under fake timers cannot make a later test wait for nothing.
+async function settleInFlight() {
+  if (inFlight.size === 0) return;
+  if (!vi.isFakeTimers()) {
+    for (let round = 0; round < 10 && inFlight.size > 0; round++) {
+      const pending = [...inFlight];
+      await Promise.all(pending);
+      pending.forEach((p) => inFlight.delete(p));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  inFlight.clear();
 }
 
 // jsdom has no layout engine and no media stack, so a few browser APIs the app legitimately uses
@@ -101,7 +129,9 @@ beforeEach(() => {
   }
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Before cleanup(): the page is still mounted while its save finishes, as it would be for a person.
+  await settleInFlight();
   cleanup();
   vi.restoreAllMocks();
   localStorage.clear();
