@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **A username or name that is not text is refused with a readable error, instead of a 500 or a wrong account (#1224).** Setting up the first admin, adding a user and editing a user now answer `400` with "username must be text." (or `first_name`, `last_name`) before the password is hashed. Before, editing a user with a numeric username answered 500, and the first-run setup and Add user quietly accepted a numeric username and stored it as a number (a username `42` came back as `42.0`). Names may still be left out or `null`.
+
 ## [0.51.0] - 2026-11-24
 
 ### Added
