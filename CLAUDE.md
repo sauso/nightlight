@@ -161,6 +161,14 @@ node scripts/scoreboard.mjs <snapshot.db> [--clock=<ISO>] [--unseen-after=<ISO>]
                                    # old-vs-new comparison. Nights older than the 30-day activity retention
                                    # cannot be recomputed and are counted, not scored. Only "unseen" measures
                                    # progress; read its n. See planning/sleep-marker-review-runbook.md §6.
+node scripts/replay-nights.mjs <compare|drift|night|rewrite> ...   # REPLAY STORED NIGHTS (read-only, not in CI):
+                                   # the backend's own scoring over a COPY of a snapshot, to see what a sleep
+                                   # change moved. compare <oldBackend> <newBackend> <snapshot> [--whole] prints
+                                   # the nights where old and new differ; drift <backend> <snapshot> = STORED
+                                   # (the card) vs FRESH (the detail page); night <backend> <snapshot> <date>;
+                                   # rewrite <backend> <snapshot> runs "Update past nights" on the copy (preview,
+                                   # apply, undo). --tz=<Zone> for printed times (default UTC). Run it on BOTH the
+                                   # prod and staging snapshot. See docs/development.md.
 node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way at a time (the
                                    # catalogue is scripts/mutants.json) and reports any mutant the
                                    # tests fail to kill. Weekly + by hand in CI (mutation.yml), never
