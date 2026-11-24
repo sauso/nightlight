@@ -218,3 +218,23 @@ test('admin sees only supported General controls and saves only their fields (#9
   await waitFor(() => expect(putSpy).toHaveBeenCalled());
   expect(Object.keys(putSpy.mock.calls[0][1]).sort()).toEqual(['app_name', 'temp_unit', 'timezone']);
 });
+
+describe('Update past nights sits with the other cards, above Save changes', () => {
+  // The card first went in AFTER the form, so it hung under the Save button with no gap and a body-sized paragraph
+  // (the owner's phone screenshot, 2026-11-24: "needs to be above save"). It is a card like Temperature unit; Save
+  // belongs to the settings on this page, so it comes last.
+  test('the card comes after the other cards and before the Save button in the page, and its buttons never submit the form', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(null);
+    vi.spyOn(api, 'post').mockResolvedValue({ preview: 'a'.repeat(64), changed: 0, figures_changed: 0, facts_only: 0, children: [] });
+    const { user } = renderWith({ app_name: 'Nightlight' });
+    const save = await screen.findByRole('button', { name: /Save changes/ });
+    const card = screen.getByRole('heading', { name: 'Update past nights' });
+    const temperature = screen.getByRole('heading', { name: 'Temperature unit' });
+    expect(temperature.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Its button runs the check, it does not save the page's settings (a type="submit" inside the form would).
+    await user.click(screen.getByRole('button', { name: /check what would change/i }));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(putSpy).not.toHaveBeenCalled();
+  });
+});

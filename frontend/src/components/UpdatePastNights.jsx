@@ -100,10 +100,20 @@ export default function UpdatePastNights() {
   return <>
     <section className="card">
       <h2 className="card-heading">Update past nights</h2>
-      <p>After sleep scoring changes, check saved nights and choose whether to update them. Nothing runs by itself.</p>
-      <button type="button" className="btn btn-secondary" onClick={check} disabled={busy}>Check what would change</button>
-      {latest?.undoable && <button type="button" className="btn btn-secondary" onClick={() => setConfirmUndo(true)} disabled={busy}>Undo these changes</button>}
-      {latest && !latest.undoable && <p role="status">The last update can no longer be undone.{latest.left ? ` ${leftAsIs(latest.left)}.` : ''}</p>}
+      {/* The same description style and stacked full-width buttons as the cards beside it (Automatic clips, Wake clips):
+          a bare <p> read as body text at twice the size, and the buttons had no gap between them (2026-11-24). */}
+      <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
+        After sleep scoring changes, check saved nights and choose whether to update them. Nothing runs by itself.
+      </div>
+      <div className="form-actions" style={{ marginTop: 0 }}>
+        <button type="button" className="btn btn-secondary" onClick={check} disabled={busy}>Check what would change</button>
+        {latest?.undoable && <button type="button" className="btn btn-secondary" onClick={() => setConfirmUndo(true)} disabled={busy}>Undo these changes</button>}
+      </div>
+      {latest && !latest.undoable && (
+        <div className="camera-tile__sub" role="status" style={{ marginTop: 12 }}>
+          The last update can no longer be undone.{latest.left ? ` ${leftAsIs(latest.left)}.` : ''}
+        </div>
+      )}
     </section>
     {open && <Modal title="Update past nights" onClose={() => setOpen(false)} error={error}>
       {notice && <p role="status">{notice}</p>}
