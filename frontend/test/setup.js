@@ -41,7 +41,11 @@ if (LATENCY_MS > 0) {
       spy.mockResolvedValue = (value) =>
         spy.mockImplementation(() => {
           const p = new Promise((resolve) => setTimeout(() => resolve(value), LATENCY_MS));
-          inFlight.add(p);
+          // Only a request made under REAL timers can be waited for. One made under fake timers answers only when
+          // the test advances the clock, and a test that then calls useRealTimers() (childListCard does, in its own
+          // afterEach, which runs before ours) would leave us waiting for a timer that no longer exists: the first
+          // version of this fix hung that test's afterEach for 10 s (run 45362711247).
+          if (!vi.isFakeTimers()) inFlight.add(p);
           return p;
         });
     }
@@ -51,17 +55,22 @@ if (LATENCY_MS > 0) {
 
 // Waits until the requests a test left in flight have answered AND the code that was waiting on them has run, which
 // may start the next request (save -> refresh): so rounds, each ending on a macrotask, until nothing is left.
-// Skipped under fake timers (their setTimeout never fires on its own, so waiting would hang), and the set is
-// cleared at the end so a request made under fake timers cannot make a later test wait for nothing.
+// Skipped while fake timers are installed, and bounded by a wall-clock cap on the REAL setTimeout (captured here,
+// before any test can fake it), so a wait that cannot finish costs at most a second instead of failing the hook.
+// The set is cleared at the end so nothing carries into the next test.
+const realSetTimeout = setTimeout;
 async function settleInFlight() {
   if (inFlight.size === 0) return;
   if (!vi.isFakeTimers()) {
-    for (let round = 0; round < 10 && inFlight.size > 0; round++) {
-      const pending = [...inFlight];
-      await Promise.all(pending);
-      pending.forEach((p) => inFlight.delete(p));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    const wait = (async () => {
+      for (let round = 0; round < 10 && inFlight.size > 0; round++) {
+        const pending = [...inFlight];
+        await Promise.all(pending);
+        pending.forEach((p) => inFlight.delete(p));
+        await new Promise((resolve) => realSetTimeout(resolve, 0));
+      }
+    })();
+    await Promise.race([wait, new Promise((resolve) => realSetTimeout(resolve, 1000))]);
   }
   inFlight.clear();
 }
