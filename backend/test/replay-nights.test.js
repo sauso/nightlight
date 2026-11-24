@@ -164,7 +164,11 @@ before(() => {
 // makes. If --old were ignored the numbers would be the real tree's and the night below would not differ as stated.
 // Options: `clock` makes every time the frozen "now" (new Date()), `reverse` builds the result with its keys in the
 // opposite order, `extra` adds literal-source fields (e.g. { scoring_context: "'x'" }).
-function fakeBackend({ clock = false, reverse = false, extra = {} } = {}) {
+// `rewrite` adds a stub src/lib/sleepRewrite.js: { previewWrites } makes a PREVIEW change the stored rows (the safety claim
+// "the preview wrote nothing" must then print false), { applyWrites } makes the apply change them and the undo NOT put
+// them back ("back exactly" must then print false). The two printed claims are computed from the rows, so only a backend
+// that breaks them can show the script does not just print true.
+function fakeBackend({ clock = false, reverse = false, extra = {}, rewrite = null } = {}) {
   const tree = mkTmp('nightlight-rn-fake-');
   const lib = path.join(tree, 'backend', 'src', 'lib');
   fs.mkdirSync(lib, { recursive: true });
@@ -183,14 +187,34 @@ function fakeBackend({ clock = false, reverse = false, extra = {} } = {}) {
     `const nights = [{ child_id: '${KID_FIRST.id}', night_date: '2026-07-01' }];`,
     `const kids = [{ id: '${KID_FIRST.id}' }, { id: '${KID_SECOND.id}' }];`,
     `const reviews = [{ child_id: '${KID_FIRST.id}', night_date: '2026-07-01', in_bed: '2026-07-01 19:31:00', onset: '2026-07-01 19:40:00', wake: '2026-07-02 06:00:00' }];`,
+    'const rows = [{ id: 1, status: "ok" }];',
     'export default {',
+    '  rows,',
     '  prepare(sql) {',
-    '    return { all: () => (/FROM children/.test(sql) ? kids : /sleep_reviews/.test(sql) ? reviews : /sleep_nights/.test(sql) ? nights : []) };',
+    '    return {',
+    '      all: () => (/FROM children/.test(sql) ? kids : /sleep_reviews/.test(sql) ? reviews : /SELECT \\* FROM sleep_nights/.test(sql) ? rows : /sleep_nights/.test(sql) ? nights : []),',
+    '      get: () => ({ n: rows.length }),',
+    '    };',
     '  },',
     '  close() {},',
     '};',
     '',
   ].join('\n'));
+  if (rewrite) {
+    fs.writeFileSync(path.join(lib, 'sleepRewrite.js'), [
+      "import db from '../db.js';",
+      `const previewWrites = ${!!rewrite.previewWrites}; const applyWrites = ${!!rewrite.applyWrites};`,
+      'export function rewritePastNights({ apply }) {',
+      '  if (!apply && previewWrites) db.rows.push({ id: db.rows.length + 1 });',
+      '  if (apply && applyWrites) db.rows.push({ id: db.rows.length + 1 });',
+      "  return { preview: 'p', changed: 0, figures_changed: 0, facts_only: 0, children: [] };",
+      '}',
+      "export const latestRewrite = () => ({ batch_id: 'b' });",
+      '// the undo deliberately restores nothing',
+      'export const undoRewrite = () => ({ restored: 0, skipped: {} });',
+      '',
+    ].join('\n'));
+  }
   return path.join(tree, 'backend');
 }
 
@@ -364,6 +388,18 @@ describe('scripts/replay-nights.mjs on a real database', () => {
     // The two claims that print true/false are COMPUTED, not asserted by the script: they must be true here.
     assert.match(r.stdout, /undo restored 1, left \{\}; every stored row is back exactly as in the snapshot: true/);
     assert.match(r.stdout, /a second update after the undo changed 1 \(the first changed 1\)/);
+  });
+
+  test('the two safety lines rewrite prints are computed: a preview that writes, or an undo that does not restore, prints false', () => {
+    const clean = run(['rewrite', fakeBackend({ rewrite: {} }), fixture.snap, `--clock=${CLOCK}`]);
+    assert.equal(clean.code, 0, clean.stderr);
+    assert.match(clean.stdout, /same hash twice: true; the preview wrote nothing: true/);
+    assert.match(clean.stdout, /every stored row is back exactly as in the snapshot: true/);
+    const wrote = run(['rewrite', fakeBackend({ rewrite: { previewWrites: true } }), fixture.snap, `--clock=${CLOCK}`]);
+    assert.match(wrote.stdout, /the preview wrote nothing: false/);
+    const kept = run(['rewrite', fakeBackend({ rewrite: { applyWrites: true } }), fixture.snap, `--clock=${CLOCK}`]);
+    assert.match(kept.stdout, /the preview wrote nothing: true/);
+    assert.match(kept.stdout, /every stored row is back exactly as in the snapshot: false/);
   });
 
   test('rewrite refuses a backend that predates Update past nights, and a path that is not a backend', () => {
