@@ -137,7 +137,12 @@ async function openBackend(backendDir, dbFile, clockMs, wantRewrite = false) {
     static now() { return clockMs; }
   };
   process.env.DATA_DIR = work;
-  const imp = (rel) => import(pathToFileURL(path.join(path.resolve(backendDir), 'src', rel)).href + `?replay=${Math.random()}`);
+  // The PLAIN file URL, never a cache-busting query (`?x=random`). Each backend directory is loaded once per process
+  // (compare refuses the same directory twice), so nothing needs busting, and a query makes the module a different
+  // "script" to V8: when this runs as a child inside `npm run test:core`'s coverage run, its near-empty coverage of
+  // `sleepAnalysis.js?x=...` replaced the real file's entry and the core gate fell to 70% lines (PR #1216, CI run
+  // 45325344988: sleepAnalysis.js 32.72% lines, 1.72% functions, exactly what this script alone covers).
+  const imp = (rel) => import(pathToFileURL(path.join(path.resolve(backendDir), 'src', rel)).href);
   let sa; let db; let rewrite = null;
   try {
     sa = await imp('lib/sleepAnalysis.js');
