@@ -115,7 +115,7 @@ export async function seedDemo(clock = () => new Date()) {
 
   const resetTables = [
     'esphome_readings', 'esphome_entities', 'esphome_devices', 'nlcam_readings',
-    'push_tokens', 'sessions', 'sleep_reviews', 'sleep_nights', 'bed_transitions',
+    'push_tokens', 'sessions', 'sleep_reviews', 'sleep_night_rewrites', 'sleep_nights', 'bed_transitions',
     'activity_samples', 'sensor_readings', 'detection_events', 'camera_events',
     'recordings', 'timelapses', 'cameras', 'children', 'users',
   ];

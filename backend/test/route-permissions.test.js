@@ -194,6 +194,9 @@ const ROUTE_GATES = {
   'GET /api/settings/mqtt/status': ADMIN,
   'GET /api/settings/clip-storage': ADMIN,
   'GET /api/settings/clip-retention-preview': ADMIN,
+  'GET /api/settings/sleep-rewrite': ADMIN,
+  'POST /api/settings/sleep-rewrite': ADMIN,
+  'POST /api/settings/sleep-rewrite/undo': ADMIN,
   'PUT /api/settings': ADMIN,
 
   'GET /api/logs': ADMIN,
