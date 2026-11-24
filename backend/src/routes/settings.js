@@ -6,6 +6,7 @@ import { applyRecordingSettingsChange } from '../lib/clipCapture.js';
 import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
 import { wakeClipStats } from '../lib/recordings.js';
 import { previewClipRetention } from '../lib/clipRetentionPreview.js';
+import { rewritePastNights, undoRewrite, latestRewrite } from '../lib/sleepRewrite.js';
 
 const router = Router();
 
@@ -142,6 +143,34 @@ router.get('/clip-retention-preview', requireAuth, requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'days must be a whole number from 0 to 365 and max_gb from 0 to 2000' });
   }
   res.json(previewClipRetention({ days, maxGb }));
+});
+
+function rewriteError(res, error) {
+  if (error.status && error.reason) return res.status(error.status).json({ error: error.message, reason: error.reason });
+  throw error;
+}
+
+router.get('/sleep-rewrite', requireAuth, requireAdmin, (req, res) => {
+  res.json(latestRewrite());
+});
+
+router.post('/sleep-rewrite', requireAuth, requireAdmin, (req, res) => {
+  const { apply, expect } = req.body || {};
+  if (apply !== undefined && typeof apply !== 'boolean') {
+    return res.status(400).json({ error: 'apply must be true or false', reason: 'invalid_apply' });
+  }
+  if (expect !== undefined && (typeof expect !== 'string' || !/^[0-9a-f]{64}$/.test(expect))) {
+    return res.status(400).json({ error: 'expect must be a preview hash', reason: 'invalid_expect' });
+  }
+  try {
+    return res.json(rewritePastNights({ apply: apply === true, expect, userId: req.user.id }));
+  } catch (error) { return rewriteError(res, error); }
+});
+
+router.post('/sleep-rewrite/undo', requireAuth, requireAdmin, (req, res) => {
+  try {
+    return res.json(undoRewrite({ batchId: req.body?.batch_id }));
+  } catch (error) { return rewriteError(res, error); }
 });
 
 function isValidTimezone(tz) {

@@ -54,7 +54,8 @@ before "asleep", so most nights still show one time. If you corrected a night's 
 camera's "In bed" is hidden and only your time is shown: the recorded put-down belongs to the bedtime
 you corrected, so it may not match yours. Correcting only the wake-up time keeps it. If you gave the
 **In bed** time yourself in the morning review, yours is shown, beside your asleep time too. A night
-saved before 0.35.0 has no "in bed" time on the sleep page until it's recomputed, and a night
+saved before 0.35.0 has no "in bed" time on the sleep page until it's recomputed (including through
+[Update past nights](#updating-past-nights-admins) while its minute data remains), and a night
 you corrected in the morning review is locked against that until the correction is removed (or give
 its **In bed** time yourself in the review). The detail page works the night out fresh each time, so
 it shows the time straight away.
@@ -261,8 +262,8 @@ the child's settings (shown once a child has two or more cameras).
   applies to every night computed afterwards, not only future ones: tonight's figures, the **morning
   review** (always worked out fresh), last night's saved summary while it can still be updated (up to
   about three hours after the wake time), a review correction that saves the night first, and an
-  admin's **Recompute**. Older saved summaries (the child's card) are not recomputed and keep the
-  numbers of the camera they were measured from. A finished night's **detail page** uses the camera it
+  admin's **Recompute**. Older saved summaries (the child's card) keep the
+  numbers of the camera they were measured from until an admin uses [Update past nights](#updating-past-nights-admins). A finished night's **detail page** uses the camera it
   was saved with too, with a switch to today's (see [Finished nights use the settings they were saved
   with](#finished-nights-use-the-settings-they-were-saved-with)); a night saved before nights recorded
   their camera uses today's. An admin's Recompute can instead use the camera a night was saved with:
@@ -360,7 +361,8 @@ start; when onset is after the window start, the 45-minute settle limit and the 
 check are the remaining protections. That occupied-bed check may initially accept a live
 onset because its 150-minute observation period is unfinished, then withdraw it later.
 
-Nights worked out before this change keep their saved figures until recomputed. The sleep
+Nights worked out before this change keep their saved figures until recomputed individually or with
+[Update past nights](#updating-past-nights-admins). The sleep
 detail page works a night out afresh, so it can differ from its saved card. For up to 28
 days, the child's "usual" can mix nights worked out under both rules. A comparison may
 then say "more sleep" or "more wakes" because of the rule change alone.
@@ -442,7 +444,8 @@ triggered** option (`detect_record_clips`) is off by default. A cry without an a
 one the model misses, falls back to the movement rule. Labels live with alert history; after
 an event is removed by retention, recomputing that older night can no longer use its cry label.
 Turn off **Listen for crying, coughing and talking in alert clips** to ignore stored cry labels
-as well as stop new analysis. Stored nights are not recomputed on upgrade, so expect a one-off
+as well as stop new analysis. Stored nights are not recomputed on upgrade unless an admin uses
+[Update past nights](#updating-past-nights-admins), so expect a one-off
 step in the sleep-score trend as newly worked-out nights use the changed rule.
 
 ### A microphone that looks faulty
@@ -671,7 +674,8 @@ than that is not taken as the morning wake on its own.
 - Because a night's answer now depends on the nights before it, working out an earlier night again
   (or deleting one) can change a later night's answer, even though nothing about that later night
   changed.
-- Nights already saved keep their figures until they are worked out again, and a night whose wake time
+- Nights already saved keep their figures until they are worked out again, including through
+  [Update past nights](#updating-past-nights-admins), and a night whose wake time
   was already sent in a notification is never cleared back to "still asleep" (a Recompute of it is
   refused, as before).
 
@@ -1557,8 +1561,8 @@ its frame, so a labelled picture is never deleted on a timer.
 
 ## Re-working out a night (admins)
 
-A night's summary is worked out once, the morning after, and
-then kept as it is — so if sleep detection is improved later, an already-recorded night keeps showing
+A night's summary is worked out the morning after, then kept until an admin updates it. If sleep detection
+is improved later, an already-recorded night keeps showing
 the old answer while the detail view, which works the night out fresh each time you open it (always with
 today's detection rules), shows the new one. **Recompute this night** on the sleep detail page reconciles
 them. It compares what is *saved* — the summary on the child's page — against what the recorded movement
@@ -1653,6 +1657,27 @@ For developers (the API behind the dialog, the detail page and the morning revie
   `stored_state` is `none` (no record), `unreadable` or `ok`, and `differs` counts the camera, timezone and
   window but not the rules version. Camera names are looked up when asked (`null` for one that no longer
   exists). More in [architecture.md](architecture.md), "Data layer".
+
+## Updating past nights (admins)
+
+After a sleep-scoring change, open **Settings → General → Update past nights** and press **Check what would change**.
+The check shows each child's changed nights, unchanged nights and reasons for skips. It saves nothing.
+Press **Update N nights** to apply the checked changes. If a saved night changes between the check and the
+update, nothing is applied; check again. Nothing runs automatically, and this action can be used again after
+later scoring changes.
+
+The action uses each night's saved camera, timezone and sleep window with today's scoring rules. It works
+from oldest to newest because a later night's wake calculation can depend on earlier stored nights. It leaves
+corrected or reviewed nights alone, including nights with only an answered or dismissed review. It also leaves
+the nightly job's current night, nights without saved settings, nights with sleep tracking off, and nights
+without all the minute or alert data needed for a faithful replay. Minute data is normally kept 30 days.
+The existing guards also leave a night alone if its saved camera is missing, the replay would lose its score
+or a notified wake time, or a scored night would become empty. Climate and sensor evidence are kept from the
+original row; this action re-scores sleep, not the room's measurements.
+
+**Undo these changes** restores nights from the latest update batch only. A night saved again or reviewed
+since that update is left alone. Notification history is kept. Each run has its own batch; older batches are
+not offered for undo. A child's update block runs synchronously; its duration has not been measured here.
 
 ## Known limits
 

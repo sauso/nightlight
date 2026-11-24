@@ -8,6 +8,7 @@ import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import { loadDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 import { useSettingsDraft } from '../lib/useSettingsDraft.js';
+import UpdatePastNights from '../components/UpdatePastNights.jsx';
 
 // The fields this screen edits: what Save sends, and what a reload-surviving draft may store (#377). All plain
 // strings, no secrets on this page.
@@ -156,6 +157,7 @@ export default function SettingsGeneral() {
             </button>
           </div>
         </form>
+        <UpdatePastNights />
       </main>
     </>
   );

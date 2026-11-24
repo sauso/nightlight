@@ -282,6 +282,20 @@ db.exec(`
     UNIQUE (child_id, night_date)
   );
 
+  -- A changed stored night and its exact undo fingerprint live in the same transaction.
+  -- The rows are deleted with the child rather than exposing old sleep data after deletion.
+  CREATE TABLE IF NOT EXISTS sleep_night_rewrites (
+    batch_id TEXT NOT NULL,
+    child_id TEXT NOT NULL,
+    night_date TEXT NOT NULL,
+    before_json TEXT NOT NULL,
+    after_json TEXT NOT NULL,
+    applied_at TEXT NOT NULL,
+    applied_by_user_id TEXT,
+    undone_at TEXT,
+    PRIMARY KEY (batch_id, child_id, night_date)
+  );
+
   -- Bed-boundary transition events from the frame-diff detector: a child leaving the bed
   -- ('out_of_bed') or being placed into it ('into_bed'), classified by the SEQUENCE of the in-bed vs
   -- outside-bed motion channels (see lib/motionDetector.js). Low-rate signal, distinct from the

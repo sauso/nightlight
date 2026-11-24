@@ -482,7 +482,7 @@ const SETTLING_WITNESS_CLIMBOUT_MIN = 1;
 // per camera per day. An early onset is only ACCEPTED under the two guards in computeNight (a real
 // into_bed, and sleep continuing into the window) — quiet alone is not evidence of a child, which is
 // the whole lesson of the empty-bed case below.
-const ONSET_LOOKBEHIND_MS = 3 * 60 * 60 * 1000;
+export const ONSET_LOOKBEHIND_MS = 3 * 60 * 60 * 1000;
 // An into_bed this long before a quiet run still counts as the put-down that started it (the child is
 // placed, fusses a little, then settles).
 const EARLY_ONSET_PUTDOWN_MS = 45 * 60 * 1000;
