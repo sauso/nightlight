@@ -421,6 +421,15 @@ the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — ther
 framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
 missing, keep it idempotent.
 
+**`lib/sleepRewrite.js` updates stored nights on an admin request.** It replays eligible nights in date
+order inside an immediate SQLite transaction. A preview uses the same write path and rolls the transaction
+back, so its result cannot drift from the apply path. Apply requires a check first (400 `preview_required`).
+The preview hash covers every candidate night's outcome, including unchanged and skipped nights, and rejects
+an apply if any outcome has moved. `sleep_night_rewrites` stores full before and after rows for changed nights,
+with one batch id per run. Undo makes one attempt on the latest batch and records nights it leaves in
+`undo_skip_reason`. It compares the entire current row with the after row, except notification ledger fields,
+before restoring the before row. A minute-level `computed_at` alone would miss a second save in the same minute.
+
 **`sleep_nights.scoring_context` records what produced a stored night** (#361, design in
 `planning/361-scoring-context.md`). A stored night used to keep the answer (times, minutes, status) but not the
 question, so any later re-score silently used today's camera and settings. Every store (`computeAndStoreNight`,
@@ -668,7 +677,8 @@ it. `detection_events.protected` and `recordings.protected` are 0/1 clip flags. 
 admin toggle routes are `GET /api/cameras/clips/protected`, `PUT /api/cameras/alerts/:id/protected` and
 `PUT /api/recordings/:id/protected`.
 Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
-`activity_samples`, `detection_events`, `camera_events`, `sensor_readings`, `sleep_nights`, `sleep_reviews`), so
+`activity_samples`, `detection_events`, `camera_events`, `sensor_readings`, `sleep_nights`, `sleep_reviews`,
+`sleep_night_rewrites`), so
 the database will not cascade for you. **A new table or column that names a child or camera (`child_id`,
 `camera_id`) must be added to `entityPurge.js`**, or `backend/test/entity-purge.test.js` fails: it finds every such
 column with `PRAGMA`, fills a row and real files in each, deletes over HTTP and checks nothing is left. The order is

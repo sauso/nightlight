@@ -305,6 +305,7 @@ export function purgeChild(childId) {
     db.prepare('UPDATE esphome_devices SET child_id = NULL WHERE child_id = ?').run(childId);
     for (const camId of cameraIds) db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(camId);
     db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(childId);
+    db.prepare('DELETE FROM sleep_night_rewrites WHERE child_id = ?').run(childId);
     db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(childId);
     db.prepare('UPDATE cameras SET child_id = NULL WHERE child_id = ?').run(childId);
     // These cameras now belong to nobody, so no OTHER child may keep naming one as its primary (#655).

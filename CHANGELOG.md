@@ -9,6 +9,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-11-24
+
+### Added
+
+- **Update past nights (admins, Settings → General).** After a sleep-scoring change, saved nights keep their old numbers on the child's card and in the "usual" averages until each is recomputed by hand. This re-scores every eligible saved night in one go, with the settings each night was saved with: **Check what would change** shows exactly what would move (nothing is written), then **Update** applies exactly that (if anything changed since the check, it asks you to check again), and the latest update can be undone once: a night saved again or reviewed since is left as it is. It runs only when pressed and can be run again after any later scoring change. It never touches a night you corrected or answered in the morning review, a night the nightly job still owns, or a night whose minute data is partly or wholly gone, and it never re-sources a night's room climate or sensor readings. No notification is sent for an updated night.
+
+### Changed
+
+- **Routine dependency updates, no behaviour change intended.** Backend: `better-sqlite3` 13.0.3 → 13.2.0 (the database library: SQLite 3.53.4 → 3.54.1, and a fix for a musl detection call that could hang; recomputing every stored night on both the production and staging databases gave identical results), `express-rate-limit` 8.7.4 → 8.7.5, `onnxruntime-web` 1.22.0 → 1.31.1 (the runtime behind the Crying, Coughing and Talking badges on alert clips: the real model gave the same scores as before to within float rounding on test clips, loads in the same worker, and the image grows by about 4 MB). Web app: `lucide-react` 1.75.0 → 1.77.0 (icons). Test tooling (not part of the image): `vitest` and `@vitest/coverage-v8` 5.1.0 → 5.1.1, `@testing-library/user-event` 14.6.10 → 14.6.13, `@testing-library/jest-dom` 7.0.1 → 8.0.0 (a major version that only drops support for vitest older than 5, which this project already left).
+- Node 26 is now the supported Node version for running and testing Nightlight: `.nvmrc`, `engines` in both `package.json` files (`>=26`), every CI workflow and the CI containers that test the entrypoint all use 26, matching the Docker image that has run it since 0.50.0. The pin test now requires all of them to agree, with no exception. The weekly "next Node major" preview workflow is retired (Node 27 has no release to preview yet). Nothing changes for a running install (#751).
+
 ## [0.50.0] - 2026-11-24
 
 ### Added

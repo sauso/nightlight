@@ -8,6 +8,7 @@ import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import { loadDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 import { useSettingsDraft } from '../lib/useSettingsDraft.js';
+import UpdatePastNights from '../components/UpdatePastNights.jsx';
 
 // The fields this screen edits: what Save sends, and what a reload-surviving draft may store (#377). All plain
 // strings, no secrets on this page.
@@ -149,6 +150,10 @@ export default function SettingsGeneral() {
               </button>
             </div>
           </div>
+
+          {/* A card like the two above it, so it sits ABOVE Save changes: Save belongs to the settings on this page, and
+              this card runs its own action (every control in it is type="button", so it can never submit this form). */}
+          <UpdatePastNights />
 
           <div className="form-actions">
             <button className="btn btn-primary" type="submit" disabled={busy}>
