@@ -561,6 +561,32 @@ describe('POST /setup — only before there is an account', () => {
     assert.equal(valid.status, 200, JSON.stringify(valid.body));
     assert.ok(bcrypt.compareSync('a-long-enough-password', db.prepare('SELECT password_hash FROM users WHERE username = ?').get('first').password_hash));
   });
+
+  // #1224: the same hygiene for the account's TEXT fields. Each of these used to throw on `.trim()` or in the database
+  // driver and answer 500 (Cloudflare strips a 5xx body, so the person saw no reason), after the password was hashed.
+  test('#1224 /setup: a non-text username or name gets a readable 400 before the hash, and leaves setup open', async () => {
+    db.prepare('DELETE FROM users').run();
+    // Few requests on purpose: /setup has its own 20-per-window limiter (setupLimiter) that the tests before this one
+    // already draw on, and a 429 here would hide the answer under test. 0 is falsy but still not text (`0?.trim()`
+    // throws), so it is tried once, on a name; the other two routes below try every value.
+    const cases = [
+      ...['username', 'first_name', 'last_name'].flatMap((field) => [42, { a: 1 }].map((value) => [field, value])),
+      ['first_name', 0],
+    ];
+    for (const [field, value] of cases) {
+      const before = passwordWorkerStats().submitted;
+      const res = await post('/setup', { username: 'first', password: 'a-long-enough-password', [field]: value });
+      const label = `${field}=${JSON.stringify(value)}`;
+      assert.equal(res.status, 400, `${label} returned ${res.status}: ${JSON.stringify(res.body)}`);
+      assert.deepEqual(res.body, { error: `${field} must be text.` }, label);
+      assert.equal(passwordWorkerStats().submitted, before, `${label} reached the hash worker`);
+      assert.equal(db.prepare('SELECT COUNT(*) c FROM users').get().c, 0, `${label} created an account`);
+    }
+    // Absent and null names are fine (they are optional), and text still works.
+    const ok = await post('/setup', { username: 'first', password: 'a-long-enough-password', first_name: null, last_name: ' Ada ' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(db.prepare('SELECT last_name FROM users WHERE username = ?').get('first').last_name, 'Ada');
+  });
 });
 
 describe('★★ no response ever carries a secret column', () => {
@@ -783,6 +809,26 @@ describe('user management is admin-only', () => {
     assert.ok(bcrypt.compareSync('a-long-enough-password', db.prepare('SELECT password_hash FROM users WHERE username = ?').get('new-account').password_hash));
   });
 
+  test('#1224 POST /users: a non-text username or name gets a readable 400 before the hash and creates nothing', async () => {
+    const token = await loginAs('alice');
+    const accounts = () => db.prepare('SELECT COUNT(*) c FROM users').get().c;
+    const startCount = accounts();
+    for (const field of ['username', 'first_name', 'last_name']) {
+      for (const value of [42, 0, false, true, { a: 1 }, ['x']]) {
+        const before = passwordWorkerStats().submitted;
+        const res = await post('/users', { username: 'new-account', password: 'a-long-enough-password', [field]: value }, token);
+        const label = `${field}=${JSON.stringify(value)}`;
+        assert.equal(res.status, 400, `${label} returned ${res.status}: ${JSON.stringify(res.body)}`);
+        if (!(field === 'username' && !value)) assert.deepEqual(res.body, { error: `${field} must be text.` }, label);
+        assert.equal(passwordWorkerStats().submitted, before, `${label} reached the hash worker`);
+        assert.equal(accounts(), startCount, `${label} created an account`);
+      }
+    }
+    // Absent and null names stay allowed.
+    const ok = await post('/users', { username: 'new-account', password: 'a-long-enough-password', first_name: null }, token);
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+  });
+
   test('an unknown role cannot be smuggled in — anything but "admin" is a caregiver', async () => {
     const token = await loginAs('alice');
     await post('/users', { username: 'eve', password: 'a-long-enough-pw', role: 'superuser' }, token);
@@ -962,6 +1008,32 @@ describe('gaps found by review — the success paths nobody reached', () => {
     const changed = db.prepare('SELECT first_name, password_hash FROM users WHERE id = ?').get('u-mfa');
     assert.equal(changed.first_name, 'Changed');
     assert.ok(bcrypt.compareSync('a-brand-new-password', changed.password_hash));
+  });
+
+  test('#1224 PUT /users/:id: a non-text username or name gets a readable 400 before the hash and changes nothing', async () => {
+    const token = await admin();
+    const beforeRow = db.prepare('SELECT * FROM users WHERE id = ?').get('u-mfa');
+    const beforeSessions = sessionsFor('u-mfa');
+    for (const field of ['username', 'first_name', 'last_name']) {
+      // null is a non-text USERNAME (it used to throw on `.trim()`), but a valid way to CLEAR a name, so it is
+      // checked separately below.
+      for (const value of [42, 0, false, true, { a: 1 }, ['x'], ...(field === 'username' ? [null] : [])]) {
+        const hashes = passwordWorkerStats().submitted;
+        const res = await put('/users/u-mfa', { password: 'a-brand-new-password', [field]: value }, token);
+        const label = `${field}=${JSON.stringify(value)}`;
+        assert.equal(res.status, 400, `${label} returned ${res.status}: ${JSON.stringify(res.body)}`);
+        assert.deepEqual(res.body, { error: `${field} must be text.` }, label);
+        assert.equal(passwordWorkerStats().submitted, hashes, `${label} reached the hash worker`);
+        assert.deepEqual(db.prepare('SELECT * FROM users WHERE id = ?').get('u-mfa'), beforeRow, `${label} changed the account`);
+        assert.deepEqual(sessionsFor('u-mfa'), beforeSessions, `${label} ended a session`);
+      }
+    }
+    // null still CLEARS a name, and text still works.
+    const clear = await put('/users/u-mfa', { first_name: null, last_name: ' Lovelace ' }, token);
+    assert.equal(clear.status, 200, JSON.stringify(clear.body));
+    const row = db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get('u-mfa');
+    assert.equal(row.first_name, null);
+    assert.equal(row.last_name, 'Lovelace');
   });
 
   test('★ an admin cannot delete their OWN account', async () => {
