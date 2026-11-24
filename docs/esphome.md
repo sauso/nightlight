@@ -54,9 +54,9 @@ A minute is drawn only when it counts as a measured minute by the same rule as t
 
 ## The sleep shadow (for comparison only)
 
-A camera sometimes logs a child as getting out of bed when they only turned over, and the morning wake time then comes out too early. A radar sensor at the bed can see whether a person's heartbeat or breathing is still there after that *got out of bed*. Nightlight now works out, beside each night, **the wake time it would have reported if it had listened to the sensor**, and stores it. **It changes nothing you see**: not the wake time, any other figure, the morning notification or an alert. It is evidence, collected so the idea can be checked on real nights before it is ever allowed to act.
+A camera sometimes logs a child as getting out of bed when they only turned over, and the morning wake time then comes out too early. A radar sensor at the bed can see whether a person's heartbeat or breathing is still there after that *got out of bed*. Nightlight now works out, beside each night, **the wake time it would have reported if it had listened to the sensor**, and stores it. **It changes nothing you see**: not the wake time, any other figure, the morning notification or an alert. It was collected so the idea could be checked on real nights, and it has now failed that check (see [Not promoted](#not-promoted)): it stays a comparison and is not planned to act.
 
-**Why it does not act yet.** The sensor cannot tell a child from an adult. If a parent stands at the bed within a few minutes of a child really getting up, the sensor reads their heartbeat, and the rule then wrongly sets the real *got out of bed* aside. In a test that added a parent's readings for six minutes shortly after the real wake on six recorded mornings, the sensor-based wake moved 56 to 91 minutes later on four of them. Until that case is understood, the sensor only shadows the real answer.
+**Why it does not act.** The sensor cannot tell a child from an adult. If a parent stands at the bed within a few minutes of a child really getting up, the sensor reads their heartbeat, and the rule then wrongly sets the real *got out of bed* aside. In a test that added a parent's readings for six minutes shortly after the real wake on six recorded mornings, the sensor-based wake moved 56 to 91 minutes later on four of them, and then a real morning did the same (see [Not promoted](#not-promoted)). So the sensor only shadows the real answer.
 
 **When it runs.** For a child whose ESPHome device reports a heart rate or a breathing rate, on every finished night (not the night in progress) that has those readings. Nightlight recognises the two by the sensor's name: "heart rate", and "respiratory rate", "respiration rate" or "breath rate" (with or without a space or underscore). A sensor named anything else ("Breathing rate", "Pulse", "HR" or a name in another language) is not used. A child with no such sensor is worked out exactly as before.
 
@@ -74,7 +74,15 @@ SELECT n.night_date, n.wake_at, n.wake_at_sensor, n.sensor_rejects, r.true_wake_
  ORDER BY n.child_id, n.night_date;
 ```
 
-Before the sensor is allowed to change a wake time, it should be right on **at least 15 reviewed nights**, including **at least 5 where an adult was at the bed within minutes of a real wake**, and make **none** of them worse.
+### Not promoted
+
+The bar for letting the sensor change a wake time was **at least 15 reviewed nights**, including **at least 5 where an adult was at the bed within minutes of a real wake**, and **none** made worse. It has been failed, so the sensor-based wake is **not promoted and nothing is planned to act on it**. The values keep being stored, for comparison.
+
+What the real nights showed (one house, two sensors; the first nights with a stored sensor value are from 2026-10-31):
+
+- Over about 47 finished nights with sensor readings, the rule set a *got out of bed* aside on **three**. Of the two that were reviewed, one changed nothing and one was **wrong**.
+- On that night the child left the bed at the time confirmed in the morning review. Someone then stayed in the sensor's view for the next hour (a person target at about 80 to 92 cm, where the child in bed had read about 43 to 57 cm, and heartbeats still being read), so the rule set the real exit aside and put the sensor-based wake **54 minutes later** than the confirmed one. That is the adult-at-the-bed case this page warned about, and it is the failure the bar forbids.
+- Since the values began to be stored, the rule has helped on none of the reviewed nights and hurt one, so the case for acting on it does not exist. A rule that tells a child from an adult (for example by the distance the person is read at) would have to be a new idea, measured on its own nights, with that one as the first test.
 
 **Limits, all of them known:**
 
