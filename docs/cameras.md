@@ -78,9 +78,11 @@ and **More about timing** reveals the longer note. Settings save automatically. 
 
 ## Where to put the camera
 
-Nightlight works from **any** camera position: put the camera wherever it fits and you will still get sleep tracking and motion alerts. A good position makes them **more reliable**, and nothing more than that. These are suggestions from testing in one household, not guarantees, and not a measured result (a proper comparison of positions has not been done yet).
+Nightlight works from **any** camera position: put the camera wherever it fits and you will still get sleep tracking and motion alerts. A good position makes them **more reliable**, and nothing more than that.
 
-- **The suggested view:** looking down at the bed from above, at about **45 degrees**, the way most baby monitors are mounted. Have the **whole bed in frame**, and the **doorway or room entry in view as well** if you can: seeing who comes in and goes out makes an entry or exit easier to tell from other movement.
+**The recommended view** is the one Nightlight is developed and tested against. It came from moving a camera in one household, which then read much more reliably. That is one room, so treat it as the best-tested position, not a guarantee, and not a measured comparison.
+
+- **The recommended view:** looking down at the bed from above, at about **45 degrees**, the way most baby monitors are mounted. Have the **whole bed in frame**, and the **doorway or room entry in view as well** if you can: seeing who comes in and goes out makes an entry or exit easier to tell from other movement.
 - **What to avoid:**
   - **A light that flashes, flickers or changes brightness in view of the bed** (a blinking charger or night light, a screen, a light that cycles). Every change lights up pixels in the bed, which can break the empty-bed check into short pieces, and a correct morning wake can then read wrong or be missed. Cover or move the light, or point the camera so it is out of frame.
   - **A bed zone that overlaps where a parent stands or leans** (for example a camera so low or side-on that a person at the bedside covers the bed in the picture). Their movement then counts as movement in the bed.
