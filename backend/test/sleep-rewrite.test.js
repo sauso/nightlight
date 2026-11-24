@@ -6,10 +6,10 @@ import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken,
 useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { computeAndStoreNight, lastCompletedNightDate } = await import('../src/lib/sleepAnalysis.js');
-const { rewritePastNights, undoRewrite, latestRewrite } = await import('../src/lib/sleepRewrite.js');
+const { rewritePastNights: rewriteRaw, undoRewrite, latestRewrite } = await import('../src/lib/sleepRewrite.js');
 const { default: settingsRouter } = await import('../src/routes/settings.js');
 const { demoGuard } = await import('../src/middleware/demoMode.js');
-const { purgeChild } = await import('../src/lib/entityPurge.js');
+const { purgeChild, purgeCamera } = await import('../src/lib/entityPurge.js');
 
 const CHILD = 'rewrite-child';
 const CAM = 'rewrite-camera';
@@ -18,6 +18,12 @@ const sql = (date) => date.toISOString().slice(0, 19).replace('T', ' ').replace(
 const at = (h, m, day = 0) => new Date(Date.UTC(2026, 6, 1 + day, h - 10, m));
 const rows = () => db.prepare('SELECT * FROM sleep_nights ORDER BY id').all();
 const backups = () => db.prepare('SELECT * FROM sleep_night_rewrites ORDER BY batch_id').all();
+function rewritePastNights(options = {}) {
+  if (options.apply === true && options.expect === undefined) {
+    return rewriteRaw({ ...options, expect: rewriteRaw({ apply: false }).preview });
+  }
+  return rewriteRaw(options);
+}
 let server;
 let adminToken;
 let careToken;
@@ -46,6 +52,10 @@ function stale() {
     avg_temperature = 21, avg_humidity = 42, wake_at_sensor = '2026-07-01 20:00:00', sensor_rejects = 3
     WHERE child_id = ?`).run(CHILD);
   return { original, before: rows()[0] };
+}
+function applyChecked(options = {}) {
+  const preview = rewritePastNights({ apply: false });
+  return rewritePastNights({ apply: true, expect: preview.preview, ...options });
 }
 
 before(async () => {
@@ -89,8 +99,10 @@ test('preview rolls back every row and exactly predicts the apply; evidence and 
 });
 
 test('unchanged night stays byte-identical with no backup', () => {
-  const before = stored();
-  const result = rewritePastNights({ apply: true });
+  stored();
+  db.prepare("UPDATE sleep_nights SET computed_at = '2026-07-02 03:00:00' WHERE child_id = ?").run(CHILD);
+  const before = rows()[0];
+  const result = applyChecked();
   assert.equal(result.children[0].unchanged, 1);
   assert.deepEqual(rows(), [before]);
   assert.deepEqual(backups(), []);
@@ -155,9 +167,10 @@ test('legacy settings, missing camera, lost score and missing alert history have
   const context = JSON.stringify({ v: 1, camera_id: CAM, tz: 'Australia/Melbourne',
     window: { start: '19:30', end: '07:00' }, algo: 'older' });
   db.prepare('UPDATE sleep_nights SET scoring_context = ? WHERE child_id = ?').run(context, CHILD);
-  db.prepare('DELETE FROM cameras WHERE id = ?').run(CAM);
-  assert.equal(rewritePastNights({ apply: true }).children[0].skipped.stored_camera_missing, 1);
+  purgeCamera(CAM);
+  assert.equal(applyChecked().children[0].skipped.stored_camera_missing, 1);
   db.prepare("INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path) VALUES (?, 'A camera', 'rtsp://example/x', ?, 'rewrite')").run(CAM, CHILD);
+  samples();
   db.prepare('UPDATE activity_samples SET motion_frames = 0 WHERE camera_id = ?').run(CAM);
   assert.equal(rewritePastNights({ apply: true }).children[0].skipped.would_downgrade, 1);
   db.prepare('UPDATE activity_samples SET motion_frames = 1 WHERE camera_id = ?').run(CAM);
@@ -312,6 +325,218 @@ test('a stale preview returns 409 and writes nothing', async () => {
   assert.equal(res.body.reason, 'changed_since_preview');
   assert.deepEqual(rows(), before);
   assert.deepEqual(backups(), []);
+});
+
+test('apply requires a valid check hash through both HTTP and the module', async () => {
+  stale();
+  const before = rows();
+  for (const expect of [undefined, 'invalid']) {
+    assert.throws(() => rewriteRaw({ apply: true, expect }), { status: 400, reason: 'preview_required' });
+    const res = await call(`${server.url}/api/settings/sleep-rewrite`, { method: 'POST', token: adminToken,
+      body: { apply: true, ...(expect === undefined ? {} : { expect }) } });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.reason, 'preview_required');
+    assert.equal(res.body.error, 'Check what would change first, then update.');
+  }
+  assert.deepEqual(rows(), before);
+  assert.deepEqual(backups(), []);
+});
+
+test('a review on an unchanged candidate invalidates the preview without writing', () => {
+  stored();
+  const preview = rewriteRaw({ apply: false });
+  assert.equal(preview.children[0].unchanged, 1);
+  db.prepare('INSERT INTO sleep_reviews (child_id, night_date, dismissed) VALUES (?, ?, 1)').run(CHILD, DATE);
+  const before = rows();
+  assert.throws(() => rewriteRaw({ apply: true, expect: preview.preview }), { reason: 'changed_since_preview' });
+  assert.deepEqual(rows(), before);
+  assert.deepEqual(backups(), []);
+});
+
+test('the three-hour look-behind needs its first sample at or before the boundary', () => {
+  stale();
+  db.prepare('DELETE FROM activity_samples WHERE bucket_start < ?').run(sql(at(18, 20)));
+  const insert = db.prepare(`INSERT INTO activity_samples
+    (camera_id, bucket_start, motion_level, motion_peak, sound_level, sound_peak, motion_frames, sound_windows)
+    VALUES (?, ?, 0.004, 0.004, 0, 0, 1, 0)`);
+  insert.run(CAM, sql(at(16, 29)));
+  assert.equal(rewriteRaw({ apply: false }).changed, 1);
+  db.prepare('DELETE FROM activity_samples WHERE bucket_start = ?').run(sql(at(16, 29)));
+  insert.run(CAM, sql(at(16, 31)));
+  const before = rows();
+  assert.equal(rewriteRaw({ apply: false }).children[0].skipped.partial_data, 1);
+  assert.deepEqual(rows(), before);
+});
+
+test('an in-progress old night remains owned by the nightly job', () => {
+  stale();
+  // A manual early save can exist outside the last completed date; the live end still belongs to the job.
+  db.prepare("UPDATE sleep_nights SET window_end = datetime('now', '+1 hour') WHERE child_id = ?").run(CHILD);
+  const before = rows();
+  assert.equal(rewriteRaw({ apply: false }).children[0].skipped.owned_by_nightly_job, 1);
+  assert.deepEqual(rows(), before);
+});
+
+test('an empty stored night can be replayed without the would-become-empty guard', () => {
+  stored();
+  db.prepare("UPDATE sleep_nights SET status = 'empty', asleep_minutes = 1 WHERE child_id = ?").run(CHILD);
+  db.prepare('UPDATE activity_samples SET motion_level = 0, motion_peak = 0 WHERE camera_id = ?').run(CAM);
+  const check = rewriteRaw({ apply: false });
+  assert.equal(check.children[0].skipped.would_become_empty, undefined);
+  assert.equal(check.changed + check.children[0].unchanged, 1);
+});
+
+test('protected clips cannot stand in for deleted ordinary alert history', () => {
+  db.prepare("UPDATE settings SET classify_alert_audio = 1 WHERE id = 'app'").run();
+  db.prepare(`INSERT INTO detection_events (camera_id, camera_name, type, audio_label, created_at)
+    VALUES (?, 'A camera', 'sound', 'cry', ?)`).run(CAM, sql(at(16, 0)));
+  stored();
+  db.prepare('DELETE FROM detection_events WHERE protected = 0').run();
+  db.prepare(`INSERT INTO detection_events (camera_id, camera_name, type, protected, created_at)
+    VALUES (?, 'A camera', 'sound', 1, ?)`).run(CAM, '2026-06-01 00:00:00');
+  const before = rows();
+  const check = rewriteRaw({ apply: false });
+  assert.equal(check.children[0].skipped.partial_data, 1);
+  assert.deepEqual(rows(), before);
+  assert.deepEqual(backups(), []);
+});
+
+test('replay retains the saved room climate after another sensor camera is assigned', () => {
+  samples();
+  db.prepare('INSERT INTO sensor_readings (camera_id, temperature, humidity, created_at) VALUES (?, 20, 40, ?)')
+    .run(CAM, sql(at(20, 0)));
+  assert.equal(computeAndStoreNight(CHILD, DATE).status, 'ok');
+  const original = rows()[0];
+  db.prepare("INSERT INTO cameras (id, name, rtsp_url, child_id, mediamtx_path) VALUES ('other-camera', 'Other camera', 'rtsp://example/y', ?, 'other')").run(CHILD);
+  db.prepare('INSERT INTO sensor_readings (camera_id, temperature, humidity, created_at) VALUES (?, 30, 80, ?)')
+    .run('other-camera', sql(at(20, 0)));
+  db.prepare('UPDATE sleep_nights SET asleep_minutes = 1 WHERE child_id = ?').run(CHILD);
+  const before = rows()[0];
+  assert.equal(applyChecked().changed, 1);
+  const after = rows()[0];
+  assert.equal(after.avg_temperature, original.avg_temperature);
+  assert.equal(after.avg_humidity, original.avg_humidity);
+  assert.deepEqual(JSON.parse(after.summary_facts).climate, JSON.parse(before.summary_facts).climate);
+});
+
+test('a legacy facts object without climate does not acquire today\'s climate', () => {
+  stale();
+  const facts = JSON.parse(rows()[0].summary_facts);
+  delete facts.climate;
+  db.prepare('UPDATE sleep_nights SET summary_facts = ? WHERE child_id = ?').run(JSON.stringify(facts), CHILD);
+  db.prepare('INSERT INTO sensor_readings (camera_id, temperature, humidity, created_at) VALUES (?, 26, 60, ?)')
+    .run(CAM, sql(at(20, 0)));
+  assert.equal(applyChecked().changed, 1);
+  assert.equal(Object.hasOwn(JSON.parse(rows()[0].summary_facts), 'climate'), false);
+});
+
+test('a null saved facts value does not acquire today\'s climate', () => {
+  stale();
+  db.prepare('UPDATE sleep_nights SET summary_facts = NULL WHERE child_id = ?').run(CHILD);
+  db.prepare('INSERT INTO sensor_readings (camera_id, temperature, humidity, created_at) VALUES (?, 26, 60, ?)')
+    .run(CAM, sql(at(20, 0)));
+  assert.equal(applyChecked().changed, 1);
+  assert.equal(Object.hasOwn(JSON.parse(rows()[0].summary_facts), 'climate'), false);
+});
+
+test('late minute evidence changes the after values and invalidates the preview', () => {
+  stale();
+  const preview = rewriteRaw({ apply: false });
+  assert.equal(preview.changed, 1);
+  db.prepare(`UPDATE activity_samples SET motion_level = 0.4, motion_peak = 0.4
+    WHERE bucket_start >= ? AND bucket_start < ?`).run(sql(at(19, 40)), sql(at(21, 0)));
+  const nextPreview = rewriteRaw({ apply: false });
+  assert.equal(nextPreview.changed, 1);
+  assert.notEqual(nextPreview.preview, preview.preview);
+  const before = rows();
+  assert.throws(() => rewriteRaw({ apply: true, expect: preview.preview }), { reason: 'changed_since_preview' });
+  assert.deepEqual(rows(), before);
+  assert.deepEqual(backups(), []);
+});
+
+test('a failure after a night write rolls its savepoint back and later nights continue', () => {
+  const { before } = stale();
+  db.prepare(`INSERT INTO activity_samples (camera_id, bucket_start, motion_level, motion_peak,
+    sound_level, sound_peak, motion_frames, sound_windows)
+    SELECT camera_id, datetime(bucket_start, '+1 day'), motion_level, motion_peak,
+      sound_level, sound_peak, motion_frames, sound_windows FROM activity_samples`).run();
+  db.prepare(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status,
+    onset_at, asleep_minutes, scoring_context, computed_at)
+    VALUES (?, '2026-07-02', '2026-07-02 09:30:00', '2026-07-02 21:00:00', 'ok',
+      '2026-07-02 06:56:00', 1, ?, '2026-07-03 00:00:00')`).run(CHILD, before.scoring_context);
+  db.exec(`CREATE TRIGGER fail_backup AFTER INSERT ON sleep_night_rewrites
+    WHEN NEW.night_date = '${DATE}' BEGIN SELECT RAISE(ABORT, 'injected backup failure'); END`);
+  try {
+    const result = applyChecked();
+    assert.equal(result.children[0].skipped.error, 1);
+    assert.equal(result.changed, 1);
+    assert.deepEqual(rows()[0], before);
+    assert.equal(backups().length, 1);
+    assert.equal(backups()[0].night_date, '2026-07-02');
+  } finally { db.exec('DROP TRIGGER fail_backup'); }
+});
+
+test('one undo attempt closes reviewed and re-saved rows', () => {
+  stale();
+  applyChecked();
+  const batch = latestRewrite().batch_id;
+  const rewritten = rows()[0];
+  db.prepare('INSERT INTO sleep_reviews (child_id, night_date, dismissed) VALUES (?, ?, 1)').run(CHILD, DATE);
+  assert.equal(undoRewrite({ batchId: batch }).skipped.corrected_since, 1);
+  db.prepare('DELETE FROM sleep_reviews').run();
+  assert.equal(latestRewrite().undoable, false);
+  assert.equal(latestRewrite().left, 1);
+  assert.equal(latestRewrite().restored, 0);
+  assert.throws(() => undoRewrite({ batchId: batch }), { reason: 'already_undone' });
+  assert.deepEqual(rows(), [rewritten]);
+  assert.equal(backups()[0].undo_skip_reason, 'corrected_since');
+});
+
+test('a re-saved night remains closed after the later save is put back', () => {
+  stale();
+  applyChecked();
+  const batch = latestRewrite().batch_id;
+  const rewritten = rows()[0];
+  db.prepare('UPDATE sleep_nights SET asleep_minutes = asleep_minutes + 1 WHERE child_id = ?').run(CHILD);
+  assert.equal(undoRewrite({ batchId: batch }).skipped.saved_again_since, 1);
+  db.prepare('UPDATE sleep_nights SET asleep_minutes = ? WHERE child_id = ?').run(rewritten.asleep_minutes, CHILD);
+  assert.equal(latestRewrite().undoable, false);
+  assert.throws(() => undoRewrite({ batchId: batch }), { reason: 'already_undone' });
+  assert.deepEqual(rows(), [rewritten]);
+});
+
+test('a restored batch is not undoable and older batches are refused', () => {
+  stale();
+  applyChecked();
+  const first = latestRewrite().batch_id;
+  assert.equal(undoRewrite({ batchId: first }).restored, 1);
+  assert.equal(latestRewrite().undoable, false);
+  assert.equal(latestRewrite().restored, 1);
+  assert.throws(() => undoRewrite({ batchId: first }), { reason: 'already_undone' });
+  applyChecked();
+  assert.notEqual(latestRewrite().batch_id, first);
+  assert.throws(() => undoRewrite({ batchId: first }), { reason: 'not_latest' });
+});
+
+test('undo during a running update is refused, and a deleted night is left as it is', () => {
+  stale();
+  applyChecked();
+  const batch = latestRewrite().batch_id;
+  db.prepare('UPDATE sleep_nights SET asleep_minutes = 1 WHERE child_id = ?').run(CHILD);
+  let refusal;
+  db.function('try_undo_during_update', () => {
+    try { undoRewrite({ batchId: batch }); } catch (error) { refusal = error; }
+    return 1;
+  });
+  db.exec(`CREATE TRIGGER try_undo_during_update BEFORE UPDATE ON sleep_nights
+    WHEN NEW.asleep_minutes <> OLD.asleep_minutes BEGIN SELECT try_undo_during_update(); END`);
+  try { applyChecked(); } finally { db.exec('DROP TRIGGER try_undo_during_update'); }
+  assert.equal(refusal.reason, 'in_progress');
+  assert.equal(refusal.status, 409);
+  const second = latestRewrite().batch_id;
+  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(CHILD);
+  assert.equal(undoRewrite({ batchId: second }).skipped.saved_again_since, 1);
+  assert.equal(latestRewrite().undoable, false);
 });
 
 test('the admin HTTP flow previews, applies strictly true, reads latest and undoes', async () => {

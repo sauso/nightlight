@@ -293,6 +293,7 @@ db.exec(`
     applied_at TEXT NOT NULL,
     applied_by_user_id TEXT,
     undone_at TEXT,
+    undo_skip_reason TEXT,
     PRIMARY KEY (batch_id, child_id, night_date)
   );
 

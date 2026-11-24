@@ -54,8 +54,8 @@ before "asleep", so most nights still show one time. If you corrected a night's 
 camera's "In bed" is hidden and only your time is shown: the recorded put-down belongs to the bedtime
 you corrected, so it may not match yours. Correcting only the wake-up time keeps it. If you gave the
 **In bed** time yourself in the morning review, yours is shown, beside your asleep time too. A night
-saved before 0.35.0 has no "in bed" time on the sleep page until it's recomputed (including through
-[Update past nights](#updating-past-nights-admins) while its minute data remains), and a night
+saved before 0.35.0 has no "in bed" time on the sleep page until you recompute that night. Those
+older rows lack saved settings, so [Update past nights](#updating-past-nights-admins) skips them. A night
 you corrected in the morning review is locked against that until the correction is removed (or give
 its **In bed** time yourself in the review). The detail page works the night out fresh each time, so
 it shows the time straight away.
@@ -1662,22 +1662,25 @@ For developers (the API behind the dialog, the detail page and the morning revie
 
 After a sleep-scoring change, open **Settings → General → Update past nights** and press **Check what would change**.
 The check shows each child's changed nights, unchanged nights and reasons for skips. It saves nothing.
-Press **Update N nights** to apply the checked changes. If a saved night changes between the check and the
-update, nothing is applied; check again. Nothing runs automatically, and this action can be used again after
+The update requires that check first. Press **Update N nights** to apply the checked changes. If any candidate
+night's result changes between the check and the update, nothing is applied; check again. Nothing runs automatically, and this action can be used again after
 later scoring changes.
 
 The action uses each night's saved camera, timezone and sleep window with today's scoring rules. It works
 from oldest to newest because a later night's wake calculation can depend on earlier stored nights. It leaves
 corrected or reviewed nights alone, including nights with only an answered or dismissed review. It also leaves
 the nightly job's current night, nights without saved settings, nights with sleep tracking off, and nights
-without all the minute or alert data needed for a faithful replay. Minute data is normally kept 30 days.
+without all the minute or unprotected alert data needed for a faithful replay. Protected clips can outlive
+ordinary alert history and do not satisfy that requirement. Minute data is normally kept 30 days.
 The existing guards also leave a night alone if its saved camera is missing, the replay would lose its score
-or a notified wake time, or a scored night would become empty. Climate and sensor evidence are kept from the
-original row; this action re-scores sleep, not the room's measurements.
+or a notified wake time, or a scored night would become empty. Room climate (including the stored climate
+summary) and sensor evidence are kept from the original row; this action re-scores sleep, not the room's measurements.
 
-**Undo these changes** restores nights from the latest update batch only. A night saved again or reviewed
-since that update is left alone. Notification history is kept. Each run has its own batch; older batches are
-not offered for undo. A child's update block runs synchronously; its duration has not been measured here.
+**Undo these changes** asks for confirmation and makes one attempt on the latest update batch only. A night
+saved again or reviewed since that update is left as it is, even if the later save or review is removed.
+Notification history is kept. Each run has its own batch; older batches are not offered for undo.
+The whole run across all children is one synchronous transaction. On 2026-11-24, it took about 0.2 s
+for 200 stored nights with 16 changed on a production snapshot, and 0.05 s on a staging snapshot.
 
 ## Known limits
 

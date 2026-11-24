@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
 
 const reasons = {
   tracking_off: 'Sleep tracking is off',
@@ -17,13 +19,21 @@ const reasons = {
   error: 'Could not work out this night',
 };
 
-function summary(row) {
-  return `asleep ${row.asleep_minutes ?? '—'} min, wakes ${row.wake_count ?? '—'}, onset ${row.onset_at ?? '—'}, wake ${row.wake_at ?? '—'}`;
+function fmtDur(min) {
+  if (min == null) return '—';
+  const hours = Math.floor(min / 60);
+  const minutes = min % 60;
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+function summary(row, fmtTime) {
+  return `asleep ${fmtDur(row.asleep_minutes)}, wakes ${row.wake_count ?? '—'}, onset ${fmtTime(row.onset_at)}, wake ${fmtTime(row.wake_at)}`;
 }
 const nightCount = (count) => `${count} ${count === 1 ? 'night' : 'nights'}`;
 
 export default function UpdatePastNights() {
   const { user } = useAuth();
+  const homeTime = useHomeTime();
+  const fmtTime = (utc) => utc ? homeTime.time(new Date(`${utc.replace(' ', 'T')}Z`)) : '—';
   const [latest, setLatest] = useState(null);
   const [report, setReport] = useState(null);
   const [open, setOpen] = useState(false);
@@ -31,6 +41,7 @@ export default function UpdatePastNights() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [done, setDone] = useState(false);
+  const [confirmUndo, setConfirmUndo] = useState(false);
 
   useEffect(() => {
     if (user?.role !== 'admin') return;
@@ -79,9 +90,10 @@ export default function UpdatePastNights() {
       setReport(null);
       setDone(false);
       setOpen(true);
-      setNotice(`Restored ${nightCount(result.restored)}.${Object.keys(result.skipped).length ? ' Some nights were saved or reviewed since and were left alone.' : ''}`);
+      const left = Object.values(result.skipped).reduce((sum, count) => sum + count, 0);
+      setNotice(`Restored ${nightCount(result.restored)}.${left ? ` ${nightCount(left)} were left as they are.` : ''}`);
     } catch (e) { setOpen(true); setError(e.message); }
-    finally { setBusy(false); }
+    finally { setConfirmUndo(false); setBusy(false); }
   }
 
   return <>
@@ -89,7 +101,8 @@ export default function UpdatePastNights() {
       <h2 className="card-heading">Update past nights</h2>
       <p>After sleep scoring changes, check saved nights and choose whether to update them. Nothing runs by itself.</p>
       <button type="button" className="btn btn-secondary" onClick={check} disabled={busy}>Check what would change</button>
-      {latest?.undoable && <button type="button" className="btn btn-secondary" onClick={undo} disabled={busy}>Undo these changes</button>}
+      {latest?.undoable && <button type="button" className="btn btn-secondary" onClick={() => setConfirmUndo(true)} disabled={busy}>Undo these changes</button>}
+      {latest && !latest.undoable && <p role="status">The last update can no longer be undone.{latest.left ? ` ${nightCount(latest.left)} were left as they are.` : ''}</p>}
     </section>
     {open && <Modal title="Update past nights" onClose={() => setOpen(false)} error={error}>
       {notice && <p role="status">{notice}</p>}
@@ -100,15 +113,22 @@ export default function UpdatePastNights() {
         {report.children.map((child) => <div key={child.child_id}>
           <h3>{child.name}</h3>
           {child.changed.map((night) => <p key={night.night_date}>
-            {night.night_date}: {night.figures_changed ? 'Figures changed' : 'Facts only'} — {summary(night.before)} → {summary(night.after)}
+            {homeTime.dayLabel(night.night_date)}: {night.figures_changed ? 'Figures changed' : 'Facts only'} — {summary(night.before, fmtTime)} → {summary(night.after, fmtTime)}
           </p>)}
           <p>{child.unchanged} unchanged</p>
           {Object.entries(child.skipped).map(([reason, count]) => <p key={reason}>{reasons[reason] || reason}: {count}</p>)}
         </div>)}
-        {!done && <button type="button" className="btn btn-primary" onClick={update} disabled={busy || !report.changed}>
+        {!done && <ModalActions><button type="button" className="btn btn-primary" onClick={update} disabled={busy || !report.changed}>
           Update {nightCount(report.changed)}
-        </button>}
+        </button></ModalActions>}
       </>}
+    </Modal>}
+    {confirmUndo && <Modal title="Undo the last update?" onClose={() => setConfirmUndo(false)}>
+      <p>Nights saved again or corrected since the update will be left as they are.</p>
+      <ModalActions>
+        <button type="button" className="btn btn-secondary" onClick={() => setConfirmUndo(false)} disabled={busy}>Cancel</button>
+        <button type="button" className="btn btn-danger" onClick={undo} disabled={busy}>Undo</button>
+      </ModalActions>
     </Modal>}
   </>;
 }

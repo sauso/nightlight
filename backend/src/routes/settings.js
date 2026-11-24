@@ -159,6 +159,9 @@ router.post('/sleep-rewrite', requireAuth, requireAdmin, (req, res) => {
   if (apply !== undefined && typeof apply !== 'boolean') {
     return res.status(400).json({ error: 'apply must be true or false', reason: 'invalid_apply' });
   }
+  if (apply === true && (typeof expect !== 'string' || !/^[0-9a-f]{64}$/.test(expect))) {
+    return res.status(400).json({ error: 'Check what would change first, then update.', reason: 'preview_required' });
+  }
   if (expect !== undefined && (typeof expect !== 'string' || !/^[0-9a-f]{64}$/.test(expect))) {
     return res.status(400).json({ error: 'expect must be a preview hash', reason: 'invalid_expect' });
   }

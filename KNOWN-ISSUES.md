@@ -1371,7 +1371,8 @@ someone retunes notifications.
   not a step away from a known-good one.
 - **Above 90 (up to 100, 0.2%) the threshold goes up**, and transitions can change in either direction
   (for example, a false exit that is recorded holds off a real one for the 2 minute pause).
-- **Stored history is not rewritten**, and neither are sleep nights already computed.
+- **Stored transition history is not rewritten.** Already computed sleep nights can be re-scored with
+  [Update past nights](docs/sleep-tracking.md#updating-past-nights-admins) when the saved settings and minute data remain.
 - **A noisy room can no longer be quieted for sleep tracking by lowering the sensitivity.** A fan, a
   curtain or infrared noise in the picture used to be tamed that way. Now only the detection zone helps
   (**Cameras → edit → detection zone**), and 1.19% of a small outside area is only a handful of pixels, so
