@@ -151,13 +151,16 @@ export default function SettingsGeneral() {
             </div>
           </div>
 
+          {/* A card like the two above it, so it sits ABOVE Save changes: Save belongs to the settings on this page, and
+              this card runs its own action (every control in it is type="button", so it can never submit this form). */}
+          <UpdatePastNights />
+
           <div className="form-actions">
             <button className="btn btn-primary" type="submit" disabled={busy}>
               {busy ? 'Saving…' : 'Save changes'}
             </button>
           </div>
         </form>
-        <UpdatePastNights />
       </main>
     </>
   );
