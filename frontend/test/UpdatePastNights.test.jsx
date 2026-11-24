@@ -26,7 +26,7 @@ describe('Update past nights', () => {
     await user.click(screen.getByRole('button', { name: /check what would change/i }));
     expect(await screen.findByText(/1 night would change/)).toBeInTheDocument();
     expect(screen.getByText(/Someone reviewed this night: 1/)).toBeInTheDocument();
-    expect(screen.getByText(/Some minute data is missing: 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Some minute data or alert history this night needs is missing: 2/)).toBeInTheDocument();
     expect(screen.getByText(/onset 7:00 pm/i)).toBeInTheDocument();
     expect(screen.queryByText(/onset 2026-07-01 09:00:00/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Figures changed/).closest('p')).toHaveTextContent(/01\/07\/2026/);
@@ -64,6 +64,12 @@ describe('Update past nights', () => {
     renderAsAdmin(<UpdatePastNights />);
     expect(await screen.findByText(/2 nights were left as they are/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /undo these changes/i })).not.toBeInTheDocument();
+  });
+
+  test('one night left by undo uses singular wording', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ ...latest, undoable: false, restored: 1, left: 1 });
+    renderAsAdmin(<UpdatePastNights />);
+    expect(await screen.findByText(/1 night was left as it is/i)).toBeInTheDocument();
   });
 
   test('only admins see the card', () => {

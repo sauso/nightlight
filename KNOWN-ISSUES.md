@@ -1459,7 +1459,8 @@ The minute after the *got into bed* is now excluded too: on 20 November 2026, th
 quiet, occupied witness minutes was the child's climb out after the real 06:22 exit. Counting it set that exit
 aside and let a later 09:03 exit become the wake on a fresh detail page. The night card still said 06:22
 because its stored row was written before that later exit existed. This change covers that shape; stored
-nights are not recomputed. A still sleeper's later quiet, occupied minutes still count, but a still
+nights are not automatically recomputed. An admin can use [Update past nights](docs/sleep-tracking.md#updating-past-nights-admins)
+to re-score eligible saved nights. A still sleeper's later quiet, occupied minutes still count, but a still
 sleeper can lose one quiet, occupied witness minute. The skip is anchored to the *got into bed* minute,
 not the exit: the pair is at most 60 seconds apart, so an exit in the next minute has its own minute
 skipped and a later climb-out minute can still count. The measured night's witness falls from six to five,

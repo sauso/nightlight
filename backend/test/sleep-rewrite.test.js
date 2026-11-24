@@ -476,6 +476,31 @@ test('a failure after a night write rolls its savepoint back and later nights co
   } finally { db.exec('DROP TRIGGER fail_backup'); }
 });
 
+test('a full database aborts the outer transaction and releases the update flag', () => {
+  const { before } = stale();
+  // The large saved fact makes the backup need new pages after the preview has rolled back.
+  db.prepare('UPDATE sleep_nights SET summary_facts = ? WHERE child_id = ?')
+    .run(JSON.stringify({ ...JSON.parse(before.summary_facts), climate: { padding: 'x'.repeat(200_000) } }), CHILD);
+  const preview = rewriteRaw({ apply: false });
+  assert.equal(preview.changed, 1);
+  // Preview's rolled-back backup may leave reusable pages; compact them before enforcing the cap.
+  db.exec('VACUUM');
+  const originalLimit = db.pragma('max_page_count', { simple: true });
+  try {
+    const pageCount = db.pragma('page_count', { simple: true });
+    db.pragma(`max_page_count = ${pageCount}`);
+    assert.throws(() => rewriteRaw({ apply: true, expect: preview.preview }), (error) => {
+      assert.equal(error.code, 'SQLITE_FULL');
+      assert.notEqual(error.reason, 'changed_since_preview');
+      return true;
+    });
+    assert.equal(db.inTransaction, false);
+  } finally {
+    db.pragma(`max_page_count = ${originalLimit}`);
+  }
+  assert.doesNotThrow(() => rewriteRaw({ apply: false }));
+});
+
 test('one undo attempt closes reviewed and re-saved rows', () => {
   stale();
   applyChecked();

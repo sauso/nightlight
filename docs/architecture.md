@@ -423,10 +423,12 @@ missing, keep it idempotent.
 
 **`lib/sleepRewrite.js` updates stored nights on an admin request.** It replays eligible nights in date
 order inside an immediate SQLite transaction. A preview uses the same write path and rolls the transaction
-back, so its result cannot drift from the apply path. The preview hash rejects an apply if the change list
-has moved. `sleep_night_rewrites` stores full before and after rows for changed nights, with one batch id per
-run. Undo compares the entire current row with the after row, except notification ledger fields, before
-restoring the before row. A minute-level `computed_at` alone would miss a second save in the same minute.
+back, so its result cannot drift from the apply path. Apply requires a check first (400 `preview_required`).
+The preview hash covers every candidate night's outcome, including unchanged and skipped nights, and rejects
+an apply if any outcome has moved. `sleep_night_rewrites` stores full before and after rows for changed nights,
+with one batch id per run. Undo makes one attempt on the latest batch and records nights it leaves in
+`undo_skip_reason`. It compares the entire current row with the after row, except notification ledger fields,
+before restoring the before row. A minute-level `computed_at` alone would miss a second save in the same minute.
 
 **`sleep_nights.scoring_context` records what produced a stored night** (#361, design in
 `planning/361-scoring-context.md`). A stored night used to keep the answer (times, minutes, status) but not the

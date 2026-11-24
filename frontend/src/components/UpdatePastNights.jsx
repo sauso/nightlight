@@ -10,7 +10,7 @@ const reasons = {
   no_saved_settings: 'Saved settings are unavailable',
   has_review: 'Someone reviewed this night',
   owned_by_nightly_job: 'The nightly job is still updating it',
-  partial_data: 'Some minute data is missing',
+  partial_data: 'Some minute data or alert history this night needs is missing',
   reviewed: 'Someone corrected this night',
   stored_camera_missing: 'The saved camera is missing',
   would_downgrade: 'Not enough data remains to score it',
@@ -29,6 +29,7 @@ function summary(row, fmtTime) {
   return `asleep ${fmtDur(row.asleep_minutes)}, wakes ${row.wake_count ?? '—'}, onset ${fmtTime(row.onset_at)}, wake ${fmtTime(row.wake_at)}`;
 }
 const nightCount = (count) => `${count} ${count === 1 ? 'night' : 'nights'}`;
+const leftAsIs = (count) => `${nightCount(count)} ${count === 1 ? 'was left as it is' : 'were left as they are'}`;
 
 export default function UpdatePastNights() {
   const { user } = useAuth();
@@ -91,7 +92,7 @@ export default function UpdatePastNights() {
       setDone(false);
       setOpen(true);
       const left = Object.values(result.skipped).reduce((sum, count) => sum + count, 0);
-      setNotice(`Restored ${nightCount(result.restored)}.${left ? ` ${nightCount(left)} were left as they are.` : ''}`);
+      setNotice(`Restored ${nightCount(result.restored)}.${left ? ` ${leftAsIs(left)}.` : ''}`);
     } catch (e) { setOpen(true); setError(e.message); }
     finally { setConfirmUndo(false); setBusy(false); }
   }
@@ -102,11 +103,11 @@ export default function UpdatePastNights() {
       <p>After sleep scoring changes, check saved nights and choose whether to update them. Nothing runs by itself.</p>
       <button type="button" className="btn btn-secondary" onClick={check} disabled={busy}>Check what would change</button>
       {latest?.undoable && <button type="button" className="btn btn-secondary" onClick={() => setConfirmUndo(true)} disabled={busy}>Undo these changes</button>}
-      {latest && !latest.undoable && <p role="status">The last update can no longer be undone.{latest.left ? ` ${nightCount(latest.left)} were left as they are.` : ''}</p>}
+      {latest && !latest.undoable && <p role="status">The last update can no longer be undone.{latest.left ? ` ${leftAsIs(latest.left)}.` : ''}</p>}
     </section>
     {open && <Modal title="Update past nights" onClose={() => setOpen(false)} error={error}>
       {notice && <p role="status">{notice}</p>}
-      <p>Corrected or reviewed nights are never touched. Nights without all their minute data are left as they are.</p>
+      <p>Corrected or reviewed nights are never touched. Nights without the minute data or alert history they need are left as they are.</p>
       {busy && <p>Checking nights…</p>}
       {report && <>
         <p>{done ? `Updated ${nightCount(report.changed)}` : `${nightCount(report.changed)} would change`}</p>

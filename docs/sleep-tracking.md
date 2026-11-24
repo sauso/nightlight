@@ -262,8 +262,9 @@ the child's settings (shown once a child has two or more cameras).
   applies to every night computed afterwards, not only future ones: tonight's figures, the **morning
   review** (always worked out fresh), last night's saved summary while it can still be updated (up to
   about three hours after the wake time), a review correction that saves the night first, and an
-  admin's **Recompute**. Older saved summaries (the child's card) keep the
-  numbers of the camera they were measured from until an admin uses [Update past nights](#updating-past-nights-admins). A finished night's **detail page** uses the camera it
+  admin's **Recompute**. Older saved summaries (the child's card) keep their saved numbers until an admin uses
+  [Update past nights](#updating-past-nights-admins), which re-scores each eligible night with its own saved
+  camera and settings. A finished night's **detail page** uses the camera it
   was saved with too, with a switch to today's (see [Finished nights use the settings they were saved
   with](#finished-nights-use-the-settings-they-were-saved-with)); a night saved before nights recorded
   their camera uses today's. An admin's Recompute can instead use the camera a night was saved with:
