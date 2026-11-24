@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-11-24
+
 ### Added
 
 - **Update past nights (admins, Settings → General).** After a sleep-scoring change, saved nights keep their old numbers on the child's card and in the "usual" averages until each is recomputed by hand. This re-scores every eligible saved night in one go, with the settings each night was saved with: **Check what would change** shows exactly what would move (nothing is written), then **Update** applies exactly that (if anything changed since the check, it asks you to check again), and the latest update can be undone once: a night saved again or reviewed since is left as it is. It runs only when pressed and can be run again after any later scoring change. It never touches a night you corrected or answered in the morning review, a night the nightly job still owns, or a night whose minute data is partly or wholly gone, and it never re-sources a night's room climate or sensor readings. No notification is sent for an updated night.
