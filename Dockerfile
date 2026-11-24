@@ -51,8 +51,11 @@ RUN apk add --no-cache python3 make g++
 COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev
 # Node's package export imports dist/ort.node.min.mjs, which dynamically loads only the
-# simd-threaded WASM loader and binary (measured with the Node entry in 1.22.0). Browser,
-# WebGPU/JSEP and source-map bundles add about 60 MB and are unused by this CPU worker.
+# simd-threaded WASM loader and binary (measured with the Node entry in 1.22.0, and again on 2026-11-24 with 1.31.1:
+# the real classifier worker loads and scores with only these three files left, and gives the same scores as 1.22.0 to
+# float32 rounding). Browser, WebGPU/JSEP, JSPI/asyncify (new in 1.31) and source-map bundles are unused by this CPU
+# worker and are deleted. Re-measure on every onnxruntime-web bump: a new loader the Node entry needs would fail only at
+# the first alert clip, not at build time.
 RUN find node_modules/onnxruntime-web/dist -maxdepth 1 -type f \
   ! -name 'ort.node.min.mjs' ! -name 'ort-wasm-simd-threaded.mjs' \
   ! -name 'ort-wasm-simd-threaded.wasm' -delete
