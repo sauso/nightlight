@@ -172,7 +172,7 @@ child's wake has been observed. Full analysis and the design-review history: ROA
 - **Option 3 — a rolling expected wake time per child from history**, holding the report until about
   then — not built; real design work (how much history, an unusual night, a new install).
 
-### 1.7 Observation time and coverage (#373) — instrument `SHIPPED` (0.34.0), consumers `SHIPPED` (0.35.0), Stage B + owed runs `NEXT`
+### 1.7 Observation time and coverage (#373, closed 2026-11-25) — instrument `SHIPPED` (0.34.0), consumers `SHIPPED` (0.35.0), follow-ups `HELD` (reopen if a night is traced to the clock)
 
 The observation clock (`lib/observationClock.js`) and each consumer that switched over to it are
 described in ROADMAP-archive.md §1.7, issue by issue. Shipped in 0.35.0: #493 (no fabricated frames in
@@ -197,15 +197,16 @@ detector watchdog). Every threshold in it came from one house's runs.
   and CPU with the clock on and off — the build's microbenchmark is a simulation, not this).
 
 **Open after 0.45.0 (2026-11-01):**
-- **ESPHome radar sensor, promotion decision (#917) — `HELD`.** 0.45.0 stores a shadow wake (`wake_at_sensor`,
-  `sensor_rejects`) beside each completed night and changes nothing shown. Promote it only with at least 15
-  reviewed nights, at least 5 of them with an adult at the bed right after a real exit, and none made worse
-  (the bar is in `docs/esphome.md`, "The sleep shadow"). Waits on nights and on the owner's morning reviews.
-- **Camera placement trial (#644) — `HELD`.** The docs half shipped in 0.36.0. The trial compares transition
-  accuracy and the empty-bed scan before and after a camera moves to the top-down view; both cameras of the
-  one install moved on 2026-10-29, so the earliest useful read is about three weeks later. A bed zone and the
-  room baselines change with a move, so before and after are not directly comparable: state that in the result.
-- **Late or missing morning wake (#700, #618 follow-ups) — `HELD`** until the shadow nights and reviews above exist.
+- **ESPHome radar sensor, promotion decision (#917) — `CLOSED`, not promoted (2026-11-25).** 0.45.0 stores a shadow
+  wake (`wake_at_sensor`, `sensor_rejects`) beside each completed night and changes nothing shown; it keeps being stored for
+  comparison. It failed its own bar ("none made worse"): on one reviewed night an adult stayed in the sensor's view and
+  the sensor wake came out 54 minutes late. The evidence is in `docs/esphome.md` ("Not promoted") and moved to §4.
+- **Camera placement (#644) — `CLOSED` (2026-11-25).** The 45 degree top-down view is the recommended position in
+  `docs/cameras.md`, stated as best-tested rather than measured (both cameras moved on 2026-10-29 together with a camera
+  model change and scoring improvements, so the position's own effect cannot be separated out). The measured before/after
+  trial and a Settings hint for a tiny or misplaced bed zone are not planned.
+- **Late or missing morning wake (#618 follow-up, #670, #936) — `HELD`** for a third occurrence (#700 was closed 2026-11-25:
+  the early-exit rule fired on 5 nights on staging and 2 on production ever, and the one reviewed agrees).
 - **A sleep window of almost 24 hours never closes the wake watcher's gate (#922) — `SHIPPED` (0.50.0).** The watcher's state now belongs to one window key and resets when the key changes.
 
 ### 1.8 Sleep Score and Night summary — phases 0 to 4 `SHIPPED` (0.48.0), 5 to 7 open
@@ -439,6 +440,13 @@ Stubs for finished items that code comments still cite (the full text is in git 
 
 Recorded so they don't get re-litigated. Each was considered and consciously parked.
 
+- **The radar sleep shadow acting on the wake (#917)** — `NOT PROMOTED 2026-11-25` (owner's call). The rule sets a
+  camera "got out of bed" aside when the ESPHome sensor still measures a person in at least 6 of the next 10 minutes. On the
+  real nights (one install, about 47 finished nights with a stored sensor value from 2026-10-31) it fired on three; of the two
+  reviewed, one changed nothing and one was wrong: an adult stayed at the sensor's edge for an hour (a person target at about
+  80 to 92 cm where the child in bed read 43 to 57 cm, heartbeats still read) and the sensor wake came out 54 minutes later
+  than the confirmed one. The distance limit cannot tell the two apart (see `docs/esphome.md`, "Not promoted"). A rule that
+  does would be a new idea measured on its own nights, with that night as the first test. The shadow values stay stored.
 - **Bed occupancy via camera vision** — `ABANDONED 2026-09-10` (owner's call). Was §2.5: a frozen
   MobileNetV3 backbone shipped once, plus a ~1,154-parameter per-install head fitted on ~20-60 frames
   the owner labels himself, vetoing bed-transition calls the motion detector gets wrong (Child B sleeps
