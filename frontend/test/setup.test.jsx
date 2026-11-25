@@ -273,7 +273,11 @@ describe('setup steps', () => {
     state = initial('in_progress', 'caregivers');
     api.post.mockResolvedValue({ id: 'u-new' });
     const view = wizard();
-    await view.user.type(await screen.findByLabelText('Username'), 'nanny');
+    // The form is disabled until the demo status answers (SetupCaregivers: readOnly while it is still unknown), so wait for it
+    // to ENABLE before typing: typing into it earlier is silently dropped (React 19 timing, #634).
+    const usernameField = await screen.findByLabelText('Username');
+    await waitFor(() => expect(usernameField).toBeEnabled());
+    await view.user.type(usernameField, 'nanny');
     await view.user.type(screen.getByLabelText('Password'), 'correct horse');
     await view.user.click(screen.getByRole('button', { name: 'Add caregiver' }));
     expect(await screen.findByRole('button', { name: 'Continue' })).toBeInTheDocument();
@@ -320,7 +324,8 @@ describe('setup steps', () => {
     state = initial('in_progress', 'remote');
     const view = wizard();
     expect(await screen.findByText('https://nightlight.example.ts.net/')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Maybe later' })).toBeNull();
+    // Waited for: the card tells the page it is ready from an effect, which React 19 runs after the commit that shows the address (#634).
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Maybe later' })).toBeNull());
     await view.user.click(await screen.findByRole('button', { name: 'Continue' }));
     expect(setupApi.progress).toHaveBeenCalledWith('review', 0);
   });

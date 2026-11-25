@@ -1188,10 +1188,15 @@ describe('★ the empty states each say a different thing', () => {
     vi.spyOn(api, 'get').mockImplementation((path) => {
       if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
       if (path.includes('/sleep/insights')) return Promise.resolve(null);
-      return new Promise((r) => { resolveNight = r; });
+      // Only the night's own request (`?detail=1`) is captured. The page also asks for /auth/status and the night strip,
+      // which stay pending: they used to overwrite `resolveNight` too, and under React 19 (#634) the night request is made
+      // AFTER "Loading night…" first shows, so resolving at once resolved the strip's request and the night never came.
+      if (path.includes('?detail=1')) return new Promise((r) => { resolveNight = r; });
+      return new Promise(() => {});
     });
     mount();
     expect(await screen.findByText('Loading night…')).toBeTruthy();
+    await waitFor(() => expect(resolveNight).toBeDefined());
     resolveNight(NIGHT);
     await waitFor(() => expect(screen.queryByText('Loading night…')).toBeNull());
   });
