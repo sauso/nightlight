@@ -344,7 +344,9 @@ describe('setup steps', () => {
     state = initial(status, 'review');
     const view = wizard();
     await screen.findByRole('heading', { name: "You're all set!" });
-    expect(navHidden()).toBe(true);
+    // Waited for, not read at once: the class is put on <html> by an effect (useSetupChrome), which React 19 flushes after
+    // the commit that shows the heading, so reading it the moment the heading appears raced the effect (#634 spike).
+    await waitFor(() => expect(navHidden()).toBe(true));
     view.unmount();
     expect(navHidden(), 'leaving the page gives the navigation back').toBe(false);
   });
