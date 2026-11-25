@@ -607,6 +607,22 @@ function refusedUnusablePassword(res, password) {
   return true;
 }
 
+// The text fields of an account form (#1224, split from #1157). A value that is not text reached `.trim()` or the
+// database driver and threw, which answers 500 (and Cloudflare strips a 5xx body, so the person saw no reason).
+// Refused with a 400 `<field> must be text.`, the wording the invite path and the notifier routes already use.
+// `username` is optional only by being absent (null is not a name; the routes keep their own "required"/"empty"
+// answers for a missing or blank one), the two names may also be null (that clears them on a PUT). Call it BEFORE
+// the password is hashed, so a refused form costs no hash. True (and the 400 already sent) when it refused.
+function refusedNonTextField(res, { username, first_name, last_name }) {
+  const bad =
+    (username !== undefined && typeof username !== 'string' ? 'username' : null) ||
+    (first_name != null && typeof first_name !== 'string' ? 'first_name' : null) ||
+    (last_name != null && typeof last_name !== 'string' ? 'last_name' : null);
+  if (!bad) return false;
+  res.status(400).json({ error: `${bad} must be text.` });
+  return true;
+}
+
 // One-time: create the first admin account. Locked once any user exists.
 router.post('/setup', setupLimiter, asyncHandler(async (req, res) => {
   if (userCount() > 0) {
@@ -620,6 +636,7 @@ router.post('/setup', setupLimiter, asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
   }
   if (refusedUnusablePassword(res, password)) return;
+  if (refusedNonTextField(res, { username, first_name, last_name })) return;
   const id = uuid();
   const password_hash = await passwordHash.hash(password, 10);
   // The hash yields to the event loop (#548), so a second /setup can pass the check above while this one
@@ -858,6 +875,7 @@ router.post('/users', requireAuth, requireAdmin, asyncHandler(async (req, res) =
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
   }
   if (refusedUnusablePassword(res, password)) return;
+  if (refusedNonTextField(res, { username, first_name, last_name })) return;
   // Hashed BEFORE the username-taken check, not after: the async hash yields, and a check made before it
   // would let two simultaneous creates of one name both pass and the second die on the UNIQUE index (500).
   // Everything from the check to the INSERT stays synchronous.
@@ -892,6 +910,9 @@ router.post('/users', requireAuth, requireAdmin, asyncHandler(async (req, res) =
 const discardPendingSetup = db.prepare('UPDATE users SET mfa_secret = NULL, mfa_last_step = NULL WHERE id = ? AND mfa_enabled = 0');
 
 router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
+  // First of all, so a form with a non-text field costs no hash (#1224; the 404 below yields to it, as a malformed
+  // body does everywhere else here).
+  if (refusedNonTextField(res, req.body || {})) return;
   // Hash first (#548), so every read-validate-write step below stays synchronous, as it was. Only for a
   // password that will pass the length check below; the rest fall through to the same 400/404 as before.
   // Hashing for a user that turns out not to exist is wasted work, bounded by the admin gate.

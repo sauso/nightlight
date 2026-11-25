@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.51.1] - 2026-11-25
+
+### Changed
+
+- **Docs: the camera guide now recommends the top-down view at about 45 degrees (#644), and the radar sleep shadow is recorded as not promoted (#917).** `docs/cameras.md` says the view is the best-tested position (one household, both cameras moved together with a camera model change, so it is not a measured comparison) and that any position still works. `docs/esphome.md` ("Not promoted") says the radar-based wake did not meet its own bar on real nights and nothing is planned to act on it; the stored comparison values stay. Also the routine `react-router-dom` patch update (7.18.6).
+
+### Fixed
+
+- **A username or name that is not text is refused with a readable error, instead of a 500 or a wrong account (#1224).** Setting up the first admin, adding a user and editing a user now answer `400` with "username must be text." (or `first_name`, `last_name`) before the password is hashed. Before, editing a user with a numeric username answered 500, and the first-run setup and Add user quietly accepted a numeric username and stored it as a number (a username `42` came back as `42.0`). Names may still be left out or `null`.
+
 ## [0.51.0] - 2026-11-24
 
 ### Added
