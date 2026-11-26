@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **The web app now runs on React 19 (19.3.1), up from 18.3.1 (#634).** No screen or setting changes. An audit found no removed or changed React feature in use, and no app source file needed to change. Six tests were fixed because they read a result the instant the page appeared, before React 19's later effect flush had produced it; they now wait for it. Not covered by automated tests, so checked on staging by hand: live video (WebRTC and HLS), picture-in-picture, background audio in the Android app, drag reorder, the crash screen and the stale-page retry.
+
 ## [0.51.1] - 2026-11-25
 
 ### Changed
