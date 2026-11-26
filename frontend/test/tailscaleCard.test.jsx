@@ -438,7 +438,9 @@ test('in the demo a failed load offers no Retry', async () => {
 test('rename starts from the name the device really has', async () => {
   const view = card({ ...ready, hostname: 'nightlight-staging', dns_name: 'nightlight-staging-1.example.ts.net' });
   fireEvent.click(await screen.findByText('Advanced'));
-  expect(screen.getByLabelText('Rename this device')).toHaveValue('nightlight-staging-1');
+  // Waited for: the field is filled by an effect (TailscaleCard syncs `name` to the device's real name), which React 19 runs
+  // after the commit that shows the field (#634).
+  await waitFor(() => expect(screen.getByLabelText('Rename this device')).toHaveValue('nightlight-staging-1'));
   expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   await view.user.clear(screen.getByLabelText('Rename this device'));
   await view.user.type(screen.getByLabelText('Rename this device'), 'nightlight-staging');

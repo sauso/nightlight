@@ -263,7 +263,8 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ scope: 'last', night: { ...OK_NIGHT, score: { ...SCORE, score: 60, band: 'fair' } } });
     const { unmount } = renderAsAdmin(<SleepSummaryCard childId="kid-1" onBand={onBand} />);
     await asleep('10h 37m asleep');
-    expect(onBand).toHaveBeenLastCalledWith('fair');
+    // Waited for: the band is reported to the parent by an effect, which React 19 runs after the commit that shows the text.
+    await waitFor(() => expect(onBand).toHaveBeenLastCalledWith('fair'));
     unmount();
     expect(onBand).toHaveBeenLastCalledWith(null);
   });
