@@ -798,7 +798,11 @@ make the container a sandbox, and it does not stop everything:
 - **MediaMTX's control API (`127.0.0.2:9997`) and its RTSP port (`127.0.0.2:8554`) have no password.** A taken-over
   media program can add, change or remove stream paths, and read or publish a camera's stream. It cannot get a camera's
   address or password from them: MediaMTX is never told them (FFmpeg connects to the camera itself). A password on the
-  API would not help while all the media programs share one user, which can already signal or inspect MediaMTX. The
+  API would not help while all the media programs share one user, which can already signal or inspect MediaMTX. On
+  **host networking** (the default in `docker-compose.yml`) `127.0.0.2` is the server's own loopback, not the
+  container's, so another host-networked container, or any local user on the server, can reach the same two ports
+  with no password, and can add paths or read and publish a camera's stream through them. Treat everything else
+  that runs on the server as able to watch the cameras, and keep untrusted containers off host networking. The
   passwords that can be read are the ones on FFmpeg's command line, next.
 - **Camera passwords are on FFmpeg's command line,** visible to every process in the container, and they are in that
   FFmpeg's memory too. Whether another media program can read that memory depends on your host's kernel: where Yama's

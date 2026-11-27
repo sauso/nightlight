@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- **Docs: the media isolation limits now say that on host networking, other containers and local users on the server can reach MediaMTX's password-free ports.** This is how it already behaved; it was not written down. No setting or behaviour changes.
+
 - **The web app now runs on React 19 (19.3.1), up from 18.3.1 (#634).** No screen or setting changes. An audit found no removed or changed React feature in use, and no app source file needed to change. Six tests were fixed because they read a result the instant the page appeared, before React 19's later effect flush had produced it; they now wait for it. Automated tests cannot show these, so they are checked by hand on staging before a release: live video (WebRTC and HLS), picture-in-picture, background audio in the Android app, drag reorder, the crash screen and the stale-page retry.
 
 ## [0.51.1] - 2026-11-25
