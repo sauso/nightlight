@@ -17,7 +17,8 @@ function timeAgo(iso) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-// The small status pill on a row for the caregiver invite feature (#1094), or null for an ordinary account. Three states, from the
+// The small status pill on a row: a disabled account (#1233, below) or the caregiver invite feature (#1094), or null for an
+// ordinary account. The invite's three states, from the
 // fields GET /auth/users adds (all additive: a server older than this sends none of them and no pill shows):
 //  - password_set === false with a live invite: "Invite pending" (they have a link and have not used it);
 //  - password_set === false with invite_expires_at null: "No active invite". NOT "expired": null also means revoked or never made,
@@ -25,7 +26,14 @@ function timeAgo(iso) {
 //  - invite_accepted_at set (the server sends it for 7 days after the invite was used): "Joined <date>".
 // `=== false`, not falsy, so an account with no `password_set` key is not mistaken for a pending one.
 // Colours are the existing status-badge modifiers (gold highlight, grey, green), which already have both themes.
-function invitePill(u, formatDay) {
+//
+// #1233: a disabled account shows "Disabled" INSTEAD of any invite pill. It is the thing an admin needs to know first, and the
+// invite pill would mislead: a disabled account's invite does not work (the server sends invite_expires_at null), so a pending
+// one would read "No active invite" although the invite is kept and works again once the account is enabled. Grey (`--off`), the
+// neutral colour a disabled camera also gets: a choice an admin made, not a fault. `=== true`, so a server older than this
+// feature (no `disabled` key) shows no pill for it.
+function statusPill(u, formatDay) {
+  if (u.disabled === true) return { text: 'Disabled', cls: 'status-badge--off' };
   if (u.password_set === false) {
     return u.invite_expires_at
       ? { text: 'Invite pending', cls: 'status-badge--highlight' }
@@ -120,7 +128,7 @@ export default function SettingsUsers() {
             const sessions = allSessions.filter((s) => s.user_id === u.id);
             const isOpen = expanded.has(u.id);
             const panelId = `user-sessions-${u.id}`;
-            const pill = invitePill(u, (d) => day(d, { month: 'short', day: 'numeric' }));
+            const pill = statusPill(u, (d) => day(d, { month: 'short', day: 'numeric' }));
             return (
               <div className="user-row" key={u.id}>
                 {/* The row is two SIBLING controls, not one button holding another: a button inside a role=button

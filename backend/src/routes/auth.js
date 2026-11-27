@@ -414,7 +414,10 @@ class LastAdminError extends Error {}
 // refuse the change that would leave it so. The API never makes a pending admin (invites are for caregivers, and PUT
 // /users/:id refuses the role while the account is pending), so this only matters for a database edited by hand or
 // restored from elsewhere; it is the same post-condition, counted honestly.
-const adminCount = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND password_set = 1");
+// Nor does a disabled admin (#1233): it cannot sign in either. So disabling, demoting or removing the last ENABLED admin
+// is refused (409), and an install whose other admins are all disabled keeps one that can sign in and switch them back
+// on. Re-enabling never needs this guard (it can only raise the count).
+const adminCount = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND password_set = 1 AND disabled = 0");
 
 // Issue #441: the sole admin could demote themselves via PUT (sending role=caregiver), and the very
 // next request from ANYONE reads the new role straight from the database (middleware/auth.js, issue
@@ -447,6 +450,8 @@ function keepingAnAdmin(mutate) {
 }
 
 const LAST_ADMIN_MESSAGE = 'This is the only admin account. Make another account an admin first, then change this one.';
+// #1233: what /login answers for a disabled account whose password is right (see that route for why only then).
+const ACCOUNT_DISABLED_MESSAGE = 'This account is disabled. Ask an admin.';
 
 function demoMaxGuests() {
   const configured = Number(process.env.DEMO_MAX_GUESTS ?? 25);
@@ -703,6 +708,15 @@ function adminRightsEnded(req, res) {
   return true;
 }
 
+// #1233: is the account disabled, or gone, NOW? For a sign-in path that awaited something after it last read the row
+// (/login/mfa's backup-code compare), called with no await between it and createSession. `disabled` is NOT NULL, so
+// anything but 0 is disabled (the same rule as the SQL's `disabled = 0` everywhere else).
+const accountDisabledState = db.prepare('SELECT disabled FROM users WHERE id = ?');
+function accountDisabledOrGone(userId) {
+  const row = accountDisabledState.get(userId);
+  return !row || row.disabled !== 0;
+}
+
 router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
   const user =
@@ -740,6 +754,19 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   if (!current || current.password_hash !== user.password_hash) {
     return res.status(401).json({ error: 'Incorrect username or password' });
   }
+  // #1233: a disabled account, told so, but ONLY now that its password has verified (the owner's decision for #1233).
+  // Everything before this line is exactly what any other account goes through: the same compare, the same throttle
+  // count (a correct password counts as a success, as for any account), and a wrong password, or an unknown name, gets
+  // the generic 401 above. So the distinct answer tells nothing to someone who does not already know the password, and
+  // says no more to someone who does than a sign-in would (that the password is right). 403, not 401: the web app (and
+  // so the Android app, which runs the same web code) treats ANY 401 as "this sign-in is over" (frontend lib/api.js),
+  // while a 403 is shown as the message; and a 4xx, because Cloudflare strips the body of a 5xx. Read from `current`,
+  // AFTER the compare's await, so an admin who disables the account while its password is being compared wins (the
+  // #261-style re-read above).
+  // Before the two-factor branch: a disabled account gets no MFA token either.
+  if (current.disabled !== 0) {
+    return res.status(403).json({ error: ACCOUNT_DISABLED_MESSAGE, code: 'ACCOUNT_DISABLED' });
+  }
   // Password is correct. If the account has two-factor on, don't issue a session yet — hand back a
   // short-lived token the client exchanges at /login/mfa after the second step.
   if (current.mfa_enabled) {
@@ -765,6 +792,9 @@ router.post('/login/mfa', mfaLimiter, asyncHandler(async (req, res) => {
   // #1094 (Codex plan review C1): an MFA token minted before the account was made pending must not finish a sign-in.
   // The same answer as a token for an account that no longer exists.
   if (user.password_set !== 1) return res.status(401).json({ error: 'Invalid verification token' });
+  // #1233: nor for a disabled account (an MFA token minted before the disable lives 5 minutes). The same answer again,
+  // so the second step says nothing /login did not.
+  if (user.disabled !== 0) return res.status(401).json({ error: 'Invalid verification token' });
 
   // Try the authenticator code first, then fall back to consuming a one-time backup code.
   //
@@ -796,6 +826,12 @@ router.post('/login/mfa', mfaLimiter, asyncHandler(async (req, res) => {
   }
   if (!ok) return res.status(401).json({ error: 'Incorrect code' });
 
+  // #1233 (Codex plan review, High): the backup-code compare above yields to the hash worker, long enough for an admin
+  // to disable the account while it runs. The disable deletes the account's sessions, so a session made after it would
+  // be a sign-in that outlived the disable. The row is read again here, with NO await between this check and
+  // createSession, and a disabled account (or one removed meanwhile, whose session insert would fail its foreign key)
+  // gets the same answer as above. The code is spent either way, the safe direction (as for the step claim above).
+  if (accountDisabledOrGone(user.id)) return res.status(401).json({ error: 'Invalid verification token' });
   const sessionId = createSession(user.id, req.headers['user-agent']);
   res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
 }));
@@ -856,11 +892,13 @@ router.delete('/sessions/:id', requireAuth, (req, res) => {
 // Admin: manage caregiver accounts.
 // The list only (not every user object) also says, per account, whether it has a password and where its invite stands
 // (#1094): `password_set`, `invite_expires_at` and `invite_accepted_at` (see inviteFields). Added keys only, so a page
-// opened before the update keeps working.
+// opened before the update keeps working. And `disabled` (#1233, a boolean): here and in the answer of PUT
+// /users/:id/disabled only, NOT in toPublicUser, so /me, /login and every other user object keep their shape. A screen
+// treats a missing key as enabled (a server older than #1233 sends none).
 router.get('/users', requireAuth, requireAdmin, (req, res) => {
   const users = db.prepare('SELECT * FROM users ORDER BY created_at').all();
   const invites = inviteStatesByUser();
-  res.json(users.map((u) => ({ ...toPublicUser(u), ...inviteFields(u, invites.get(u.id)) })));
+  res.json(users.map((u) => ({ ...toPublicUser(u), ...inviteFields(u, invites.get(u.id)), disabled: u.disabled !== 0 })));
 });
 
 router.post('/users', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
@@ -1364,6 +1402,56 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   res.status(204).end();
 });
 
+// Admin: disable or re-enable an account (#1233). Reversible, unlike removing it: the account, its history (camera
+// history, morning reviews: the attribution is untouched, as for removal), its settings, its two-factor and any open
+// invite are kept. While disabled it cannot sign in (/login answers 403 ACCOUNT_DISABLED, and only after a correct
+// password), cannot finish a second step (/login/mfa), cannot use an invite (/invite/check and /invite/redeem give the
+// usual invite_invalid), and no session of it authenticates (middleware/auth.js). The body is `{ disabled: true|false }`,
+// the boolean only: a "true" string or a 1 from a sloppy client is a 400, never a guess. Idempotent: asking again for
+// the state an account is already in answers 200 with the same account.
+//
+// Disabling also, in the SAME transaction, so a refused change leaves everything as it was:
+//   * ends every session of the account and drops its push registrations. push_tokens first (it has no FK to sessions,
+//     so the subquery must see them before they go), by session AND by user_id, like the invite redeem: a registration
+//     tied to the account but to no live session goes too. Its devices are signed out at their next request and stop
+//     getting the app's alerts at once; its open live views close within one 15 s sweep (index.js). Pushover, ntfy and
+//     Gotify are household-wide, not per account, so they are NOT touched (Codex plan review; the docs say so);
+//   * runs inside keepingAnAdmin, so the last ENABLED admin cannot be disabled (409). Like DELETE's, the guard cannot
+//     fire today: the caller is an enabled admin and is not the target (the self check below), so disabling another
+//     enabled admin always leaves the caller. It holds the invariant for the day an await is added to this handler.
+// Re-enabling brings NO session back: the person signs in again (the docs say so). It can only raise the admin count,
+// so the guard never refuses it. Disabling your own account is refused (400), as removing it is: you would be signed
+// out at once with no way back but another admin. Enabling yourself is not refused: you are signed in, so you are
+// enabled already, and nothing changes.
+// Synchronous on purpose: no await anywhere between the checks and the writes.
+const setDisabled = db.prepare('UPDATE users SET disabled = ? WHERE id = ?');
+router.put('/users/:id/disabled', requireAuth, requireAdmin, (req, res) => {
+  const disabled = req.body?.disabled;
+  if (typeof disabled !== 'boolean') {
+    return res.status(400).json({ error: 'disabled must be true or false.' });
+  }
+  if (disabled && req.params.id === req.user.id) {
+    return res.status(400).json({ error: "You can't disable your own account" });
+  }
+  const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'User not found' });
+  try {
+    keepingAnAdmin(() => {
+      setDisabled.run(disabled ? 1 : 0, req.params.id);
+      if (disabled) {
+        db.prepare('DELETE FROM push_tokens WHERE user_id = ? OR session_id IN (SELECT id FROM sessions WHERE user_id = ?)')
+          .run(req.params.id, req.params.id);
+        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(req.params.id);
+      }
+    });
+  } catch (e) {
+    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });
+    throw e;
+  }
+  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  res.json({ ...toPublicUser(row), disabled: row.disabled !== 0 });
+});
+
 // --- Caregiver invites (#1094) -----------------------------------------------------------------------------------
 //
 // An admin creates a caregiver account WITHOUT a password and gets a one-time link (a QR code in the app); the
@@ -1393,7 +1481,7 @@ const INVITE_TTL_DAYS = 7;
 // same answer as an unknown token, after the same lookup (see liveInvite).
 const INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 // ONE answer for every invite that cannot be used: unknown, expired, already used, revoked, malformed, or one whose
-// account is no longer a pending caregiver. Same status, same body, about the same work, so nothing tells a
+// account is no longer a pending caregiver or is disabled (#1233). Same status, same body, about the same work, so nothing tells a
 // guesser which of those it was (no enumeration). A machine-readable code, not a sentence: the page words it.
 const INVITE_INVALID = { error: 'invite_invalid' };
 // How long the Users list keeps saying an invite was accepted ("joined", L7). Not a security rule: long enough for an
@@ -1484,8 +1572,12 @@ const inviteRedeemInFlight = new Set();
 // ONE text for "this invite can be used" (`i` an invite joined to its account `u`, `?` the time now), shared with the
 // Users list (inviteStates), so the list never calls a link open that /invite/check refuses (review of #1094, Codex 2
 // and Opus L2: a link whose account's hash was replaced behind it was listed as open).
+// `u.disabled = 0` (#1233, Codex plan review): a disabled account's link is unusable, with the SAME 404 as every other
+// unusable link (SECURITY.md: no answer says which), so /invite/check does not show a disabled account's name either,
+// and the Users list does not call its invite open. The invite row is kept: enabling the account again makes the link
+// work again, until its 7 days are up.
 const USABLE_INVITE = `i.used_at IS NULL AND i.expires_at > ? AND u.password_set = 0 AND u.role = 'caregiver'
-     AND u.password_hash = i.placeholder_hash`;
+     AND u.password_hash = i.placeholder_hash AND u.disabled = 0`;
 const liveInviteByHash = db.prepare(
   `SELECT i.token_hash, i.placeholder_hash, i.user_id, u.username, u.first_name
    FROM user_invites i JOIN users u ON u.id = i.user_id
@@ -1501,11 +1593,12 @@ const markPasswordSet = db.prepare('UPDATE users SET password_set = 1 WHERE id =
 const insertInvitedUser = db.prepare(
   'INSERT INTO users (id, username, password_hash, role, first_name, last_name, photo, password_set) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
 );
-// The redeem's two compare-and-swaps (see the route).
+// The redeem's two compare-and-swaps (see the route). The account's also requires `disabled = 0` (#1233): an account
+// disabled while the link's password was hashing is not claimed (the whole claim rolls back, the usual 404).
 const claimInvite = db.prepare('UPDATE user_invites SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?');
 const inviteOwner = db.prepare('SELECT user_id FROM user_invites WHERE token_hash = ?');
 const setInvitedPassword = db.prepare(
-  "UPDATE users SET password_hash = ?, password_set = 1 WHERE id = ? AND password_set = 0 AND role = 'caregiver' AND password_hash = ?"
+  "UPDATE users SET password_hash = ?, password_set = 1 WHERE id = ? AND password_set = 0 AND role = 'caregiver' AND password_hash = ? AND disabled = 0"
 );
 // Per account, for the Users list: the expiry of its newest invite that can be used (the SAME rule as the public
 // routes, USABLE_INVITE), and when an invite was last accepted within INVITE_ACCEPTED_SHOWN_DAYS. Grouped in one query

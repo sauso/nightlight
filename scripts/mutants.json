@@ -2606,8 +2606,8 @@
   {
     "label": "push public URL: the newest-device fallback includes non-admin devices",
     "file": "backend/src/lib/push.js",
-    "find": "AND pt.user_id IN (SELECT id FROM users WHERE role = 'admin')",
-    "replace": "AND pt.user_id IN (SELECT id FROM users)",
+    "find": "AND pt.user_id IN (SELECT id FROM users WHERE role = 'admin' AND disabled = 0)",
+    "replace": "AND pt.user_id IN (SELECT id FROM users WHERE disabled = 0)",
     "expect": "killed",
     "tests": [
       "push-public-url.test.js"
@@ -2848,8 +2848,8 @@
   {
     "label": "push public URL: the fallback excludes caregivers instead of requiring an admin",
     "file": "backend/src/lib/push.js",
-    "find": "AND pt.user_id IN (SELECT id FROM users WHERE role = 'admin')",
-    "replace": "AND pt.user_id NOT IN (SELECT id FROM users WHERE role = 'caregiver')",
+    "find": "AND pt.user_id IN (SELECT id FROM users WHERE role = 'admin' AND disabled = 0)",
+    "replace": "AND pt.user_id NOT IN (SELECT id FROM users WHERE role = 'caregiver' OR disabled != 0)",
     "expect": "killed",
     "tests": [
       "push-public-url.test.js"
@@ -3189,8 +3189,8 @@
   {
     "label": "#441: onlyAdmin (frontend) checks for TWO admins instead of one",
     "file": "frontend/src/pages/UserSettings.jsx",
-    "find": "users.filter((x) => x.role === 'admin').length === 1",
-    "replace": "users.filter((x) => x.role === 'admin').length === 2",
+    "find": "users.filter((x) => x.role === 'admin' && isEnabled(x)).length === 1",
+    "replace": "users.filter((x) => x.role === 'admin' && isEnabled(x)).length === 2",
     "expect": "killed",
     "tests": ["users.test.jsx"],
     "namePattern": "T6|T7"
@@ -17177,8 +17177,8 @@
   {
     "label": "#562 TTL M7: isLiveSessionId drops the age condition",
     "file": "backend/src/middleware/auth.js",
-    "find": "const sessionAlive = db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND ${sweepAge.sql}`);",
-    "replace": "const sessionAlive = db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND (${sweepAge.sql} OR 1)`);",
+    "find": "WHERE s.id = ? AND ${sweepAge.sql}`",
+    "replace": "WHERE s.id = ? AND (${sweepAge.sql} OR 1)`",
     "expect": "killed",
     "tests": ["session-lifetime.test.js"],
     "namePattern": "live-view sweep"
@@ -26151,8 +26151,8 @@
   {
     "label": "#1094 invite redeem: the account compare-and-swap drops the placeholder match",
     "file": "backend/src/routes/auth.js",
-    "find": "AND role = 'caregiver' AND password_hash = ?\"",
-    "replace": "AND role = 'caregiver' AND ? IS NOT NULL\"",
+    "find": "AND role = 'caregiver' AND password_hash = ? AND disabled = 0\"",
+    "replace": "AND role = 'caregiver' AND ? IS NOT NULL AND disabled = 0\"",
     "expect": "killed",
     "tests": ["auth-invite.test.js"],
     "namePattern": "a password hash replaced meanwhile",
@@ -26190,8 +26190,8 @@
   {
     "label": "#1094 invite: requireAuth accepts a session of a pending account",
     "file": "backend/src/middleware/auth.js",
-    "find": "JOIN users u ON u.id = s.user_id AND u.password_set = 1 WHERE",
-    "replace": "JOIN users u ON u.id = s.user_id WHERE",
+    "find": "JOIN users u ON u.id = s.user_id AND u.password_set = 1 AND u.disabled = 0 WHERE",
+    "replace": "JOIN users u ON u.id = s.user_id AND u.disabled = 0 WHERE",
     "expect": "killed",
     "tests": ["auth-invite.test.js"],
     "namePattern": "a session that already exists stops working",
@@ -26259,8 +26259,8 @@
   {
     "label": "#1094 invite: adminCount counts an admin who cannot sign in",
     "file": "backend/src/routes/auth.js",
-    "find": "WHERE role = 'admin' AND password_set = 1\"",
-    "replace": "WHERE role = 'admin'\"",
+    "find": "WHERE role = 'admin' AND password_set = 1 AND disabled = 0\"",
+    "replace": "WHERE role = 'admin' AND disabled = 0\"",
     "expect": "killed",
     "tests": ["auth-invite.test.js"],
     "namePattern": "a pending admin does not count as an admin",
@@ -26830,5 +26830,61 @@
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#1159: sustained sound at bedtime"
+  },
+  {
+    "label": "#1233 disable: the session check accepts a session of a disabled account",
+    "file": "backend/src/middleware/auth.js",
+    "find": "AND u.password_set = 1 AND u.disabled = 0 WHERE s.id = ?",
+    "replace": "AND u.password_set = 1 WHERE s.id = ?",
+    "expect": "killed",
+    "tests": ["auth-middleware.test.js"],
+    "namePattern": "#1233 requireAuth refuses a session of a disabled account",
+    "note": "The fixture keeps the session row and flips only users.disabled, so the route's session delete cannot kill it."
+  },
+  {
+    "label": "#1233 disable: the live-view sweep keeps a disabled account's view open (isLiveSessionId join)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "FROM sessions s JOIN users u ON u.id = s.user_id AND u.disabled = 0 WHERE",
+    "replace": "FROM sessions s JOIN users u ON u.id = s.user_id WHERE",
+    "expect": "killed",
+    "tests": ["auth-middleware.test.js"],
+    "namePattern": "#1233 the live-view sweep"
+  },
+  {
+    "label": "#1233 disable: /login signs a disabled account in with its right password",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (current.disabled !== 0) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["account-disable.test.js"],
+    "namePattern": "#1233 the right password gets 403 ACCOUNT_DISABLED"
+  },
+  {
+    "label": "#1233 disable: adminCount counts a disabled admin",
+    "file": "backend/src/routes/auth.js",
+    "find": "AND password_set = 1 AND disabled = 0\"",
+    "replace": "AND password_set = 1\"",
+    "expect": "killed",
+    "tests": ["account-disable.test.js"],
+    "namePattern": "#1233 a disabled admin does not count"
+  },
+  {
+    "label": "#1233 disable: activePushTokens delivers to a disabled account's device",
+    "file": "backend/src/lib/push.js",
+    "find": "WHERE pt.user_id IN (SELECT id FROM users WHERE disabled = 0)",
+    "replace": "WHERE pt.user_id IN (SELECT id FROM users)",
+    "expect": "killed",
+    "tests": ["push.test.js"],
+    "namePattern": "#1233 a disabled account.+token is excluded"
+  },
+  {
+    "label": "#1233 disable: a disabled account's invite is still usable (the shared usable-invite rule)",
+    "file": "backend/src/routes/auth.js",
+    "find": "AND u.password_hash = i.placeholder_hash AND u.disabled = 0",
+    "replace": "AND u.password_hash = i.placeholder_hash",
+    "expect": "killed",
+    "tests": ["account-disable.test.js"],
+    "namePattern": "#1233 /invite/check and /invite/redeem refuse",
+    "note": "Codex plan review: /invite/check must not show a disabled account's name. The redeem's own compare-and-swap (disabled = 0) still refuses the redeem without this, so it is the check that tells."
   }
 ]

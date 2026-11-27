@@ -297,12 +297,14 @@ export function getPublicBaseUrl() {
 // push_tokens.user_id has no foreign key, so a row can name a user that no longer exists, and only
 // the positive form excludes it. Walks newest-first and takes the first VALID value, so one malformed
 // legacy row can't hide an older good one behind it.
+// `disabled = 0` (#1233): a disabled admin's device no longer decides where the household's links point. Disabling
+// deletes its registrations anyway (routes/auth.js); this holds for a row that outlived that.
 function newestAdminDeviceBaseUrl() {
   const rows = db
     .prepare(
       `SELECT pt.base_url FROM push_tokens pt
         WHERE pt.base_url IS NOT NULL AND pt.base_url != ''
-          AND pt.user_id IN (SELECT id FROM users WHERE role = 'admin')
+          AND pt.user_id IN (SELECT id FROM users WHERE role = 'admin' AND disabled = 0)
         ORDER BY pt.updated_at DESC`
     )
     .all();
@@ -356,10 +358,15 @@ export function removeToken(token) {
 //                  text, which must appear exactly once in this file.
 //   excludeUserId  not this account's devices (the person who set the silence).
 // Both sit on top of the user and session filters above, never instead of them.
+//
+// The user filter requires an ENABLED account (#1233, `disabled = 0`): a disabled account's devices get none of the
+// app's alerts. Disabling deletes its registrations and sessions (routes/auth.js), so this is the same defence in depth
+// as the rest of this filter, for a row that outlived that delete. It cannot reach Pushover, ntfy or Gotify: those are
+// household-wide destinations, not per account (the docs say so).
 export function activePushTokens({ adminsOnly = false, excludeUserId = null } = {}) {
   const age = sessionAgeCondition();
   let sql = `SELECT pt.token, pt.base_url FROM push_tokens pt
-        WHERE pt.user_id IN (SELECT id FROM users)
+        WHERE pt.user_id IN (SELECT id FROM users WHERE disabled = 0)
           AND pt.session_id IN (
             SELECT id FROM sessions WHERE ${age.sql}
           )`;

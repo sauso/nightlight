@@ -185,6 +185,31 @@ describe('★ talk-back access is re-checked while the socket stays open (GHSA-6
     assert.equal(fakeSession.write.mock.callCount(), 1, 'no audio may be forwarded once the account is gone');
   });
 
+  test('★ #1233 disabling the account closes an open call at the next re-check, even with its session row kept', async (t) => {
+    // Hostile: only `users.disabled` changes (the route also deletes the sessions, which the case above already covers),
+    // so this fails without the join on `disabled` in middleware/auth.js's session check.
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const user = makeUser(db, { id: 'u-7', username: 'alice', role: 'caregiver' });
+    const sid = makeSession(db, user.id, { id: 's-7' });
+    const token = signMedia(user.id, sid);
+    const ws = fakeWs();
+
+    handleTalkConnection(ws, camera(), { username: user.username }, token);
+    await Promise.resolve();
+    ws.emit('message', AUDIO, true);
+    assert.equal(fakeSession.write.mock.callCount(), 1, 'precondition: audio forwards before the disable');
+
+    db.prepare('UPDATE users SET disabled = 1 WHERE id = ?').run(user.id);
+
+    t.mock.timers.tick(TALK_REVALIDATE_MS);
+    await Promise.resolve();
+
+    assert.equal(ws.close.mock.callCount(), 1, 'a disabled account must close the socket');
+    ws.emit('message', AUDIO, true);
+    assert.equal(fakeSession.write.mock.callCount(), 1, 'no audio may be forwarded once the account is disabled');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE id = ?').get(sid).n, 1, 'the fixture lost its session row');
+  });
+
   test('a naturally-expired media token has the same effect, with no revocation action at all', async (t) => {
     t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
     const user = makeUser(db, { id: 'u-4', username: 'admin' });

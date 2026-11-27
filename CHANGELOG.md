@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **An admin can disable an account and enable it again later, instead of removing it (#1233).** On the person's page in Settings → Users, the new **Account access** card has **Disable account** (and **Enable account**); the accounts list shows **Disabled**. A disabled account is signed out of every device at once (a live view stops within about 15 seconds), cannot sign in, and its invite link stops working, while the account, its history and its settings are kept. With the right password the sign-in screen says "This account is disabled. Ask an admin."; a wrong password gets the usual message. The Nightlight app on its devices stops getting alerts, but Pushover, ntfy and Gotify are shared by the household and are not affected. Enabling it brings no sign-in back: the person signs in again. You cannot disable your own account or the last admin that can sign in. A version from before this one ignores the setting.
+
 ### Changed
 
 - **Docs: the media isolation limits now say that on host networking, other containers and local users on the server can reach MediaMTX's password-free ports.** This is how it already behaved; it was not written down. No setting or behaviour changes.
