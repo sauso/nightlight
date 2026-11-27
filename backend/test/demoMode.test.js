@@ -69,6 +69,8 @@ before(async () => {
   router.post('/api/auth/invite/check', record('invite-check'));
   router.post('/api/auth/invite/redeem', record('invite-redeem'));
   router.post('/api/auth/users', record('create-user'));
+  // #1233: disabling or re-enabling an account. Not on the allowlist: the demo's shared admin must not lock others out.
+  router.put('/api/auth/users/:id/disabled', record('disable-user'));
 
   // Mounted at '/' with demoGuard as global middleware, matching index.js's real registration
   // order (after express.json(), before every router) rather than nesting demoGuard inside a
@@ -204,6 +206,17 @@ describe('demoGuard — DEMO_MODE=true, mutation allowlist', () => {
       assert.match(res.body.error, /read-only public demo/);
       assert.equal(hits[hit], undefined, `${method} ${path} reached its handler`);
     }
+  });
+
+  // The same kind of GUARD (#1233): blocked by the default rule today. Adding it to the allowlist would let any demo
+  // visitor, who signs in as the shared admin, disable the demo account for everyone else.
+  test('#1233: disabling or enabling an account is blocked, handler never invoked', async () => {
+    for (const disabled of [true, false]) {
+      const res = await call(`${server.url}/api/auth/users/u-1/disabled`, { method: 'PUT', body: { disabled } });
+      assert.equal(res.status, 403, `disabled: ${disabled} was not blocked`);
+      assert.match(res.body.error, /read-only public demo/);
+    }
+    assert.equal(hits['disable-user'], undefined, 'the disable route reached its handler');
   });
 });
 

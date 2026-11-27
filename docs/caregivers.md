@@ -7,6 +7,7 @@ The **Users** page lists **Accounts**. **Add user** is at the bottom of the Acco
 **Signing a device out.** Each account that is signed in somewhere has a down arrow at the right of its row. Tap it to see that account's active sessions: the device, "(this device)" on the one you are using, and when it was last active. **Sign out** ends that one session, so that phone or browser has to log in again. The sessions are closed until you open them, and an account with no sessions has no arrow. Signing out your own current device logs you out of this one. Tapping the account itself, not the arrow, opens its details.
 
 To remove another account, open that user's page and choose the red **Remove user** button at the bottom. The confirmation explains that the person will be signed out everywhere. You cannot remove your own account.
+To switch an account off for a while and keep it, see [Disable an account instead of removing it](#disable-an-account-instead-of-removing-it).
 
 Instead of choosing a caregiver's password for them, an admin can send them a one-time link and let them choose
 their own: see [Invite a caregiver with a link](#invite-a-caregiver-with-a-link).
@@ -80,7 +81,35 @@ for them rather than the whole screen being off-limits.
 **Changing someone’s role takes effect immediately** — on their very next action, on every device
 they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
 a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
-sessions at once and signs that person out everywhere.
+sessions at once and signs that person out everywhere, and so does disabling it (below).
+
+### Disable an account instead of removing it
+
+If someone should not have access for a while (a relative for a few weeks, say), disable their account rather than
+remove it. Open their page from **Settings → Users** and, in the **Account access** card, choose **Disable account**.
+Removing an account is permanent; disabling keeps the account, its history (camera history, morning reviews) and its
+settings, and **Enable account** in the same card switches it back on.
+
+While an account is disabled:
+
+- **It is signed out of every device at once.** Its next request shows the sign-in screen, and a live view that is
+  playing stops within about 15 seconds.
+- **It cannot sign in.** With the right password, the sign-in screen says "This account is disabled. Ask an admin." A
+  wrong password gets the usual message, so the screen does not tell anyone who does not know the password that the
+  account exists.
+- **The Nightlight app on its devices stops getting alerts.** Pushover, ntfy and Gotify are not per account: everyone
+  subscribed to the household's destination still gets those. If this person is subscribed, remove them there too.
+- **Its invite link does not work**, for an account still waiting on its invite. The invite is kept: once the account
+  is enabled again, the link works until its 7 days run out.
+- **The accounts list shows Disabled** under the name, in place of any invite label.
+
+Enabling the account does **not** sign its devices back in: the person signs in again on each one. Its two-factor and
+its password stay as they were, and an admin setting a new password for it does not enable it. You cannot disable your
+own account, or the last admin that can sign in (see [Keep an admin](#keep-an-admin-and-recover-access)). The public
+demo refuses both actions.
+
+**Going back to an older version.** A version of Nightlight from before this feature ignores the setting, so a disabled
+account can sign in there. Its devices stay signed out until it does.
 
 ## Invite a caregiver with a link
 
@@ -196,7 +225,8 @@ that has just worked look used. If they never chose a password with it, someone 
 
 **There must always be at least one admin.** The only admin on an install can't be changed to
 caregiver until another account is made an admin first, and no account can ever delete itself —
-another admin has to remove it. Both are enforced by the server, not just hidden in the UI: the Role
+another admin has to remove it. Only an admin that can sign in counts: a disabled admin, or one still waiting on its
+invite, is not a second admin, and no account can disable itself. Both are enforced by the server, not just hidden in the UI: the Role
 field explains it up front when it applies, and a request that tries anyway gets a clear error rather
 than a partial change. If an install somehow already has no admin (a database edited by hand, or
 from before this was enforced), see **[docs/mfa.md](mfa.md)**'s recovery section for the console

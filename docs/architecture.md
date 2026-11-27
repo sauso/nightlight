@@ -237,8 +237,8 @@ without detected sleep. The child's sleep camera can detect sleep from two conse
 ## Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)
 
 JWT-based, but a valid JWT alone isn't sufficient — every request also checks a `sessions` row
-in SQLite still exists (`backend/src/db.js`). This is what makes "sign out this device" and
-"delete this caregiver" take effect immediately rather than waiting for token expiry. The same lookup
+in SQLite still exists (`backend/src/db.js`). This is what makes "sign out this device",
+"delete this caregiver" and "disable this account" take effect immediately rather than waiting for token expiry. The same lookup
 checks the session's age: a session lasts `SESSION_TTL_DAYS` (default 30, range 7-30) from sign-in,
 judged by `sessions.created_at`, not by the token's `exp`, so lowering the setting ends older sessions at
 their next request even though their tokens say 30 days (#562). One helper, `sessionAgeCondition` in
@@ -402,8 +402,9 @@ the account's password throttle and two-factor confirmation budget are emptied, 
 throttle count), `/login/mfa` refuses it, and the session check every request passes through joins on
 `users.password_set = 1`, so a session or token from before cannot be used either. `PUT /users/:id` refuses
 `role: 'admin'` for it unless the same request sets a password; an admin setting its password sets `password_set = 1`
-and deletes its unused invites. `keepingAnAdmin` counts only admins with `password_set = 1`, and
-`scripts/promote-admin.js` refuses a pending account.
+and deletes its unused invites. `keepingAnAdmin` counts only admins with `password_set = 1` (and, since #1233, not
+disabled), and `scripts/promote-admin.js` refuses a pending account. Nor does a disabled account ever authenticate: see
+"Disabled accounts" below; a disabled account's invite gets the same 404 as any unusable link.
 
 **Limits on the public routes.** One `express-rate-limit` instance shared by check and redeem, its own (not the
 per-client budget `/login` shares), counting failures only (`skipSuccessfulRequests`): 100 per 15 minutes per source
@@ -411,6 +412,45 @@ address. Junk tokens cost one sha256 and one indexed lookup each and never reach
 address (or Tailscale), 100 bad tokens, which anyone can send without holding a link, make the two invite routes
 answer 429 to everyone behind it for the rest of the 15-minute window (sign-in is not affected); a caregiver who sees
 "too many attempts" waits 15 minutes ([caregivers.md](caregivers.md#invite-a-caregiver-with-a-link) says so). Demo mode blocks all five routes (they are unlisted mutations). Tests: `auth-invite.test.js`.
+
+### Disabled accounts (#1233)
+
+An admin can switch an account off without removing it, and back on. User-facing rules:
+[caregivers.md](caregivers.md#disable-an-account-instead-of-removing-it).
+
+**Data.** `users.disabled` (INTEGER NOT NULL, default 0; added by a guarded `ALTER` beside `password_set`, so every
+existing account is enabled and an upgrade changes nothing). 1 = disabled. Nothing else is stored: no "disabled by" or
+"since", and the camera history is not extended. An older build ignores the column, so going back to one lets a disabled
+account sign in again.
+
+| Route | Gate | Request | Answer |
+|---|---|---|---|
+| `PUT /api/auth/users/:id/disabled` | admin | `{ disabled: true \| false }` (the boolean only, else `400`) | `200`, the usual user object plus `disabled`; `400` for your own account (disabling only), `404` unknown id, `409` for the last enabled admin |
+
+Disabling sets the flag and, in the same transaction, deletes the account's `push_tokens` (by session and by `user_id`)
+and then its `sessions`, inside `keepingAnAdmin`. The `409` cannot be reached today (the caller is an enabled admin and
+not the target), the same defence in depth as `DELETE /users/:id`. Enabling clears the flag only: no session comes back.
+Idempotent both ways. `GET /api/auth/users` adds `disabled` (boolean) to each account; `toPublicUser` is unchanged, so
+`/me`, `/login` and every other user object keep their shape, and a screen reads a missing key as enabled.
+
+**A disabled account never authenticates.** The session check every request, media token, talk socket and Tailscale
+route passes through (`sessionWithUser`) joins on `users.disabled = 0`, and so does `isLiveSessionId` (the 15 s WebRTC
+sweep, and `signInEnded`), so a session that outlived the delete is still refused and its live views are closed.
+`/login` compares the password exactly as for any account (same `DUMMY_HASH` cost, same throttle count); only after it
+verifies, and reading the row again after the compare's await, a disabled account gets `403 { error: "This account is
+disabled. Ask an admin.", code: "ACCOUNT_DISABLED" }`. A wrong password gets the generic `401`, like an unknown name. 403,
+not 401, because the web app and the Android app treat any 401 as "signed out". `/login/mfa` answers a disabled account
+with the same `401 Invalid verification token` as a missing one, both before the code check and again straight before
+the session is created (the backup-code compare yields). The invite rule `USABLE_INVITE` (shared by `/invite/check`,
+`/invite/redeem` and the Users list) and the redeem's account compare-and-swap both require `disabled = 0`. Push:
+`activePushTokens` and the admin-device fallback of `getPublicBaseUrl` take enabled accounts only. Household-wide
+providers (Pushover, ntfy, Gotify) have no per-account recipient and are not affected.
+
+**Known limits** (as for revoking a session or removing an account): the WebRTC owner map is in memory, so a live view
+that MediaMTX kept across a backend restart has no recorded owner and is not closed by the sweep; and work admitted
+before the disable (a request already past its auth check) can still finish. Demo mode blocks the route (an unlisted
+mutation). Tests: `account-disable.test.js`, plus the `#1233` cases in `auth-middleware.test.js`, `talk-socket.test.js`,
+`push.test.js` and `push-public-url.test.js`.
 
 ## Data layer (`backend/src/db.js`)
 

@@ -136,8 +136,11 @@ the longer lifetime. Nor does raising it bring a signed-out device back; that de
   session: it is checked against the server on **every** request, so ending the session (below) ends it.
 - **Every sign-in can be ended from the server, at once:** sign out (on that device, or that device's
   **Sign out** in your Account's session list), an admin signing out any device (Settings → Users),
-  removing the account, or changing your password (signs out your other devices). Changing someone's role
-  takes effect at their next request without signing them out.
+  removing the account, disabling it (it is kept, and cannot sign in until an admin enables it again;
+  enabling it brings no sign-in back), or changing your password (signs out your other devices). Changing
+  someone's role takes effect at their next request without signing them out. Ending a sign-in stops the
+  Nightlight app's push alerts on that device; it cannot stop Pushover, ntfy or Gotify, which are one
+  destination for the whole household, so remove a person there yourself.
 - **The 12-hour media token ends with its sign-in.** Video, snapshot, clip and talk URLs carry a separate
   short-lived token (never the sign-in token). Since #562 it stops working when its sign-in ends, even if
   its own 12 hours have not run out; before, it could outlive the sign-in by up to 12 hours.
@@ -154,7 +157,7 @@ works once, for 7 days. Send it only to the person it is for.
 
 What protects it: the token is 256 random bits and only its sha256 is stored, so a copy of the database holds no usable
 link; it is shown once, to the admin who made it, and is in no list, API answer or log line. Every unusable link gets
-the same answer. Until it is used, the account cannot sign in by any route. Known limits: anyone who sees the link (a
+the same answer, a link whose account is disabled included. Until it is used, the account cannot sign in by any route. Known limits: anyone who sees the link (a
 shared chat, a screenshot of the QR code) holds it until it is used or cancelled, and restoring a backup can make a used
 or cancelled link work again until its 7 days are up, so cancel unexpected invites after a restore
 ([details](docs/caregivers.md#after-restoring-a-backup-or-going-back-to-an-older-version)).
@@ -170,6 +173,12 @@ manual:
   have an admin reset another account's.
 - **A caregiver invite link** that went to the wrong place: an admin cancels the invite or makes a new one (the old
   link stops working at once). If it was already used by someone else, remove that account.
+- **An account that should not have access for now** (while you find out what happened, say): an admin disables it (Settings → Users → the account → **Disable account**). It is signed out everywhere
+  at once, its open live views close within about 15 seconds, and its invite link stops working; the account and
+  its history are kept. With the right password the sign-in screen then says the account is disabled; a wrong
+  password gets the usual answer, so this tells nothing to someone who does not know the password. Remove the
+  person from Pushover, ntfy or Gotify too if they are subscribed
+  ([details](docs/caregivers.md#disable-an-account-instead-of-removing-it)).
 - **JWT signing secret** (`private/.jwt_secret` in the data volume): deleting it and restarting the
   container generates a new one and signs everyone out, forcing a fresh login everywhere.
 - **Notification-provider tokens** (Pushover, Firebase, Gotify, ntfy): regenerate/revoke the

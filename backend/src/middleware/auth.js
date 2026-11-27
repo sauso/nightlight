@@ -178,9 +178,15 @@ const touchSession = db.prepare(
 // can only meet this through a database edit or a restored backup; the rule is here, on the one query every
 // request, media token and talk socket goes through, so that "a pending account cannot authenticate" does not
 // depend on every sign-in route remembering it.
+//
+// `u.disabled = 0` (#1233), for the same reason: a disabled account never authenticates, whatever it holds. Disabling
+// also deletes the account's sessions (routes/auth.js, PUT /users/:id/disabled), so this join is what still holds for a
+// session that outlived that delete (a sign-in that finished in the same moment, a restored backup, a hand edit), and
+// it is what makes the refusal the usual 401 on every path at once: the web app and the Android app already treat a
+// 401 as "signed out".
 const requestAge = sessionAgeCondition('s');
 const sessionWithUser = db.prepare(
-  `SELECT s.id AS sid, s.user_id AS user_id, u.role AS role FROM sessions s JOIN users u ON u.id = s.user_id AND u.password_set = 1 WHERE s.id = ? AND ${requestAge.sql}`
+  `SELECT s.id AS sid, s.user_id AS user_id, u.role AS role FROM sessions s JOIN users u ON u.id = s.user_id AND u.password_set = 1 AND u.disabled = 0 WHERE s.id = ? AND ${requestAge.sql}`
 );
 function liveSession(sessionId) {
   if (!sessionId) return null;
@@ -194,9 +200,17 @@ function liveSession(sessionId) {
 
 // For the WebRTC live-view sweep (index.js): is the login session that opened a view still valid? The
 // same lifetime rule as a request, without touching last_seen_at (the sweep is the server checking, not
-// the person using the app) and without the users join (deleting a user cascades its sessions).
-const sweepAge = sessionAgeCondition();
-const sessionAlive = db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND ${sweepAge.sql}`);
+// the person using the app). Also signInEnded's rule in routes/auth.js (a signed-in route re-checking its
+// own session after a bcrypt await).
+//
+// The users join is for `disabled` only (#1233): a disabled account's open live views are closed by the
+// next 15 s sweep even if one of its sessions outlived the disable's delete (see sessionWithUser above).
+// Deleting a user needs no join: it cascades its sessions. `password_set` is not checked here, as before.
+// Aliased (`s`), because `users` has a created_at of its own and the age condition names that column.
+const sweepAge = sessionAgeCondition('s');
+const sessionAlive = db.prepare(
+  `SELECT 1 FROM sessions s JOIN users u ON u.id = s.user_id AND u.disabled = 0 WHERE s.id = ? AND ${sweepAge.sql}`
+);
 export function isLiveSessionId(sid) {
   if (!sid) return false;
   return !!sessionAlive.get(sid, ...sweepAge.params);

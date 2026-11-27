@@ -70,6 +70,24 @@ describe('★ activePushTokens excludes anything not tied to a live user (GHSA-q
   });
 });
 
+// #1233. Disabling through the route deletes the account's registrations and sessions (account-disable.test.js); this is
+// the defence-in-depth half. HOSTILE: the token AND its live session are kept, only `users.disabled` changes, so the
+// filter on the flag is the one thing that can exclude it.
+describe('★ #1233 activePushTokens excludes a disabled account\'s devices', () => {
+  test('★ #1233 a disabled account\'s token is excluded although its live session and the row are still there; others still get theirs', () => {
+    makeUser(db, { id: 'u-1', username: 'alice', role: 'admin' });
+    makeUser(db, { id: 'u-2', username: 'bob', role: 'caregiver' });
+    addToken('tok-off', 'u-1', makeSession(db, 'u-1'));
+    addToken('tok-on', 'u-2', makeSession(db, 'u-2'));
+    assert.deepEqual(activePushTokens().map((r) => r.token).sort(), ['tok-off', 'tok-on'], 'precondition: both are delivered to');
+    assert.deepEqual(activePushTokens({ adminsOnly: true }).map((r) => r.token), ['tok-off'], 'precondition: the admin-only form');
+    db.prepare('UPDATE users SET disabled = 1 WHERE id = ?').run('u-1');
+    assert.deepEqual(activePushTokens().map((r) => r.token), ['tok-on'], 'a disabled account\'s device was still selected');
+    // The narrowed form sits on top of the same filter (#552), so it cannot bring a disabled admin's device back.
+    assert.deepEqual(activePushTokens({ adminsOnly: true }), [], 'adminsOnly brought a disabled admin\'s device back');
+  });
+});
+
 describe('★ activePushTokens also excludes anything not tied to a live SESSION', () => {
   test('★ THE FIX: a token whose session has been revoked is excluded, even though its user still exists', () => {
     // The user is real and untouched — only the session is gone (signed out, an admin ending that

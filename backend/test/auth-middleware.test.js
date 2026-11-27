@@ -16,7 +16,8 @@ import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, 
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
-const { requireAuth, requireAdmin, requireAuthQueryOrHeader, verifyToken } = await import('../src/middleware/auth.js');
+const { requireAuth, requireAdmin, requireAuthQueryOrHeader, verifyToken, isLiveSessionId } = await import('../src/middleware/auth.js');
+const { sessionsToKick } = await import('../src/lib/webrtcSessions.js');
 const { Router } = await import('express');
 
 let server;
@@ -344,5 +345,64 @@ describe('a role change takes effect on the very next request (#261)', () => {
     const token = sessionToken(admin, adminSid);
     demote(admin.id);
     assert.equal(verifyToken(token)?.role, 'caregiver', 'verifyToken returned the stale role from the token');
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+// #1233: a disabled account never authenticates, on any entry point.
+//
+// ⚠️ HOSTILE ON PURPOSE: the session row is KEPT. Disabling through the route also deletes the account's sessions
+// (account-disable.test.js), and a deleted session is refused by every check here whether or not the join on
+// `users.disabled` exists. Flipping only the column is what makes each case below fail without that join. Each case
+// has its control first (the same token works before the flip), so a pass is about the flag, not a broken fixture.
+describe('#1233 a disabled account is refused by every session check, its session row kept', () => {
+  const disable = (id) => db.prepare('UPDATE users SET disabled = 1 WHERE id = ?').run(id);
+
+  test('★ #1233 requireAuth refuses a session of a disabled account with the usual 401', async () => {
+    const token = sessionToken(caregiver, caregiverSid);
+    assert.equal((await call(`${server.url}/t/session`, { token })).status, 200, 'precondition: the session works');
+    disable(caregiver.id);
+    const res = await call(`${server.url}/t/session`, { token });
+    assert.equal(res.status, 401, 'a disabled account still authenticated');
+    assert.equal(res.body.error, 'Invalid or expired session');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE id = ?').get(caregiverSid).n, 1, 'the fixture lost its session row');
+  });
+
+  test('★ #1233 requireAuthQueryOrHeader refuses it too: a session token in the header AND a media token in ?token=', async () => {
+    const header = sessionToken(caregiver, caregiverSid);
+    const media = mediaToken(caregiver, caregiverSid);
+    const viaQuery = `${server.url}/t/media?token=${encodeURIComponent(media)}`;
+    assert.equal((await call(`${server.url}/t/media`, { token: header })).status, 200, 'precondition: header');
+    assert.equal((await call(viaQuery)).status, 200, 'precondition: media token');
+    disable(caregiver.id);
+    assert.equal((await call(`${server.url}/t/media`, { token: header })).status, 401, 'the header branch let a disabled account in');
+    assert.equal((await call(viaQuery)).status, 401, 'a media URL of a disabled account still played');
+  });
+
+  test('★ #1233 verifyToken (the talk socket handshake, optionalAuth, Tailscale) returns null for it', () => {
+    assert.ok(verifyToken(mediaToken(caregiver, caregiverSid), { purpose: 'media' }), 'precondition');
+    disable(caregiver.id);
+    assert.equal(verifyToken(mediaToken(caregiver, caregiverSid), { purpose: 'media' }), null);
+    assert.equal(verifyToken(sessionToken(caregiver, caregiverSid)), null);
+  });
+
+  test('★ #1233 the live-view sweep: isLiveSessionId makes sessionsToKick close a disabled account\'s view, and keep the others', () => {
+    assert.equal(isLiveSessionId(caregiverSid), true, 'precondition');
+    disable(caregiver.id);
+    assert.equal(isLiveSessionId(caregiverSid), false, 'a disabled account\'s session still counts as live');
+    assert.equal(isLiveSessionId(adminSid), true, 'disabling one account ended another\'s session');
+    const owners = new Map([['mtx-off', { sid: caregiverSid, recordedAt: 0 }], ['mtx-on', { sid: adminSid, recordedAt: 0 }]]);
+    const { toKick } = sessionsToKick([{ id: 'mtx-off', path: 'cam_a' }, { id: 'mtx-on', path: 'cam_b' }], owners, isLiveSessionId, 1);
+    assert.deepEqual(toKick, [{ id: 'mtx-off', path: 'cam_a' }]);
+  });
+
+  test('switching it back on (the flag alone) lets the SAME session through again: the join reads the flag live', async () => {
+    // At this level only; the route also deletes the sessions, so through the app a re-enabled person signs in again
+    // (account-disable.test.js). This pins that the check is the live column, not a cached decision.
+    const token = sessionToken(caregiver, caregiverSid);
+    disable(caregiver.id);
+    assert.equal((await call(`${server.url}/t/session`, { token })).status, 401);
+    db.prepare('UPDATE users SET disabled = 0 WHERE id = ?').run(caregiver.id);
+    assert.equal((await call(`${server.url}/t/session`, { token })).status, 200);
   });
 });

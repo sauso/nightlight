@@ -119,6 +119,21 @@ describe('the caregiver list', () => {
     expect(await screen.findByText('Not authorised')).toBeTruthy();
   });
 
+  test('★ #1233 a disabled account shows "Disabled" instead of its invite pill; `false` or no key at all shows none', async () => {
+    // A disabled PENDING account: its invite does not work while disabled (the server sends invite_expires_at null), so an
+    // invite pill would say "No active invite" for an invite that is kept and works again once the account is enabled.
+    mockApi({ users: [
+      ME, // no `disabled` key: a server older than #1233
+      { ...NANNY, disabled: true, password_set: false, invite_expires_at: null },
+      { id: 'u-x', username: 'temp', role: 'caregiver', disabled: false },
+    ] });
+    mountList();
+    const row = (await screen.findByText('Nanny McPhee')).closest('.user-row');
+    expect(within(row).getByText('Disabled')).toHaveClass('status-badge');
+    expect(within(row).queryByText('No active invite')).toBeNull();
+    expect(screen.getAllByText('Disabled'), 'only the disabled account has the pill').toHaveLength(1);
+  });
+
   describe('the session list', () => {
     // ⚠️ These timestamps are what the API actually sends: SQLite datetimes with NO timezone marker,
     // which the component reads as UTC by appending 'Z'. Built as offsets from now so they cannot rot.
@@ -642,6 +657,71 @@ describe('adding and editing a caregiver', () => {
     });
   });
 
+  // #1233. The server is the gate (account-disable.test.js); these pin what the page offers, what it says, and that a refusal
+  // is shown where the button was pressed.
+  describe('★ #1233 disabling and enabling an account', () => {
+    test('is not offered on your OWN account, nor on a new one', async () => {
+      const own = mountEdit(ADMIN.id);
+      await screen.findByLabelText('First name');
+      expect(screen.queryByRole('button', { name: 'Disable account' })).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Account access' })).toBeNull();
+      own.unmount();
+      mountEdit('new');
+      await screen.findByLabelText('Username (login)');
+      expect(screen.queryByRole('button', { name: 'Disable account' })).toBeNull();
+    });
+
+    test('★ it asks first, says what it does and does not stop, then PUTs { disabled: true } and shows the new state', async () => {
+      putSpy.mockResolvedValue({ ...NANNY, disabled: true });
+      const { user } = mountEdit();
+      await user.click(await screen.findByRole('button', { name: 'Disable account' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/signed out on every device/)).toBeTruthy();
+      expect(within(dialog).getByText(/history and settings are kept/)).toBeTruthy();
+      // Codex plan review: the household-wide providers are not per account, so the dialog must not promise "no alerts".
+      expect(within(dialog).getByText(/Pushover, ntfy and Gotify/)).toBeTruthy();
+      expect(putSpy, 'opening the dialog is not the change').not.toHaveBeenCalled();
+
+      await user.click(within(dialog).getByRole('button', { name: 'Disable' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/auth/users/u-care/disabled', { disabled: true }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(await screen.findByRole('button', { name: 'Enable account' })).toBeTruthy();
+      expect(screen.getByText(/This account is disabled/)).toBeTruthy();
+      expect(screen.getByText('at /settings/users/u-care'), 'unlike Remove, the page stays').toBeTruthy();
+    });
+
+    test('★ a disabled account offers Enable instead, which PUTs { disabled: false } and says they sign in again', async () => {
+      mockApi({ users: [ME, { ...NANNY, disabled: true }] });
+      putSpy.mockResolvedValue({ ...NANNY, disabled: false });
+      const { user } = mountEdit();
+      expect(await screen.findByText(/This account is disabled/)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Disable account' })).toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Enable account' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/sign in on each one/)).toBeTruthy();
+      await user.click(within(dialog).getByRole('button', { name: 'Enable' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/auth/users/u-care/disabled', { disabled: false }));
+      expect(await screen.findByRole('button', { name: 'Disable account' })).toBeTruthy();
+    });
+
+    test('★ #378 a refusal is shown INSIDE the dialog, which stays open to retry; the state is unchanged', async () => {
+      putSpy.mockRejectedValue(new Error('Refused #1233'));
+      const { user } = mountEdit();
+      await user.click(await screen.findByRole('button', { name: 'Disable account' }));
+      const dialog = screen.getByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Disable' }));
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('Refused #1233');
+      expect(screen.getAllByText('Refused #1233')).toHaveLength(1);
+      expect(within(dialog).getByRole('button', { name: 'Disable' })).toBeEnabled();
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(screen.getByRole('button', { name: 'Disable account' }), 'a refused disable still showed the account as disabled').toBeTruthy();
+      // Reopened, the old message is gone.
+      await user.click(screen.getByRole('button', { name: 'Disable account' }));
+      expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
+    });
+  });
+
   describe('★ resetting someone else\'s two-factor', () => {
     test('is offered only for an account that HAS two-factor on', async () => {
       // Offering it otherwise would suggest the account is protected when it is not.
@@ -741,6 +821,25 @@ describe('adding and editing a caregiver', () => {
       mountEdit(ME.id);
       const role = await screen.findByLabelText(/Role/);
       expect(role.value).toBe('admin');
+      expect(within(role).getByRole('option', { name: 'Caregiver' }).disabled).toBe(false);
+      expect(screen.queryByText(/This is the only admin/)).toBeNull();
+    });
+
+    // #1233: only ENABLED admins count, as on the server (adminCount). A missing `disabled` key is enabled (T7 above has none).
+    test('T9 #1233: a DISABLED second admin does not count — the only enabled admin still gets the hint', async () => {
+      const DISABLED_ADMIN = { id: 'u-admin2', username: 'zara', role: 'admin', first_name: 'Zara', last_name: '', photo: null, mfa_enabled: 0, disabled: true };
+      mockApi({ users: [ME, DISABLED_ADMIN, NANNY] });
+      mountEdit(ME.id);
+      const role = await screen.findByLabelText(/Role/);
+      expect(within(role).getByRole('option', { name: 'Caregiver' }).disabled).toBe(true);
+      expect(screen.getByText(/This is the only admin/)).toBeTruthy();
+    });
+
+    test('T10 #1233: a disabled admin\'s own page shows no hint — demoting it cannot leave the install without an admin', async () => {
+      const DISABLED_ADMIN = { id: 'u-admin2', username: 'zara', role: 'admin', first_name: 'Zara', last_name: '', photo: null, mfa_enabled: 0, disabled: true };
+      mockApi({ users: [ME, DISABLED_ADMIN] });
+      mountEdit(DISABLED_ADMIN.id);
+      const role = await screen.findByLabelText(/Role/);
       expect(within(role).getByRole('option', { name: 'Caregiver' }).disabled).toBe(false);
       expect(screen.queryByText(/This is the only admin/)).toBeNull();
     });

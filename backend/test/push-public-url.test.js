@@ -201,6 +201,15 @@ describe('★ getPublicBaseUrl: the "newest device" fallback ignores non-admin d
     assert.equal(getPublicBaseUrl(), null);
   });
 
+  test('★ #1233 an admin device whose owner has since been DISABLED drops out of the fallback (its row kept)', () => {
+    // The twin of the demotion case: still an admin, only `disabled` changes. The route deletes the registrations too;
+    // the row is kept here so only the filter can decide.
+    adminTokenWithGlobalCleared();
+    assert.equal(getPublicBaseUrl(), GOOD, 'precondition');
+    db.prepare('UPDATE users SET disabled = 1 WHERE id = ?').run('u-admin');
+    assert.equal(getPublicBaseUrl(), null, 'a disabled admin\'s device still decided the household\'s link address');
+  });
+
   test('when several admin devices disagree, the most recently registered one wins (kept from before)', () => {
     // Pins the ordering itself: without this, reversing the sort would change nothing any test sees,
     // because the caregiver filter already leaves only one candidate in every other case.

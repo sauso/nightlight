@@ -127,6 +127,7 @@ const ROUTE_GATES = {
   'POST /api/auth/me/mfa/disable': SIGNED_IN,
   'DELETE /api/auth/users/:id/mfa': ADMIN,
   'DELETE /api/auth/users/:id': ADMIN,
+  'PUT /api/auth/users/:id/disabled': ADMIN, // #1233: disabling or re-enabling an account is account management
   // #1094 caregiver invites. Making, re-issuing and revoking an invite is account management (admin). Checking and
   // redeeming one are PUBLIC: the person opening the link has no account they can sign in to yet, and the invite token
   // in the body is the credential (one-time, 7 days, caregiver accounts only; failures-only limiter on both;

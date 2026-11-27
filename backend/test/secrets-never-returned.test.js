@@ -491,8 +491,9 @@ describe('every API response, for every role', () => {
       assert.equal(leakIn(res.body), null, `GET /users: ${leakIn(res.body)}`);
       assert.ok(res.body.length >= 4);
       // The list, and only the list, also says where each account's invite stands (#1094): three keys, a flag and two
-      // times, never the token or its hash (the planted token_hash marker is in the sweep above).
-      const LIST_USER_KEYS = [...PUBLIC_USER_KEYS, 'invite_accepted_at', 'invite_expires_at', 'password_set'].sort();
+      // times, never the token or its hash (the planted token_hash marker is in the sweep above). And whether the account
+      // is disabled (#1233), a boolean (account-disable.test.js).
+      const LIST_USER_KEYS = [...PUBLIC_USER_KEYS, 'disabled', 'invite_accepted_at', 'invite_expires_at', 'password_set'].sort();
       for (const u of res.body) {
         assert.deepEqual(Object.keys(u).sort(), LIST_USER_KEYS, `${u.username}: the user shape changed`);
         assert.equal(u.mfa_enabled, userRow(u.id).mfa_enabled === 1, `${u.username}: mfa_enabled does not match the database`);

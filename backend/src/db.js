@@ -476,6 +476,15 @@ if (!usersColumns.includes('photo')) {
 if (!usersColumns.includes('password_set')) {
   db.exec('ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1');
 }
+// #1233: has an admin switched this account off? 1 = disabled: it cannot sign in or stay signed in (the session check
+// in middleware/auth.js, /login, /login/mfa and the invite routes all require 0), but the row, its history, its
+// settings, its two-factor and any open invite are kept, so an admin can switch it back on (routes/auth.js,
+// PUT /users/:id/disabled). DEFAULT 0, so every account that existed before this column keeps working exactly as
+// before. An older build ignores the column, so going back to one signs a disabled account in again: the docs say so
+// (docs/caregivers.md).
+if (!usersColumns.includes('disabled')) {
+  db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
+}
 
 // Optional child avatar photo — a browser-resized (~256px square) base64 data-URL, stored inline
 // (small; the frontend caps the size). Null = fall back to the coloured initials avatar.

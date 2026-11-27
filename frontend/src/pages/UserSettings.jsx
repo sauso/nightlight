@@ -66,6 +66,12 @@ function UserSettingsForm() {
   // from one must not appear in the other the next time it opens.
   const [removeError, setRemoveError] = useState('');
   const [resetError, setResetError] = useState('');
+  // #1233: whether this account is disabled (GET /auth/users' `disabled`), and the Disable / Enable dialog. `accessDialog` is
+  // the action it confirms ('disable' | 'enable'), or null when closed; its error is its own state, as for Remove (#378).
+  const [accountDisabled, setAccountDisabled] = useState(false);
+  const [accessDialog, setAccessDialog] = useState(null);
+  const [accessBusy, setAccessBusy] = useState(false);
+  const [accessError, setAccessError] = useState('');
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   const later = useLater(); // blanks the "Photo saved" tick; cancelled when the page goes away (#855)
   // #441: true only when this account IS an admin AND is the only one. The backend enforces the
@@ -130,6 +136,7 @@ function UserSettingsForm() {
     // be showing while the new one's data is still loading.
     setOnlyAdmin(false);
     setPending(null);
+    setAccountDisabled(false);
     if (isNew) return;
     api.get('/auth/users').then((users) => {
       const u = users.find((x) => x.id === id);
@@ -141,7 +148,12 @@ function UserSettingsForm() {
         setRestored(!!draft);
         setFormReady(true);
         setMfaEnabled(!!u.mfa_enabled);
-        setOnlyAdmin(u.role === 'admin' && users.filter((x) => x.role === 'admin').length === 1);
+        // #1233: `=== true`, so a server older than the feature (no `disabled` key) reads as enabled, as `password_set`
+        // does below. Only ENABLED admins count, as on the server (adminCount): a disabled admin cannot sign in, so it is
+        // no second admin, and demoting a disabled admin cannot leave the install without one.
+        const isEnabled = (x) => x.disabled !== true;
+        setAccountDisabled(u.disabled === true);
+        setOnlyAdmin(u.role === 'admin' && isEnabled(u) && users.filter((x) => x.role === 'admin' && isEnabled(x)).length === 1);
         // `=== false`, not falsy: a server older than this feature sends no `password_set`, and that account is a normal one.
         setPending(u.password_set === false ? { expires: u.invite_expires_at ?? null } : null);
       }
@@ -255,6 +267,25 @@ function UserSettingsForm() {
       // Dialog stays open, button re-enabled: the person can read why and retry or cancel.
       setRemoveError(err.message);
       setRemoveBusy(false);
+    }
+  }
+
+  // #1233: disable or enable the account. The page stays (unlike Remove): the account is still there, and the card below shows
+  // its new state. The state shown is the server's answer, not the request, so the card cannot claim a change that was not made.
+  async function confirmAccess() {
+    const want = accessDialog === 'disable';
+    setAccessBusy(true);
+    setError('');
+    setAccessError('');
+    try {
+      const res = await api.put(`/auth/users/${id}/disabled`, { disabled: want });
+      setAccountDisabled(typeof res?.disabled === 'boolean' ? res.disabled : want);
+      setAccessDialog(null);
+    } catch (err) {
+      // Same as Remove (#378): the reason in the dialog, which stays open with its button re-enabled.
+      setAccessError(err.message);
+    } finally {
+      setAccessBusy(false);
     }
   }
 
@@ -398,6 +429,29 @@ function UserSettingsForm() {
               </div>
             )}
 
+            {/* #1233: Disable / Enable, beside the other per-account cards. The same three gates as Remove user below (an
+                existing account, loaded, not your own: the server refuses disabling yourself too). A card, not a red button
+                at the bottom: it is reversible, and the bottom of the page is where the permanent action lives. */}
+            {!isNew && formReady && id !== me?.id && (
+              <div className="card">
+                <h2 className="card-heading">Account access</h2>
+                <div className="camera-tile__sub" style={{ marginBottom: 10 }} role="status">
+                  {accountDisabled
+                    ? 'This account is disabled. It cannot sign in until you enable it again.'
+                    : 'Disabling signs this person out everywhere and stops them signing in, without removing the account. You can enable it again later.'}
+                </div>
+                {accountDisabled ? (
+                  <button className="btn btn-secondary" type="button" onClick={() => { setAccessError(''); setAccessDialog('enable'); }}>
+                    Enable account
+                  </button>
+                ) : (
+                  <button className="btn btn-danger" type="button" onClick={() => { setAccessError(''); setAccessDialog('disable'); }}>
+                    Disable account
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Save sits below the two-factor tile, per the settings layout. */}
             <div className="form-actions">
               <button className="btn btn-primary" type="submit" disabled={busy}>
@@ -446,6 +500,43 @@ function UserSettingsForm() {
             <button className="btn btn-secondary" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>
             <button className="btn btn-danger" type="button" onClick={confirmRemove} disabled={removeBusy}>
               {removeBusy ? 'Removing…' : 'Remove'}
+            </button>
+          </ModalActions>
+        </Modal>
+      )}
+
+      {/* #1233. What disabling does, said plainly, including what it does NOT stop (Codex plan review): Pushover, ntfy and
+          Gotify are one destination for the whole household, so a person subscribed there still gets those alerts. */}
+      {accessDialog === 'disable' && (
+        <Modal title="Disable account" placement="top" error={accessError} onClose={() => (accessBusy ? null : setAccessDialog(null))}>
+          <p style={{ marginTop: 0 }}>
+            Disable <strong>{fullName}</strong>? They'll be signed out on every device now and can't sign in until an admin
+            enables the account again. The Nightlight app on their devices stops getting alerts. Their history and settings
+            are kept.
+          </p>
+          <p>
+            Pushover, ntfy and Gotify alerts go to everyone subscribed to them, so if this person gets those, remove them
+            there too.
+          </p>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setAccessDialog(null)} disabled={accessBusy}>Cancel</button>
+            <button className="btn btn-danger" type="button" onClick={confirmAccess} disabled={accessBusy}>
+              {accessBusy ? 'Disabling…' : 'Disable'}
+            </button>
+          </ModalActions>
+        </Modal>
+      )}
+
+      {accessDialog === 'enable' && (
+        <Modal title="Enable account" placement="top" error={accessError} onClose={() => (accessBusy ? null : setAccessDialog(null))}>
+          <p style={{ marginTop: 0 }}>
+            Enable <strong>{fullName}</strong>? They'll be able to sign in again. Their devices were signed out when the account
+            was disabled, so they need to sign in on each one.
+          </p>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setAccessDialog(null)} disabled={accessBusy}>Cancel</button>
+            <button className="btn btn-primary" type="button" onClick={confirmAccess} disabled={accessBusy}>
+              {accessBusy ? 'Enabling…' : 'Enable'}
             </button>
           </ModalActions>
         </Modal>

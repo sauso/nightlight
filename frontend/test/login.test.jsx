@@ -309,6 +309,34 @@ describe('signing in', () => {
     expect(auth.login).not.toHaveBeenCalled();
   });
 
+  test('★ #1233 a disabled account\'s 403 shows the server\'s message, keeps you on the form, and signs nobody out', async () => {
+    // Through the REAL api client over a faked fetch, not a rejected spy: api.js decides by STATUS (any 401 clears the
+    // token and goes to #/login; a 403 keeps the server's message), so only the real client shows what this form does
+    // with the answer the server gives a disabled account whose password is right (routes/auth.js, /login).
+    postSpy.mockRestore();
+    const realFetch = globalThis.fetch;
+    const seen = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      seen.push(`${init.method || 'GET'} ${String(url)}`);
+      return { ok: false, status: 403, text: async () => JSON.stringify({ error: 'This account is disabled. Ask an admin.', code: 'ACCOUNT_DISABLED' }) };
+    });
+    window.location.hash = '#/somewhere';
+    try {
+      const { user, auth } = mount();
+      await fillAndSubmit(user);
+      expect(await screen.findByText('This account is disabled. Ask an admin.')).toBeTruthy();
+      expect(seen).toEqual(['POST /api/auth/login']);
+      expect(screen.getByText('at /login')).toBeTruthy();
+      expect(auth.login).not.toHaveBeenCalled();
+      // A 401 would have sent the page to #/login (api.js); a 403 leaves it alone.
+      expect(window.location.hash).toBe('#/somewhere');
+      expect(screen.getByRole('button', { name: 'Sign in' }).disabled).toBe(false);
+    } finally {
+      globalThis.fetch = realFetch;
+      window.location.hash = '';
+    }
+  });
+
   test('the form is usable again after a failure', async () => {
     // `finally { setBusy(false) }` — without it a single typo would leave the button disabled forever
     // and the only way back would be a page reload.
