@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { offerBackToScreen } from './backInterceptor.js';
 
 // Handle the Android hardware Back button AND the OS edge back-gesture (both fire the
 // @capacitor/app plugin's `backButton` event) by stepping back through react-router history,
@@ -21,10 +22,14 @@ export function useHardwareBack() {
     let handle;
     Promise.resolve(
       App.addListener('backButton', () => {
+        // A screen showing something Back should close first (the TV screen's full-screen tile) gets the press.
+        if (offerBackToScreen()) return;
         const path = locRef.current.pathname;
         // On a drill-in screen, go back a step; on the root Live dashboard (or login) there's
         // nowhere to go, so let Back leave the app as usual.
-        if (path !== '/' && path !== '/login') {
+        // `/tv` is a root too (the TV screen, opened by replacing `/`): with nothing behind it in history, stepping
+        // back would do nothing at all and the remote's Back button would never leave the app.
+        if (path !== '/' && path !== '/login' && path !== '/tv') {
           navigate(-1);
         } else {
           App.exitApp?.();
