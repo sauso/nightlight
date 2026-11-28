@@ -33,6 +33,8 @@ import { setupApi } from './lib/setupApi.js';
 const ChildDetail = lazyPage(() => import('./pages/ChildDetail.jsx'));
 const NightReview = lazyPage(() => import('./pages/NightReview.jsx'));
 const SleepDetail = lazyPage(() => import('./pages/SleepDetail.jsx'));
+// #1236: the weekly and monthly sleep report. Lazy like SleepDetail (it pulls the charts), and not admin-gated: a caregiver reads it like the nights.
+const SleepReport = lazyPage(() => import('./pages/SleepReport.jsx'));
 const ChildSettings = lazyPage(() => import('./pages/ChildSettings.jsx'));
 const CameraSettings = lazyPage(() => import('./pages/CameraSettings.jsx'));
 const Setup = lazyPage(() => import('./pages/Setup.jsx'));
@@ -243,6 +245,7 @@ function Shell() {
                     <Route path="/children/new" element={<ChildSettings />} />
                     <Route path="/children/:id" element={<ChildDetail />} />
                     <Route path="/children/:id/sleep" element={<SleepDetail />} />
+                    <Route path="/children/:id/reports" element={<SleepReport />} />
                     <Route path="/children/:id/review/:date" element={<NightReview />} />
                     <Route path="/children/:id/edit" element={<ChildSettings />} />
                     <Route path="/cameras" element={<Cameras />} />

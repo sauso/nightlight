@@ -59,8 +59,9 @@ export function median(values) {
 }
 
 // A calendar date string moved by whole days. Arithmetic on the date parts in UTC, where every day is 24 hours, so
-// no timezone or clock change can skip or repeat a date (the localDateStr lesson in sleepAnalysis.js).
-function shiftDate(dateStr, days) {
+// no timezone or clock change can skip or repeat a date (the localDateStr lesson in sleepAnalysis.js). Exported for
+// the weekly and monthly report (sleepReport.js, #1236), which walks its periods with it.
+export function shiftDate(dateStr, days) {
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
@@ -69,14 +70,22 @@ const sameContext = (a, b) =>
   Boolean(a && b) && a.camera_id != null && a.camera_id === b.camera_id
   && a.window.start === b.window.start && a.window.end === b.window.end;
 
-// May this earlier night (a toScoringInput result) stand in the baseline of `target`?
-function qualifies(input, target) {
+// Is this night (a toScoringInput result) a MEASURED night at all? The per-night half of WHICH NIGHTS COUNT above:
+// `ok` after corrections, over, not promoted from `empty`, watched for at least `min_coverage` of its window.
+// Exported (#1236) so the weekly and monthly report (sleepReport.js) counts a night by exactly this rule rather than
+// by a copy that could drift from it. The same-context clause is NOT part of it: that one is about what "usual" is
+// for one night, and a report spans camera and window changes on purpose (it says so instead, in its `notes`).
+export function nightQualifies(input) {
   return Boolean(input)
     && input.status === 'ok'
     && !input.in_progress
     && !input.promoted_from_empty
-    && input.coverage_frac != null && input.coverage_frac >= SCORE_CONFIG.baseline.min_coverage
-    && sameContext(input.context, target.context);
+    && input.coverage_frac != null && input.coverage_frac >= SCORE_CONFIG.baseline.min_coverage;
+}
+
+// May this earlier night (a toScoringInput result) stand in the baseline of `target`?
+function qualifies(input, target) {
+  return nightQualifies(input) && sameContext(input.context, target.context);
 }
 
 // The pure half: `inputs` are the child's earlier nights as toScoringInput results, NEWEST FIRST, corrections

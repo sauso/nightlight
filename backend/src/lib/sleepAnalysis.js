@@ -846,7 +846,9 @@ export function isEvidenceFinal(windowEndSql, nowMs = Date.now()) {
 //
 // Doing it on the date parts is exact: pull the local Y/M/D, then add days in UTC where every day IS
 // 24 hours, and read the date straight back. No instant is ever converted, so no offset can be applied.
-function localDateStr(tz, deltaDays = 0) {
+// Exported (#1236) for the weekly and monthly report's default date (sleepReport.js), so "today" there is this
+// same DST-safe reading and not a second one.
+export function localDateStr(tz, deltaDays = 0) {
   const p = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
     .formatToParts(new Date())
     .reduce((a, x) => ((a[x.type] = x.value), a), {});

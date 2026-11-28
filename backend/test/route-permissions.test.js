@@ -143,6 +143,7 @@ const ROUTE_GATES = {
   'PUT /api/children/:id': SIGNED_IN, //                 name/colour/photo; tracking, window, primary camera + sleep report switches refused in the handler (#542, #655, #397/#398)
   'GET /api/children/:id/sleep/live': SIGNED_IN,
   'GET /api/children/:id/sleep/insights': SIGNED_IN,
+  'GET /api/children/:id/sleep/report': SIGNED_IN, //     #1236: the weekly and monthly report, read-only, like the other sleep reads
   'GET /api/children/:id/sleep': SIGNED_IN,
   'GET /api/children/:id/sleep/:date': SIGNED_IN,
   'GET /api/children/:id/review/pending': SIGNED_IN,

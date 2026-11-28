@@ -659,6 +659,24 @@ a plain median, so a window that ends near noon can read wrong; the continuity c
 `scripts/sleep-score-evidence.mjs` scores every stored night of a snapshot copy (tests in
 `backend/test/sleep-score-evidence.test.js`).
 
+**The weekly and monthly report** (#1236; tests in `backend/test/sleep-report.test.js`; user docs and the full answer
+shape in `docs/sleep-tracking.md`, "Weekly and monthly reports"). `lib/sleepReport.js` (`buildSleepReport(child, { kind,
+date, weekStart, nowMs })`) is a pure read with no schema of its own: one `night_date BETWEEN` query over `sleep_nights`
+covering the previous period's first date to the current period's last, `applyCorrections` over the rows, then
+`toScoringInput` per night and `attachScore` for each counted night's score, all on one `nowMs`. A night counts by
+`nightQualifies` (exported from `lib/sleepBaseline.js`: the baseline's per-night rules, `ok`, over, not promoted from
+`empty`, at least `min_coverage` watched), WITHOUT the baseline's same-camera-and-window clause; instead the answer's
+`notes` gets `context_changed` when the counted nights of both periods come from more than one (camera, window). Every
+figure is a `median` (also from the baseline) and is `ready` at `REPORT_CONFIG.min_values` (3) usable values; the
+`steady` floors in `REPORT_CONFIG` are judgement, not measurement. Period bounds are date-part arithmetic in UTC
+(`shiftDate`); the default date is `localDateStr` in `settings.timezone`; `complete` reads `lastCompletedNightDate`. The
+child's `show_sleep_score` is read inside the module: while it is 0, `attachScore` is not called and no `score` key
+appears anywhere in the answer.
+
+| Route | Gate | Request | Answer |
+|---|---|---|---|
+| `GET /api/children/:id/sleep/report` | signed in (admin or caregiver) | `period=week\|month`, optional `date=YYYY-MM-DD` (default today in the app timezone), optional `week_start=1..7` (ISO, default 1) | `200 { period, earliest_night_date, nights, summary, previous, comparison, notes }`; `404` unknown child; `400` bad `period`, `date` or `week_start` |
+
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
 row's `scoring_context` and parses it (no row, `NULL` or unparseable: `400` with `reason: 'no_stored_context'`, never a

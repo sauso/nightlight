@@ -12,6 +12,7 @@ import {
   parseScoringContext, scoringContextChoice, computeNightForDisplay, displayContextFor, currentScoringContext,
 } from '../lib/sleepAnalysis.js';
 import { attachScore } from '../lib/sleepScoreAttach.js';
+import { buildSleepReport, parseReportQuery } from '../lib/sleepReport.js';
 import { withNightVitals } from '../lib/nightVitals.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
@@ -366,6 +367,21 @@ router.get('/:id/sleep/insights', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   res.json(sleepInsights(req.params.id));
+});
+
+// The weekly and monthly report (#1236): ?period=week|month (required), &date=YYYY-MM-DD (any night date inside the
+// wanted period; default today in the app timezone), &week_start=1..7 (ISO, 1 = Monday, the default; the browser sends
+// its locale's first day of the week, so no country's calendar is assumed here). The period's nights, their typical
+// figures and the change against the period just before, worked out on read from the stored nights with corrections
+// laid over them (lib/sleepReport.js, which says what counts and why). NEW and read-only: no other answer changes.
+// Any signed-in user, like every other sleep read: the child's Show sleep score switch hides the score here too.
+// Declared before '/:id/sleep/:date' so "report" isn't captured as a date.
+router.get('/:id/sleep/report', (req, res) => {
+  const child = db.prepare('SELECT id, birthday FROM children WHERE id = ?').get(req.params.id);
+  if (!child) return res.status(404).json({ error: 'Child not found' });
+  const query = parseReportQuery(req.query);
+  if (query.error) return res.status(400).json({ error: query.error });
+  res.json(buildSleepReport(child, { kind: query.kind, date: query.date, weekStart: query.weekStart, nowMs: Date.now() }));
 });
 
 // Recent stored sleep summaries for a child (newest first) — the "last night" card's data source.

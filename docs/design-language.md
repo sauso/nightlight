@@ -1111,6 +1111,49 @@ alerts), so Tab leaves the night card for the camera tile in the right column be
 Known limits: the layout has been checked in a desktop browser at 375 and 1280 wide, light and dark; it has not been seen on a
 real phone or tablet, and a screen reader has not been run over it.
 
+### Weekly and monthly report page (`pages/SleepReport.jsx`, `lib/reportFormat.js`, `components/ReportCharts.jsx`, #1236)
+A read-only page at `/children/:id/reports`, open to every signed-in user (admin and caregiver alike), linked by one quiet
+`.report-link` ("Weekly and monthly reports": a 44px line of `--accent-text` with a calendar icon and a chevron,
+`components/ReportLink.jsx`) under the child page's night card and under the sleep page's night strip. All its styles are `.report-*`.
+- **Frame.** Header "Reports" with the child's name as the back label. Then a **Week | Month** switch (the shared `.seg-track`,
+  `aria-pressed`), a previous / title / next row (44px buttons; the title is 18px, wraps and balances) and, to the right of the switch, an empty
+  box kept for the Download button a later change adds. `?period=week|month&date=YYYY-MM-DD` in the address is the whole state; no `date`
+  means today, worked out by the SERVER in the app's timezone, so the page never guesses it. The period title is built from the
+  answer's calendar dates with `Intl` and printed as dates (no zone), the range by `formatRange` so the locale orders it. Previous is
+  disabled before the first saved night, next is disabled for the period still running, and both wait while a period loads.
+- **Loading, failed and empty are three screens** (as above): "Loading report…" in a card; `LoadFailed` with **Retry** (an answer the page cannot
+  read is a failure too); and, when the child has no saved night at all, "No nights yet" with no controls. A fourth case lives
+  inside the page: with no figure ready, a card says "Not enough nights yet" and the chart and its gaps are still drawn.
+- **Tiles** (`<dl>`, two to a row on a phone, `minmax(150px, 1fr)`): the typical value in 22px tabular numbers, then the change against the period
+  before as an arrow icon AND words ("up 8 points", "15 minutes later", "steady", "not enough nights to compare"), in the text colour: a
+  change is never coloured good or bad. The words come from the server's `direction`; only the size is rounded here. A figure that is
+  not ready reads "Not enough nights yet", never a dash or a zero. The clock tiles add how much the times varied, rounded ("half of nights
+  within about 20 minutes"). The score tile has a 4px band mark beside the number and the band word after it; with the score switch
+  off there is no score tile, no band colour and the word "score" is on no screen and in no accessible name. The labels are "Fell asleep" and
+  "Got up", not "bedtime": the figures are the detected sleep and wake times, not the put-down.
+- **Best and lowest night** are two `NavRow` links to those nights ("Highest score" / "Lowest score", or "Most sleep" / "Least sleep" when
+  there is no score: the API's `best_night` and `worst_night` would otherwise judge a night). Hidden when the server sends none.
+- **Night by night** is HTML, like the seven-night strip: one `<li>` per calendar date in a 120px track (`--bg-elevated-2`), a bar growing from the
+  bottom as a `background`, because a `--band-*` token may only paint that way (never `color`, never SVG `fill`;
+  `paletteTokens.test.jsx`). With scores the height is the score and the colour its band (`bandOfValue`); with none the height is the time asleep
+  on a 12-hour-or-longer axis, in `--sleep-asleep`. **A night that did not count is never a bar, of any height:** it is an empty track with a
+  short dashed mark, a labelled image whose name gives the reason ("No data", "Not enough of this night was watched", "No one was in the bed",
+  "Tonight, still in progress", or "Not recorded yet" for a date that has not finished), and one line under the chart counts the reasons
+  in print, for a phone with no hover. A counted night that lacks the figure the chart measures is a hollow stub that still links. Each bar's
+  name starts with what it prints ("Mon 2, 2 Nov, score 82, Good, asleep 10h 5m, 1 wake-up") and is its text alternative; a month prints a
+  number on the 1st and every fifth day only.
+- **Fell asleep and got up** are two small SVGs (a dot a night, a dashed line for the typical time inside a light band of the accent line,
+  later times higher, axis in the viewer's 12 or 24 hour form, capped at 420px wide so the 11px axis text is not scaled up) with a `<title>`,
+  a `<desc>` and a visually hidden table (`.report-sr`) of the same numbers. They use `--sleep-asleep`, `--accent-line`, `--border` and
+  `--text-secondary` only.
+- Notes: "So far: N of M nights" for a period still running, and one line when the camera or sleep window changed, which names this and the previous
+  week or month. A note code the page does not know is ignored.
+Known limits: a month has up to 31 bars, about 10px wide on a phone, under the 44px target (each slot is as tall as the chart, and the highest
+and lowest nights are one wide tap each). The drift band is the typical time plus and minus half the spread, because the server sends the spread
+and not the quartiles, so it can sit off-centre for lopsided nights. A report night carries a score number and no early-estimate flag, so an early
+estimate is drawn in its band like any number (its figure is in the bar's name). Checked at 390px and 1280px in a desktop browser against canned
+data, in the day theme; not on a phone, not in the night theme by eye, and not with a screen reader.
+
 ---
 
 ## 7. Motion

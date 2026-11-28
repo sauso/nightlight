@@ -964,6 +964,195 @@ When a read's fresh night is `no_data` but a saved `ok` row exists (the raw data
 camera is gone), `score` is the saved night's and the answer also carries `score_source: "stored"`. Every
 other key is still the fresh `no_data` night; read `?stored=1` or the list for the saved figures.
 
+## Weekly and monthly reports
+
+A report sums up a child's sleep over one calendar week or one calendar month and sets it beside the week or
+month before, so you can see whether sleep is getting better without reading night by night. Like the score,
+it is an estimate from what the camera and microphone observed, not a medical measurement. Nothing is saved:
+a report is worked out from the saved nights each time you open it, so an old month can be read as well as
+this one.
+
+### Where to find it
+
+Open a child's page or the sleep page and choose **Weekly and monthly reports**; an admin and a caregiver both
+see it. The page opens on the current week.
+
+- **Week** and **Month** switch the length. The arrows step to the period before and after. The earlier arrow
+  stops at the child's first saved night, and the later one stops at the period that is still running. The
+  address keeps the choice, so a link, a bookmark and the browser's Back button all work.
+- A period that is still running says **So far** and how many nights have finished and counted.
+- Under the figures is a bar for every night. A night that did not count is an empty slot with a dashed mark,
+  and a line under the chart says why; tap a bar to open that night. Beneath it, two small charts show the
+  clock times they fell asleep and got up, one dot a night, with the typical time and about where half the
+  nights fell.
+- A figure with too few nights reads **Not enough nights yet**, never a zero. With too few nights for any
+  figure the page says so and still shows the chart.
+- With the child's [Show sleep score](#turning-the-score-off) switch off, the page has no score and no score
+  colours; the bars are time asleep, and the extremes are the most and the least sleep.
+- The page only reads. It sends nothing and changes nothing.
+
+### What a report shows
+
+- Each night of the period, or a gap with its reason.
+- The typical night: the [sleep score](#sleep-score) (unless the child's
+  [Show sleep score](#turning-the-score-off) switch is off), time asleep, wake-ups, the longest stretch, how
+  long settling took, and the clock times they fell asleep and got up, with how much those times varied.
+- The best and the worst night: by score, or by time asleep when the score is off. On a tie, the earlier night.
+- How each figure changed since the period before: up, down, or about the same.
+
+### What counts as a night
+
+The report uses your nights as you see them, with your [corrections](#correcting-a-night). A night counts
+when sleep was detected, the night is over, and the camera watched at least 80% of the sleep window. These
+are the rules for the child's ["usual"](#what-usual-means), with one difference: the usual only uses nights
+from the same camera and sleep window, while a report counts every night of the period (see
+[Known limits of reports](#known-limits-of-reports)).
+
+A night that does not count is shown as a gap, never as a zero:
+
+| Gap | When |
+| --- | --- |
+| No data | Nothing was saved for that date, too little was seen, no sleep was detected, or the camera saw an empty bed and you typed in the times (the times are yours, but nothing about that night was measured). |
+| Not watched enough | The camera watched less than 80% of the sleep window. |
+| Empty bed | The camera saw an empty bed, or you said no one was in the bed. |
+| In progress | The night has not finished. It counts once it is over. |
+
+A counted night can still lack a figure, by the same rules as the usual. Time asleep is left out when no
+wake-up was confirmed (the child may have been asleep when the window closed) or when more than 15 minutes of
+the sleep were not watched. The time they got up is left out when it was not confirmed.
+
+### Typical, not average
+
+Each "typical" figure is the median, the middle night once the nights are put in order, so one unusual night
+does not move it. A figure needs at least **3 nights**: with fewer it is not given, it is not compared, and
+there is no best or worst night. The 3 is a judgement (a median of one or two nights is not a trend), not a
+measurement, and not a setting.
+
+How much the clock times varied is the spread of the middle half of the nights, in minutes.
+
+### Weeks and months
+
+A month runs from the 1st to its last day. A week is 7 days and starts on the first day of the week for your
+browser's language and region (Monday in most places, Sunday or Saturday in some). A night belongs to the date
+it started on, so the night from Sunday into Monday is in the week that ends on that Sunday.
+
+The week or month that is still running is a report "so far". It covers the nights finished up to now, and its
+change from the period before is shown once it has 3 counted nights.
+
+### About the same
+
+A change smaller than this is called about the same:
+
+| Figure | About the same when it moved by less than |
+| --- | --- |
+| Score | 5 points |
+| Time asleep | 15 minutes |
+| Wake-ups | half a wake-up, so any change in the typical count shows |
+| Longest stretch | 15 minutes |
+| Settling | 5 minutes |
+| Fell asleep, got up | 15 minutes |
+
+These were chosen by judgement, not measured on anyone's nights, and they are not settings.
+
+### Known limits of reports
+
+- The "about the same" thresholds are a judgement. In another house they may be too wide or too narrow.
+- A change of the camera a child's sleep is measured from, or of the sleep window, can move the figures by
+  itself: another camera sees a different amount of movement. When the counted nights of the two periods come
+  from more than one camera or window, the report says that comparisons may be affected. It does not correct
+  for it. Nights saved before the camera and window were recorded with each night count as unknown settings,
+  so beside newer nights they also bring that note.
+- Moving or re-aiming the **same** camera is not noticed. A month across such a move mixes two views of the
+  bed, and the counted wake-ups can change a lot with the view.
+- Wake-up counts depend heavily on the camera's angle. Compare a child with themselves, not with another child.
+- A sleep window that ends near midday can give a wrong typical clock time, because times are counted from
+  noon.
+- Heart rate and breathing, room temperature and clips are not part of a report.
+- The score is worked out when it is read, so a past report changes if you correct a night in it or the
+  scoring is updated.
+
+### For developers: the report in the API
+
+`GET /api/children/:id/sleep/report?period=week|month&date=YYYY-MM-DD&week_start=1..7`. Read-only: nothing is
+stored and no other answer changed. Any signed-in user, and an admin and a caregiver get the same answer.
+
+| Parameter | Required | Values | Default |
+| --- | --- | --- | --- |
+| `period` | yes | `week` or `month` | none |
+| `date` | no | a real calendar date, any night date inside the wanted period | today, in the app timezone (Settings → General) |
+| `week_start` | no | `1` (Monday) to `7` (Sunday), ISO numbering; ignored for a month | `1` |
+
+`404` for an unknown child; `400` with a plain `error` for a missing or unknown `period`, a `date` that is not
+a real date (`2026-02-31` is refused), or a `week_start` outside 1 to 7.
+
+```json
+{
+  "period": { "kind": "week", "from": "2025-03-10", "to": "2025-03-16", "complete": true },
+  "earliest_night_date": "2025-01-04",
+  "nights": [
+    { "date": "2025-03-10", "status_class": "counted", "score": 82, "asleep_minutes": 610, "wake_count": 2,
+      "longest_stretch_minutes": 330, "onset_clock": 450, "wake_clock": 1110,
+      "onset_at": "2025-03-10 08:30:00", "wake_at": "2025-03-10 19:30:00" },
+    { "date": "2025-03-11", "status_class": "low_coverage" }
+  ],
+  "summary": {
+    "nights_counted": 6, "nights_in_period": 7,
+    "score": { "value": 80, "n": 6, "ready": true },
+    "asleep_minutes": { "value": 605, "n": 5, "ready": true },
+    "wake_count": { "value": 2, "n": 6, "ready": true },
+    "longest_stretch_minutes": { "value": 320, "n": 6, "ready": true },
+    "settle_minutes": { "value": null, "n": 2, "ready": false },
+    "onset_clock": { "value": 452.5, "n": 6, "ready": true, "spread": 10 },
+    "wake_clock": { "value": 1105, "n": 6, "ready": true, "spread": 20 },
+    "best_night": { "date": "2025-03-14", "score": 88 },
+    "worst_night": { "date": "2025-03-12", "score": 71 }
+  },
+  "previous": { "from": "2025-03-03", "to": "2025-03-09", "summary": { "...": "the same shape" } },
+  "comparison": {
+    "score": { "direction": "up", "delta": 6 },
+    "asleep_minutes": { "direction": "steady", "delta": -5 },
+    "wake_count": { "direction": "down", "delta": -1 },
+    "longest_stretch_minutes": { "direction": "up", "delta": 20 },
+    "settle_minutes": { "direction": "not_enough", "delta": null },
+    "onset_clock": { "direction": "steady", "delta": 2.5 },
+    "wake_clock": { "direction": "steady", "delta": -10 }
+  },
+  "notes": []
+}
+```
+
+(The example's times are for an install in UTC+11; the numbers are made up.)
+
+- **`nights`**: the current period only, one entry per date, oldest first. `status_class` is `counted`,
+  `no_data`, `low_coverage`, `empty_bed` or `in_progress`. A gap has only `date` and `status_class`. A counted
+  night has each figure only when it is usable: `asleep_minutes` is the time asleep the usual uses (absent with
+  no confirmed wake or more than 15 unwatched minutes), `longest_stretch_minutes` is absent when a correction
+  moved a time by more than 15 minutes or more than 15 minutes went unwatched, the clock figures need the night's
+  stored timezone, and `wake_at` and `wake_clock` need a confirmed wake. `onset_at` and `wake_at` are the
+  corrected UTC times (`YYYY-MM-DD HH:MM:SS`), to print in the home timezone. A date after the last finished
+  night is `no_data` when nothing is saved for it: the first `summary.nights_in_period` dates are the finished
+  ones.
+- **Clock figures** (`onset_clock`, `wake_clock`) are minutes after 12:00 noon on the local clock, in each
+  night's own stored timezone: 450 is 19:30, 1110 is 06:30 the morning after. `spread` is the interquartile
+  range in minutes, or `null` when the figure is not ready.
+- **`summary`**: each figure is `{ value, n, ready }`, the median of `n` usable values; `ready` is `n >= 3`
+  and `value` is `null` until then. `nights_counted` is the counted nights; `nights_in_period` the dates up to
+  and including the last finished night (all of them for a finished period). `best_night` and `worst_night` are
+  `{ date, score }`, or `{ date, asleep_minutes }` when the score is off, or `null` with fewer than 3 nights to
+  rank.
+- **`period.complete`** is `false` while the period's last night has not finished: the figures and the
+  comparison are then "so far".
+- **`previous`** is `null` when the previous period lies wholly before `earliest_night_date` (the child's
+  oldest saved night, `null` when there is none).
+- **`comparison`**: `{ direction, delta }` per figure. `direction` is `up`, `down`, `steady` or `not_enough`
+  (either period's figure not ready, or no previous period). `delta` is this period's value minus the previous
+  one, unrounded, or `null` for `not_enough`. Clock deltas go the shorter way round noon.
+- **When the child's Show sleep score switch is off**, there is no `score` key anywhere: not in `summary`,
+  `previous.summary`, `nights` or `comparison`.
+- **`notes`** is a list of codes. Today the only one is `context_changed`: the counted nights of the two
+  periods together were scored from more than one camera or sleep window (a night saved without that record
+  counts as one more, "unknown"). More codes may be added; ignore one you do not know.
+
 ## Night summary
 
 The child's card shows a one-line headline. The sleep page turns the night's observations into
