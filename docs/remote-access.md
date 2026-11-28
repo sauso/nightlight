@@ -180,6 +180,11 @@ is used instead — a typo here will never stop the app starting.
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
 else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
 
+**Except for a TV signed in with a code from outside your home network.** Pairing a TV is limited per source
+address only (the TV has no account yet), so without `TRUST_PROXY` every remote TV shares the proxy's budget
+and waiting slots, and one internet client can keep remote pairing busy. Set it if a TV pairs through your
+proxy ([the limits](mfa.md#signing-in-a-tv-1237)). A TV on your home network is not affected.
+
 ### While a tunnel daemon is attached
 
 These rules apply while the Tailscale daemon is attached.

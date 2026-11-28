@@ -21,6 +21,10 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { createAccountThrottle } from '../lib/accountThrottle.js';
 import { isLoopbackAddress, isLoopbackExposed } from '../lib/loopbackExposure.js';
 import { clientBucketKey } from '../lib/clientBucket.js';
+import { logger } from '../lib/logger.js';
+import {
+  newDeviceCode, deviceCodeHash, newUserCode, normaliseUserCode, displayUserCode, sanitiseLabel, DEVICE_CODE_PATTERN,
+} from '../lib/tvPairing.js';
 
 const router = Router();
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
@@ -34,8 +38,12 @@ function appName() {
 // A short-lived, single-purpose token bridging the two login steps: it proves the password was just
 // verified, but carries no session id, so it can never be used as an access token (requireAuth
 // rejects any token without a live session). Exchanged at /login/mfa for a real session token.
-function signMfaToken(userId) {
-  return jwt.sign({ id: userId, purpose: 'mfa' }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '5m' });
+// #1237: a TV's password sign-in (`tv: true` on /login, see tvSignInAsk) rides INSIDE this token, with its label, so the
+// second step makes the TV session the first step was asked for and its body cannot change it (/login/mfa reads the
+// flag from the verified payload only, never from its own body). The label is the sanitised one, at most 40 characters.
+function signMfaToken(userId, ask = { tv: false }) {
+  const tv = ask.tv ? { tv: true, label: ask.label } : {};
+  return jwt.sign({ id: userId, purpose: 'mfa', ...tv }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '5m' });
 }
 
 // A short-lived, media-ONLY token for URLs the browser has to fetch itself and can't attach an
@@ -515,9 +523,9 @@ function describeDevice(userAgent) {
 // typo, 'TV') can never be stored: sessionWithUser forces the caregiver role only for exactly 'tv', so a misspelt kind
 // would otherwise be a FULL session with the account's real role.
 const SESSION_KINDS = new Set(['user', 'tv']);
-// Every existing caller passes two arguments and gets an ordinary session, exactly as before. The options are for the
-// TV pairing (the next change); nothing in this version passes them except the tests, which make TV sessions with it.
-// Exported for those tests and for that change.
+// Every existing caller passes two arguments and gets an ordinary session, exactly as before. The options are for a TV:
+// the pairing claim (POST /device/poll) and a TV's password sign-in (signInAnswer) pass them. Exported for the tests,
+// which also make TV sessions with it.
 export function createSession(userId, userAgent, { kind = 'user', label = null, pairedBySession = null, pairedFrom = null } = {}) {
   if (!SESSION_KINDS.has(kind)) throw new Error(`createSession: unknown session kind ${JSON.stringify(kind)}`);
   const id = uuid();
@@ -536,6 +544,64 @@ function sign(user, sessionId) {
     algorithm: 'HS256',
     expiresIn: `${SESSION_TOKEN_TTL_DAYS}d`,
   });
+}
+
+// What a TV sign-in answers (#1237), from the TV's password form (/login and /login/mfa with `tv: true`) and from the
+// pairing poll alike: the /login shape, but the user carries the session's EFFECTIVE role, `caregiver` whatever the
+// account's role (middleware/auth.js sessionWithUser forces it from the row), and `kind: 'tv'`, so the web app's role
+// gates never show a TV an admin screen (planning/tv-pairing-design.md §5, §6.1). The token's role claim says caregiver
+// too. Nothing trusts that claim (the row decides, #261); it is so a token copied off a TV says what it can do.
+const TV_EFFECTIVE_ROLE = 'caregiver';
+function tvSignInAnswer(user, sessionId) {
+  return {
+    token: sign({ ...user, role: TV_EFFECTIVE_ROLE }, sessionId),
+    user: { ...toPublicUser(user), role: TV_EFFECTIVE_ROLE, kind: 'tv' },
+  };
+}
+
+// The session and the answer for a sign-in that has passed every check (/login, /login/mfa): an ordinary session, or a
+// TV's when the sign-in asked for one (`ask` from tvSignInAsk, or from the MFA token). A TV signed in by password is
+// paired by nobody: it has no paired_by_session, so revoking another session never ends it. It counts toward the cap
+// of TV_SESSIONS_PER_USER that a pairing meets, but a password sign-in is never refused by that cap: the cap bounds what
+// a borrowed SESSION can leave behind, and a person who holds the password could sign in an ordinary session instead,
+// with more power.
+function signInAnswer(user, userAgent, ask) {
+  if (!ask.tv) {
+    const sessionId = createSession(user.id, userAgent);
+    return { token: sign(user, sessionId), user: toPublicUser(user) };
+  }
+  return tvSignInAnswer(user, createSession(user.id, userAgent, { kind: 'tv', label: ask.label }));
+}
+
+// A TV's label from a request body: null when absent, the sanitised text (lib/tvPairing.js sanitiseLabel) when it is
+// a string, and undefined (with the 400 already sent) when it is anything else: a number or an object is a client bug,
+// not a name to guess at. Every route that takes a label (/device/start, /login with `tv: true`) uses this.
+function labelFromBody(body, res) {
+  const label = body?.label;
+  if (label === undefined || label === null) return null;
+  if (typeof label !== 'string') {
+    res.status(400).json({ error: 'label must be text.' });
+    return undefined;
+  }
+  return sanitiseLabel(label);
+}
+
+// `{ tv: true, label }` on /login (#1237; design §6.3): the session it makes is a TV's, view-only. A client can only ask
+// for LESS power this way, so nothing about the flag needs proving. It is tied to the TV's own sign-in form (the next
+// change sends it, on /tv/pair), not to detecting a television. The boolean only, as for `invite: true`: `tv: "true"` or
+// `tv: 1` is a 400, never a guess, because guessing "ordinary" would give that client MORE than it asked for. Checked
+// before the password compare, so a malformed request costs no hash and is no guess (it says nothing about any account).
+// Answers { tv: false } or { tv: true, label }; null when it refused (the 400 already sent).
+function tvSignInAsk(body, res) {
+  const tv = body?.tv;
+  if (tv === undefined || tv === null || tv === false) return { tv: false };
+  if (tv !== true) {
+    res.status(400).json({ error: 'tv must be true or false.' });
+    return null;
+  }
+  const label = labelFromBody(body, res);
+  if (label === undefined) return null;
+  return { tv: true, label };
 }
 
 // The two session LISTS show only sessions still within their lifetime (#562): a session past it is
@@ -737,6 +803,9 @@ function accountDisabledOrGone(userId) {
 
 router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
+  // #1237: a TV's sign-in (`tv: true`), checked before the compare (see tvSignInAsk).
+  const tvAsk = tvSignInAsk(req.body, res);
+  if (!tvAsk) return;
   const user =
     typeof username === 'string' ? db.prepare('SELECT * FROM users WHERE username = ?').get(username) : null;
   const hashToCheck = user ? user.password_hash : DUMMY_HASH;
@@ -788,10 +857,9 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   // Password is correct. If the account has two-factor on, don't issue a session yet — hand back a
   // short-lived token the client exchanges at /login/mfa after the second step.
   if (current.mfa_enabled) {
-    return res.json({ mfaRequired: true, mfaToken: signMfaToken(current.id) });
+    return res.json({ mfaRequired: true, mfaToken: signMfaToken(current.id, tvAsk) });
   }
-  const sessionId = createSession(current.id, req.headers['user-agent']);
-  res.json({ token: sign(current, sessionId), user: toPublicUser(current) });
+  res.json(signInAnswer(current, req.headers['user-agent'], tvAsk));
 }));
 
 // Second login step for MFA accounts: verify the 6-digit authenticator code (or a one-time backup
@@ -850,8 +918,13 @@ router.post('/login/mfa', mfaLimiter, asyncHandler(async (req, res) => {
   // createSession, and a disabled account (or one removed meanwhile, whose session insert would fail its foreign key)
   // gets the same answer as above. The code is spent either way, the safe direction (as for the step claim above).
   if (accountDisabledOrGone(user.id)) return res.status(401).json({ error: 'Invalid verification token' });
-  const sessionId = createSession(user.id, req.headers['user-agent']);
-  res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
+  // #1237: a TV's sign-in is whatever /login put in the VERIFIED token (signMfaToken), never this request's body, so the
+  // second step cannot turn a TV's sign-in into an ordinary one. The label is sanitised again: cheap, and it keeps the
+  // rule in one function whatever a future token carries.
+  const tvAsk = payload.tv === true
+    ? { tv: true, label: typeof payload.label === 'string' ? sanitiseLabel(payload.label) : null }
+    : { tv: false };
+  res.json(signInAnswer(user, req.headers['user-agent'], tvAsk));
 }));
 
 // Ends just the current session - the token stops working on its very next use,
@@ -1489,6 +1562,11 @@ router.put('/users/:id/disabled', requireAuth, requireAdmin, (req, res) => {
         db.prepare('DELETE FROM push_tokens WHERE user_id = ? OR session_id IN (SELECT id FROM sessions WHERE user_id = ?)')
           .run(req.params.id, req.params.id);
         db.prepare('DELETE FROM sessions WHERE user_id = ?').run(req.params.id);
+        // #1237: and the TV pairings the account approved that no TV has collected yet. The claim would refuse them
+        // anyway (the approving session is gone and the account is disabled: see claimPairing), so this is so a
+        // disabled account leaves nothing pending behind (design §3 row 7). Removing the account needs no line: the
+        // rows go with it (tv_pairings.user_id ON DELETE CASCADE).
+        db.prepare('DELETE FROM tv_pairings WHERE user_id = ?').run(req.params.id);
       }
     });
   } catch (e) {
@@ -1849,5 +1927,446 @@ router.post('/invite/redeem', inviteLimiter, asyncHandler(async (req, res) => {
     inviteRedeemInFlight.delete(invite.token_hash);
   }
 }));
+
+// --- Signing in a TV by code (#1237, phase 2 of the Android TV app) ----------------------------------------------------
+//
+// The design, its threats and its two reviews: planning/tv-pairing-design.md (cited below as "design §N"). User-facing
+// rules: SECURITY.md, "Pairing a TV". A TV (the Android TV screen) gets a view-only session without anyone typing a
+// password on it, by the device-code flow of RFC 8628:
+//   1. the TV asks POST /device/start (public) and gets a device_code (a secret it keeps) and a user_code it shows;
+//   2. a person signed in on their phone types the user_code: POST /device/pending shows what is asking, and
+//      POST /device/approve (or /deny) answers it;
+//   3. the TV polls POST /device/poll (public) with its device_code until the answer is there; on `approved` it gets a
+//      session token, once.
+// The session is a TV's (sessions.kind = 'tv'): watch and listen only, and a caregiver whatever the approver's role
+// (middleware/auth.js, tvAllowed and sessionWithUser). The QR code on the TV carries no code at all (it only opens the
+// approval page, design §2); it and every other screen are the next change.
+//
+// THE STATE MACHINE (design §4.4). One row per pairing in tv_pairings. pending -> approved (approved_at) or denied
+// (denied_at); either way it expires at expires_at, PAIRING_TTL_MS after the start. "Claimed" is not a state: the claim
+// DELETES the row. Each transition is ONE guarded statement whose row count is the verdict, in a synchronous
+// better-sqlite3 transaction with no await anywhere:
+//   approve  UPDATE ... WHERE user_code = ?   AND approved_at IS NULL     AND denied_at IS NULL AND expires_at > now
+//   deny     UPDATE ... (the same guard), sets denied_at
+//   claim    DELETE ... WHERE device_hash = ? AND approved_at IS NOT NULL AND denied_at IS NULL AND expires_at > now
+// So approve and deny exclude each other (whichever runs first wins; the other changes nothing and answers the uniform
+// 404), a denied or expired pairing is never claimed, and a claim happens once: the DELETE is the single-use guard, and
+// the same device_code polled again finds no row and is answered `expired`, like an unknown one. Node runs each
+// request's handler to its end before the next, so two "simultaneous" polls are two sequential ones; the guards are
+// what keep that true if an await is ever added (design §10: tested by sequential replay, and by a mutant per term).
+//
+// "NOW" IS THE JAVASCRIPT CLOCK, utcText(Date.now()), read inside each transaction, as the invites do, and never SQLite's
+// datetime('now'): one clock for every pairing time, and the one a test can move (node:test mock timers move Date, not
+// SQLite). A clock moved backwards can make an expired pairing live again until the real time passes its expiry (design
+// §13; tested). The SESSION a claim makes follows the ordinary session lifetime (sessionAgeCondition), like every session.
+
+// Design §4.2: a pairing lives 10 minutes (the TV counts down and starts a new one by itself), and the TV polls every 3
+// seconds. A poll less than 2 seconds after the previous one for the same pairing answers `slow_down` (RFC 8628's rule),
+// and the TV then adds 5 seconds to its interval. All three are choices, not measurements: ten minutes to find a phone
+// and type eight characters, about 200 polls for a TV that waits the whole time.
+const PAIRING_TTL_MS = 10 * 60 * 1000;
+const PAIRING_INTERVAL_SECONDS = 3;
+const POLL_SLOW_DOWN_MS = 2000;
+// Design §3 row 6: the live pairings one client bucket may hold, and all of them together. Small on purpose: a pairing
+// is a ten-minute row nobody has authenticated for, and a household pairs one TV at a time. 3 per bucket lets a TV that
+// reloaded twice (orphaning two rows), or two TVs behind one address, keep going; 20 bounds the table whatever arrives.
+const PAIRINGS_PER_BUCKET = 3;
+const PAIRINGS_IN_ALL = 20;
+// Design §3 row 14 (d): at most this many live TV sessions per account. A borrowed or stolen session can pair a TV that
+// outlives it (up to SESSION_TTL_DAYS); this bounds how many such footholds one account can collect. A household with
+// more TVs than this on one account signs an old one out first (the session lists), or pairs the rest from another
+// account; SECURITY.md states the number. A judgement, not a measurement.
+const TV_SESSIONS_PER_USER = 5;
+
+// The answers. Machine-readable codes the screens word, as invite_invalid is. ONE 404 for every code that names no
+// pairing that can be shown or answered (unknown, malformed, expired, approved, denied, claimed), after the same work,
+// so a guesser learns nothing about which it was (design §3 row 11).
+const PAIR_INVALID = { error: 'pair_invalid' };
+const TV_LIMIT = { error: 'tv_limit' };
+// /device/start when every live row it could evict is an approved one (see startPairing). 429, not a 5xx: Cloudflare
+// strips a 5xx body, and the TV backs off on a 429 as it does for the limiter's.
+const PAIR_BUSY = { error: 'pair_busy' };
+const POLL_PENDING = { status: 'pending' };
+const POLL_SLOW_DOWN = { status: 'slow_down' };
+const POLL_DENIED = { status: 'denied' };
+const POLL_EXPIRED = { status: 'expired' };
+
+// --- the limits on the five routes -----------------------------------------------------------------------------------
+//
+// Each limiter is its own express-rate-limit instance with its own MemoryStore (design §5), so junk sent to the pairing
+// routes never spends the budget /login shares (perClientLimiter), and the other way round. Known limits, the same as
+// every limiter here (docs/mfa.md, docs/remote-access.md): they are in memory, so a restart empties them; and behind a
+// reverse proxy without TRUST_PROXY every remote client is one source address, so one internet client can use up the
+// start budget for everyone remote. A TV that is not on the home network therefore needs TRUST_PROXY (design §13).
+// Through the Tailscale tunnel every peer is 127.0.0.1 to the socket, so tailnet TVs share the start and poll budgets
+// whatever TRUST_PROXY says (the bucket cap below still separates them by account slot): stated in docs/mfa.md.
+//
+//   start   PAIR_STARTS_PER_WINDOW per 15 minutes per source address. Keyed on the SOCKET address (clientKey), exactly as
+//           inviteLimiter is, NOT on clientBucketKey: #961 found that the bucket trusts a header a process on the host
+//           can forge, which would buy a fresh budget per request. Every start counts (each one writes a row). 30 is a
+//           judgement: a TV starts once per ten minutes while it waits, plus one per reload; three TVs behind one
+//           address, each reloading a few times, stay well inside it.
+//   poll    PAIR_POLLS_PER_WINDOW per 10 minutes per source address (design §4.2): a TV that waits the whole ten minutes
+//           polls about 200 times, so 600 is room for three behind one address. A chosen number, not a measured one.
+//           The limiter's own 429 is the ONLY error status the poll ever answers (see the route).
+//   pending, approve, deny   one budget for the three, PAIR_CODE_FAILURES_PER_WINDOW WRONG codes per 15 minutes per
+//           USER (design §3 row 2), whatever the source address. Keyed on the verified session's user (mounted after
+//           requireAuth), so a caller can neither mint a fresh bucket nor spend someone else's: it can only lock ITSELF
+//           out. Only a code that names nothing (the 404) counts; a code that works, and a 409 tv_limit (which needs a
+//           working code), cost nothing, so a person approving several TVs never meets it. 20 mirrors the per-account
+//           sign-in limit: against at most PAIRINGS_IN_ALL live codes among 20^8 (2.56e10), 20 guesses per window find
+//           one with odds of about 1.6e-8, about 1.5e-6 a day. And a found code is worth little (design §3 row 2): it
+//           puts the guesser's own view-only session on someone else's TV.
+export const PAIR_STARTS_PER_WINDOW = 30;
+export const PAIR_POLLS_PER_WINDOW = 600;
+export const PAIR_CODE_FAILURES_PER_WINDOW = 20;
+const PAIR_POLL_WINDOW_MS = 10 * 60 * 1000;
+const pairStartStore = new MemoryStore();
+const pairPollStore = new MemoryStore();
+const pairCodeStore = new MemoryStore();
+const pairStartLimiter = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: PAIR_STARTS_PER_WINDOW,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
+  keyGenerator: clientKey,
+  store: pairStartStore,
+});
+const pairPollLimiter = rateLimit({
+  windowMs: PAIR_POLL_WINDOW_MS,
+  limit: PAIR_POLLS_PER_WINDOW,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
+  keyGenerator: clientKey,
+  store: pairPollStore,
+});
+const pairCodeLimiter = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: PAIR_CODE_FAILURES_PER_WINDOW,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
+  keyGenerator: (req) => `tv-pair-user:${req.user.id}`,
+  store: pairCodeStore,
+  // "Successful" here means "not a code that named nothing": every other answer is given back (see above).
+  requestWasSuccessful: (req, res) => res.statusCode !== 404,
+  skipSuccessfulRequests: true,
+});
+
+// Tests share the module-level stores across cases, as they do the other limiters (see resetInviteAttemptLimits).
+export function resetTvPairingLimits() {
+  pairStartStore.resetAll();
+  pairPollStore.resetAll();
+  pairCodeStore.resetAll();
+}
+
+// --- statements -------------------------------------------------------------------------------------------------------
+
+// A live pairing: not expired and not denied (design §3 row 6). Only live rows count toward a cap. `?` is now.
+const LIVE_PAIRING = 'expires_at > ? AND denied_at IS NULL';
+// Every start first deletes the dead rows, in a statement of its own (design §3 row 6): a daily sweep is far too slow
+// for a ten-minute cap, and a row that is dead must never hold a slot. purgeTvPairings below runs the same statement
+// daily as a backstop, for a server where nobody starts a pairing. A denied row goes too, so a TV that polls after
+// someone else's start is told `expired` rather than `denied`: it starts a new pairing either way.
+const purgeDeadPairings = db.prepare('DELETE FROM tv_pairings WHERE expires_at <= ? OR denied_at IS NOT NULL');
+const liveInBucket = db.prepare(`SELECT COUNT(*) AS n FROM tv_pairings WHERE client_bucket = ? AND ${LIVE_PAIRING}`);
+const liveInAll = db.prepare(`SELECT COUNT(*) AS n FROM tv_pairings WHERE ${LIVE_PAIRING}`);
+// The eviction candidates: only UNAPPROVED live rows. An approved row is a person's yes that the TV has not collected
+// yet; evicting it would make that yes vanish, and it lasts ten minutes at most anyway (design §3 row 6). Oldest first;
+// created_at has whole seconds, so rowid (insertion order) breaks a tie.
+const oldestUnapprovedInBucket = db.prepare(
+  `SELECT id FROM tv_pairings WHERE client_bucket = ? AND approved_at IS NULL AND ${LIVE_PAIRING}
+   ORDER BY created_at, rowid LIMIT 1`
+);
+// The oldest unapproved live row of the FULLEST bucket (the most live rows), ties to the bucket holding the oldest such
+// row. Only buckets that hold an unapproved row are candidates (the WHERE), so a bucket full of approved rows is passed
+// over, not refused.
+const oldestUnapprovedOfFullest = db.prepare(
+  `SELECT p.id FROM tv_pairings p
+   JOIN (SELECT client_bucket, COUNT(*) AS n FROM tv_pairings WHERE ${LIVE_PAIRING} GROUP BY client_bucket) b
+     ON b.client_bucket = p.client_bucket
+   WHERE p.approved_at IS NULL AND p.expires_at > ? AND p.denied_at IS NULL
+   ORDER BY b.n DESC, p.created_at, p.rowid LIMIT 1`
+);
+const deletePairing = db.prepare('DELETE FROM tv_pairings WHERE id = ?');
+const userCodeTaken = db.prepare('SELECT 1 FROM tv_pairings WHERE user_code = ?');
+const insertPairing = db.prepare(
+  `INSERT INTO tv_pairings (id, device_hash, user_code, label, client_bucket, device, created_at, expires_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+);
+const pairingByHash = db.prepare('SELECT * FROM tv_pairings WHERE device_hash = ?');
+const pairingByCode = db.prepare('SELECT * FROM tv_pairings WHERE user_code = ?');
+// What the approval page may show (design §5): the label, the TV's own browser string and when it asked. Same guard as
+// approve, so the page never shows a pairing the approve would refuse.
+const answerablePairing = db.prepare(
+  `SELECT label, device, created_at FROM tv_pairings
+   WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND expires_at > ?`
+);
+const approvePairingRow = db.prepare(
+  `UPDATE tv_pairings SET user_id = ?, approved_by_session = ?, approved_from = ?, approved_at = ?
+   WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND expires_at > ?`
+);
+const denyPairingRow = db.prepare(
+  `UPDATE tv_pairings SET denied_at = ?
+   WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND expires_at > ?`
+);
+const claimPairingRow = db.prepare(
+  'DELETE FROM tv_pairings WHERE device_hash = ? AND approved_at IS NOT NULL AND denied_at IS NULL AND expires_at > ?'
+);
+// A refused claim's separate write (see the poll route). Only ever on a row the claim just found approved.
+const markClaimRefused = db.prepare('UPDATE tv_pairings SET denied_at = ? WHERE device_hash = ? AND denied_at IS NULL');
+const recordPoll = db.prepare('UPDATE tv_pairings SET last_poll_at = ? WHERE id = ?');
+const pairingUser = db.prepare('SELECT * FROM users WHERE id = ?');
+// The account's live TV sessions, for the cap: kind 'tv' and still within the session lifetime (the same condition as
+// the session lists), so a TV session past its lifetime, which can never authenticate again, holds no slot.
+const tvSessionAge = sessionAgeCondition();
+const liveTvSessions = db.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND kind = 'tv' AND ${tvSessionAge.sql}`);
+function liveTvSessionCount(userId) {
+  return liveTvSessions.get(userId, ...tvSessionAge.params).n;
+}
+
+// The daily backstop (index.js, beside purgeOldInvites): the same delete every start makes first.
+export function purgeTvPairings() {
+  const { changes } = purgeDeadPairings.run(utcText(Date.now()));
+  if (changes > 0) logger.info(`Purged ${changes} finished TV pairing(s).`);
+  return changes;
+}
+
+// --- helpers ------------------------------------------------------------------------------------------------------------
+
+// The user code source. A test replaces it to force a collision (setUserCodeSourceForTest); the app never does.
+let drawUserCode = () => newUserCode();
+export function setUserCodeSourceForTest(source) {
+  drawUserCode = source ?? (() => newUserCode());
+}
+// A user code no other row holds. Two live pairings must never share one (the approver would approve whichever the
+// lookup found). With at most PAIRINGS_IN_ALL live rows among 20^8 codes a draw collides about once in a billion, so
+// ten draws in a row are never all taken; the UNIQUE index on user_code is the backstop that holds if that is ever
+// wrong (the insert then fails and the start answers 500). Called inside startPairing's transaction, so nothing can take
+// the code between the check and the insert.
+const USER_CODE_DRAWS = 10;
+function freshUserCode() {
+  for (let i = 0; i < USER_CODE_DRAWS; i++) {
+    const code = drawUserCode();
+    if (!userCodeTaken.get(code)) return code;
+  }
+  throw new Error(`no unused TV pairing code in ${USER_CODE_DRAWS} draws`);
+}
+
+// A label for a log line: quoted (JSON, so a quote inside it cannot end it), or a plain note when the TV sent none.
+const labelForLog = (label) => (label === null ? 'a TV with no name' : JSON.stringify(label));
+
+// One start, after the dead rows went (design §3 row 6). In order:
+//   * the bucket already holds PAIRINGS_PER_BUCKET live rows: delete ITS OWN oldest unapproved one, so a TV that reloaded
+//     and orphaned its earlier rows, or several TVs behind one address, recover by themselves (the total stays the same);
+//   * otherwise the whole table holds PAIRINGS_IN_ALL live rows: delete the oldest unapproved row of the FULLEST bucket,
+//     instead of refusing. The design states this for a start from a bucket with no live row (the owner's TV against
+//     someone holding many slots); a start from a bucket with one or two takes the same rule, so a second TV behind one
+//     address takes a slot from the bucket holding the most and not from the first TV (builder's reading, stated).
+//     Many buckets can still hold every slot (a script on the LAN, tailnet account slots), which the design states as a
+//     known limit (§13): the password form on the TV is the fallback;
+//   * nothing to evict (every candidate row is approved and not yet collected): null, and the route answers 429.
+// One transaction, the clock read inside it. Answers the new codes; only the device code's hash is stored.
+const startPairing = db.transaction((label, bucket, device) => {
+  const nowMs = Date.now();
+  const now = utcText(nowMs);
+  if (liveInBucket.get(bucket, now).n >= PAIRINGS_PER_BUCKET) {
+    const oldest = oldestUnapprovedInBucket.get(bucket, now);
+    if (!oldest) return null;
+    deletePairing.run(oldest.id);
+  } else if (liveInAll.get(now).n >= PAIRINGS_IN_ALL) {
+    const oldest = oldestUnapprovedOfFullest.get(now, now);
+    if (!oldest) return null;
+    deletePairing.run(oldest.id);
+  }
+  const userCode = freshUserCode();
+  const deviceCode = newDeviceCode();
+  insertPairing.run(uuid(), deviceCodeHash(deviceCode), userCode, label, bucket, device, now, utcText(nowMs + PAIRING_TTL_MS));
+  return { deviceCode, userCode };
+});
+
+// Thrown inside approvePairing to roll the approve back when the account is at its TV cap. Never sent.
+class TvLimitError extends Error {}
+
+// The approve (design §4.4): the guarded UPDATE first, then the cap; past the cap the throw rolls the approve back, so
+// the pairing is still pending and a person who revokes an old TV can approve the same code again. In this order so the
+// UPDATE's guard is the one and only check on the pairing's state (a separate read before it would hide a weakened
+// guard from every test). Answers the approved row, or null when the code named nothing that can be approved.
+const approvePairing = db.transaction((userCode, userId, sessionId, approvedFrom) => {
+  const now = utcText(Date.now());
+  if (approvePairingRow.run(userId, sessionId, approvedFrom, now, userCode, now).changes !== 1) return null;
+  if (liveTvSessionCount(userId) >= TV_SESSIONS_PER_USER) throw new TvLimitError();
+  return pairingByCode.get(userCode);
+});
+
+// Thrown inside claimPairing for a claim that must not make a session; carries the reason for the log. Never sent.
+class ClaimRefused extends Error {
+  constructor(reason, pairingId) {
+    super(reason);
+    this.pairingId = pairingId;
+  }
+}
+
+// The claim (design §4.4), as ONE transaction with no await in it:
+//   1. the guarded DELETE (approved, not denied, not expired, now) must remove exactly one row. That is the single-use
+//      guard, and the only check of the pairing's state: anything else (unknown, pending, denied, expired, already
+//      claimed) is null, and the route says which from the row;
+//   2. THE ONE GUARANTEE AT CLAIM (design §3 row 7, §10): the session that approved is still live (isLiveSessionId: its
+//      row exists, it is within its lifetime, and its account exists and is not disabled) and the account can sign in
+//      (password_set = 1). So everything that ends the approving session before the TV collects cancels the approval,
+//      with no hook in any of those paths: its sign-out, a revoke, disabling or removing the account, and a password
+//      change or reset made from ANOTHER session (both delete every other session). Stated exception: a password change
+//      made FROM the approving session keeps that session (PUT /me/password, and an admin resetting their own password
+//      with PUT /users/:id), so an approval it gave survives it. No separate "is the account disabled" check:
+//      isLiveSessionId already joins on disabled = 0, so it would be redundant and its mutant would survive by
+//      construction (design §10);
+//   3. the account's live TV sessions are still under TV_SESSIONS_PER_USER (the approve checked; other pairings may
+//      have been collected since);
+//   4. createSession, kind 'tv', with the label, the approving session (paired_by_session: revoking that session ends
+//      this one) and the approving device (paired_from, for the session lists).
+// A refusal at 2 or 3 throws ClaimRefused, so the DELETE rolls back with everything else (see the route).
+const claimPairing = db.transaction((deviceHash, userAgent) => {
+  const now = utcText(Date.now());
+  const row = pairingByHash.get(deviceHash);
+  if (claimPairingRow.run(deviceHash, now).changes !== 1) return null;
+  if (!isLiveSessionId(row.approved_by_session)) {
+    throw new ClaimRefused('the sign-in that approved it has ended', row.id);
+  }
+  const user = pairingUser.get(row.user_id);
+  if (!user || user.password_set !== 1) throw new ClaimRefused('the account that approved it cannot sign in', row.id);
+  if (liveTvSessionCount(user.id) >= TV_SESSIONS_PER_USER) {
+    throw new ClaimRefused(`the account already has ${TV_SESSIONS_PER_USER} TV sign-ins`, row.id);
+  }
+  const sessionId = createSession(user.id, userAgent, {
+    kind: 'tv', label: row.label, pairedBySession: row.approved_by_session, pairedFrom: row.approved_from,
+  });
+  return { row, user, sessionId };
+});
+
+// --- routes -------------------------------------------------------------------------------------------------------------
+
+// Public: a TV starts a pairing. `{ label? }` (what the TV calls itself; plain text, sanitised and clamped here: there is
+// no per-route body parser, the app's express.json() has already read the body, design §3 row 6). Answers the
+// device_code (ONCE: only its sha256 is kept, and it is in no list, log or other answer), the user_code as the TV shows
+// it (`BCDF-GHJK`), and expires_in / interval in seconds, as RFC 8628 names them. The row also keeps the TV's own browser
+// string (describeDevice of its user agent: the approval page shows it beside the label, design §3 row 1 g) and its
+// client bucket (clientBucketKey, the same identity sign-in uses, so the tunnel's loopback case is handled as login
+// handles it; for the per-bucket cap only, never shown).
+router.post('/device/start', pairStartLimiter, (req, res) => {
+  const label = labelFromBody(req.body, res);
+  if (label === undefined) return;
+  purgeDeadPairings.run(utcText(Date.now()));
+  const started = startPairing(label, clientBucketKey(req), describeDevice(req.headers['user-agent']));
+  if (!started) return res.status(429).json(PAIR_BUSY);
+  res.json({
+    device_code: started.deviceCode,
+    user_code: displayUserCode(started.userCode),
+    expires_in: PAIRING_TTL_MS / 1000,
+    interval: PAIRING_INTERVAL_SECONDS,
+  });
+});
+
+// Public: the TV asks how its pairing stands. `{ device_code }` in the body (never a URL). ALWAYS HTTP 200 for every
+// pairing answer (design §5): `pending`, `slow_down`, `denied`, `expired`, or `approved` with `token` and `user` (the
+// /login shape, effective role caregiver, kind tv: tvSignInAnswer). Never a 401: the web app turns any 401 into the
+// sign-in screen, which would pull the TV off its pairing screen. The limiter's 429 is the only error status. Unknown,
+// malformed, expired and already-collected codes all answer the same `expired` (design §3 row 4); a malformed one costs
+// the same sha256 and indexed lookup as an unknown one.
+//
+// The claim is tried FIRST, on every poll: its guarded DELETE is then the one place that decides whether this pairing
+// can be collected now (design §4.4), and an approved pairing is handed over at the first poll after the approval,
+// whatever the pace. `slow_down` (a poll under POLL_SLOW_DOWN_MS after the previous one for the same pairing) is for the
+// long wait while it is pending. Its state is the row's last_poll_at (design §4.1), never a Map keyed by whatever
+// device_code a client sends, so an unknown code leaves nothing behind. Milliseconds, not utcText's whole seconds: a 2 s
+// rule cannot be judged in whole seconds. A clock that moved backwards (now before last_poll_at) is not "too fast": that
+// poll counts as an ordinary one, or a TV would be told to slow down for as long as the clock was moved back.
+router.post('/device/poll', pairPollLimiter, (req, res) => {
+  const supplied = req.body?.device_code;
+  const wellFormed = typeof supplied === 'string' && DEVICE_CODE_PATTERN.test(supplied);
+  const hash = deviceCodeHash(wellFormed ? supplied : '');
+  let claimed;
+  try {
+    claimed = claimPairing(hash, req.headers['user-agent']);
+  } catch (e) {
+    if (!(e instanceof ClaimRefused)) throw e;
+    // A REFUSED CLAIM (design §4.4): the transaction rolled back, so no session exists and the row is as it was. Then a
+    // SEPARATE, committed write marks it denied, so this TV and its next polls are told `denied` at once, not `pending`
+    // for the rest of ten minutes while the person who approved it was told it is connected (second design review,
+    // Opus L1). Any other error rolls back too and is the usual 500; the row then expires on its own.
+    markClaimRefused.run(utcText(Date.now()), hash);
+    logger.info(`[tv-pair] pairing ${e.pairingId} refused when the TV came to collect it: ${e.message}`);
+    return res.json(POLL_DENIED);
+  }
+  if (claimed) {
+    const { row, user, sessionId } = claimed;
+    // The audit line at claim (design §8): who, which TV, from where it was approved, and the new TV session's id (what
+    // to revoke). Never the device_code or the token.
+    logger.info(
+      `[tv-pair] ${labelForLog(row.label)} (${row.device}) signed in as "${user.username}", TV session ${sessionId}, ` +
+        `approved from ${row.approved_from}, pairing ${row.id}`
+    );
+    return res.json({ status: 'approved', ...tvSignInAnswer(user, sessionId) });
+  }
+  const nowMs = Date.now();
+  const row = pairingByHash.get(hash);
+  if (!row || !(row.expires_at > utcText(nowMs))) return res.json(POLL_EXPIRED);
+  if (row.denied_at !== null) return res.json(POLL_DENIED);
+  recordPoll.run(nowMs, row.id);
+  const sinceLast = row.last_poll_at === null ? null : nowMs - row.last_poll_at;
+  if (sinceLast !== null && sinceLast >= 0 && sinceLast < POLL_SLOW_DOWN_MS) return res.json(POLL_SLOW_DOWN);
+  res.json(POLL_PENDING);
+});
+
+// Signed in: what is asking to be approved. `{ user_code }` in the BODY (a code in a URL ends up in proxy logs; the
+// invite check does the same). `{ label, device, created_at }` for the approval page, which shows the label IN QUOTES
+// beside the device string, because the label is whatever the TV chose to call itself (design §3 row 1 g). A TV session
+// never gets here: requireAuth refuses it (not on tvAllowed's list), so a TV cannot approve another TV.
+router.post('/device/pending', requireAuth, pairCodeLimiter, (req, res) => {
+  const code = normaliseUserCode(req.body?.user_code);
+  const row = answerablePairing.get(code ?? '', utcText(Date.now()));
+  if (!row) return res.status(404).json(PAIR_INVALID);
+  res.json({ label: row.label, device: row.device, created_at: row.created_at });
+});
+
+// Signed in: approve the pairing the typed code names. The TV will sign in AS THE APPROVER (decided by the owner, design
+// §12.1: any signed-in user may approve, and the TV is a view-only caregiver whoever it is). Records who (user_id), which
+// session (approved_by_session, re-checked at the claim and copied onto the TV session as paired_by_session), and from
+// which device (approved_from, the approving request's browser string; the TV session's paired_from). No password or
+// code is asked for again (design §12.2, the owner's decision; the consequence is stated in SECURITY.md). 409 tv_limit at
+// TV_SESSIONS_PER_USER live TV sessions; the pairing then stays pending.
+router.post('/device/approve', requireAuth, pairCodeLimiter, (req, res) => {
+  const code = normaliseUserCode(req.body?.user_code);
+  const approvedFrom = describeDevice(req.headers['user-agent']);
+  let row;
+  try {
+    row = approvePairing(code ?? '', req.user.id, req.user.sid, approvedFrom);
+  } catch (e) {
+    if (e instanceof TvLimitError) return res.status(409).json(TV_LIMIT);
+    throw e;
+  }
+  if (!row) return res.status(404).json(PAIR_INVALID);
+  // The audit line at approve (design §8): the approver, the TV as it called itself and as its browser string says,
+  // and where it was approved from. Never the device_code (the server never has it after the start) or a token.
+  logger.info(
+    `[tv-pair] approved by "${pairingUser.get(req.user.id)?.username}" from ${approvedFrom}: ` +
+      `${labelForLog(row.label)} (${row.device}), pairing ${row.id}`
+  );
+  res.json({ ok: true });
+});
+
+// Signed in: refuse the pairing the typed code names. The same guard as approve (design §4.4), so a pairing is approved
+// or denied, never both. The TV is told `denied` at its next poll and starts again.
+router.post('/device/deny', requireAuth, pairCodeLimiter, (req, res) => {
+  const code = normaliseUserCode(req.body?.user_code) ?? '';
+  const now = utcText(Date.now());
+  if (denyPairingRow.run(now, code, now).changes !== 1) return res.status(404).json(PAIR_INVALID);
+  const row = pairingByCode.get(code);
+  logger.info(
+    `[tv-pair] denied by "${pairingUser.get(req.user.id)?.username}": ${labelForLog(row.label)} (${row.device}), pairing ${row.id}`
+  );
+  res.json({ ok: true });
+});
 
 export default router;

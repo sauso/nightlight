@@ -5,11 +5,13 @@
 // has (middleware/auth.js, sessionWithUser), it may reach only the allowlist in tvAllowed (everything else answers
 // 403 TV_SESSION_RESTRICTED), its media token reaches HLS and nothing else, it can never open the talk-back socket, the
 // camera list and /api/about answer it with a small projection, and revoking the session that paired it ends it.
-// NOTHING IN THIS VERSION CREATES ONE: the pairing that will is the next change. So every TV session here is made by
-// hand, through the real createSession(..., { kind: 'tv' }) the pairing will call.
+// Most TV sessions here are made by hand, through the real createSession(..., { kind: 'tv' }) the pairing calls; one
+// is minted by a real pairing (start, approve, poll) and walked the same way, so the two cannot drift apart. The
+// pairing's own cases are in tv-pairing.test.js.
 //
 // THE CLAIMS, each with the test below that fails without it:
 //   - a TV session is refused every pinned route but the allowlist, and reaches the allowlist   "the route walk"
+//     (a hand-made one and one minted by a real pairing, the pairing's three signed-in routes included)
 //   - its media token reaches no ?token= route (snapshots, clips, timelapses, recordings)        "the route walk"
 //   - the allowlist compares the exact method and the path part of originalUrl, refuses any
 //     path that is not plain, and a query string does not widen it                             "tvAllowed, table-driven"
@@ -30,7 +32,7 @@
 // instead of moving the expectation with it (the design's §6.4: "admin response minus caregiver response" loses its
 // oracle the day an admin-only field leaks into both).
 //
-// NOT COVERED HERE (stated, not hidden): the pairing itself (the next change); the WebSocket upgrade handler in
+// NOT COVERED HERE (stated, not hidden): the pairing's own rules (tv-pairing.test.js); the WebSocket upgrade handler in
 // index.js, which no test can import (the rule it relies on is verifyToken's, tested below and in talk-socket.test.js);
 // the real http-proxy-middleware behind /live and /hls (a sentinel stands where it sits; route-permissions.test.js pins
 // that index.js mounts the guards in front of it); what MediaMTX itself does with a path the guard lets through; and
@@ -255,9 +257,8 @@ describe('★ #1237 tvAllowed, table-driven', () => {
 });
 
 describe('★ #1237 the route walk: every pinned route, the real routers at their real paths, as a TV session', () => {
-  test('a TV session is refused 403 TV_SESSION_RESTRICTED everywhere but the allowlist, which it reaches; its media token reaches no ?token= route', async () => {
-    const phone = userSession(admin);
-    const tv = tvSession(admin, { pairedBySession: phone.sid });
+  // The walk, for a TV session `tv` ({ sid, token, media }) paired by the ordinary session `phone`.
+  async function walkAsTv(tv, phone) {
     const plan = [];
     const problems = [];
     for (const [key, gate] of Object.entries(ROUTE_GATES)) {
@@ -294,6 +295,30 @@ describe('★ #1237 the route walk: every pinned route, the real routers at thei
     // The sign-out at the end was real, and took only the TV session with it.
     assert.equal(sessionRow(tv.sid), undefined, '/logout did not end the TV session');
     assert.ok(sessionRow(phone.sid), "a TV's sign-out ended the session that paired it");
+  }
+
+  test('a TV session is refused 403 TV_SESSION_RESTRICTED everywhere but the allowlist, which it reaches; its media token reaches no ?token= route', async () => {
+    const phone = userSession(admin);
+    await walkAsTv(tvSession(admin, { pairedBySession: phone.sid }), phone);
+  });
+
+  test('a TV minted by a REAL pairing (start, approve, poll) is the same session: the same walk, the same reachable set', async () => {
+    // An ADMIN approves, so the forced caregiver role is what the walk meets (#1237 PR 1b; tv-pairing.test.js has the
+    // pairing's own cases).
+    const phone = userSession(admin);
+    const started = await call(`${base}/api/auth/device/start`, { method: 'POST', body: { label: 'Walked TV' }, headers: { 'user-agent': TV_UA } });
+    assert.equal(started.status, 200, JSON.stringify(started.body));
+    const approved = await call(`${base}/api/auth/device/approve`, { method: 'POST', token: phone.token, body: { user_code: started.body.user_code } });
+    assert.equal(approved.status, 200, JSON.stringify(approved.body));
+    const collected = await call(`${base}/api/auth/device/poll`, { method: 'POST', body: { device_code: started.body.device_code }, headers: { 'user-agent': TV_UA } });
+    assert.equal(collected.body.status, 'approved', JSON.stringify(collected.body));
+    const { sid } = JSON.parse(Buffer.from(collected.body.token.split('.')[1], 'base64url').toString());
+    const row = sessionRow(sid);
+    assert.equal(row.kind, 'tv');
+    assert.equal(row.paired_by_session, phone.sid);
+    const media = await call(`${base}/api/auth/media-token`, { method: 'POST', token: collected.body.token });
+    assert.equal(media.status, 200);
+    await walkAsTv({ sid, token: collected.body.token, media: media.body.token }, phone);
   });
 
   test('the case and trailing-slash variants REACH the camera list for an ordinary session, so refusing them is the guard', async () => {

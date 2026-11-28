@@ -508,6 +508,47 @@ if (!sessionsColumns.includes('paired_from')) {
   db.exec('ALTER TABLE sessions ADD COLUMN paired_from TEXT');
 }
 
+// #1237: a TV asking to be signed in by code (routes/auth.js, the pairing section; planning/tv-pairing-design.md §4.1).
+// One row per pairing, from the TV's start until it is collected (the claim DELETES the row: there is no claimed_at,
+// because it could never be seen), denied, evicted, or past expires_at (every start deletes the dead rows first, and a
+// daily purge is the backstop).
+//   device_hash          sha256 hex of the TV's device_code, UNIQUE. The code itself is never stored: 256 random bits need
+//                        no slow hash, and the poll looks it up by equality (as user_invites.token_hash).
+//   user_code            the code the TV shows, upper case without the dash, UNIQUE. Not a secret: it only names a pairing
+//                        to a signed-in approver who types it.
+//   label                what the TV called itself, sanitised and at most 40 characters. Untrusted: shown as text only.
+//   client_bucket        clientBucketKey of the start request, for the per-bucket cap only. Never shown.
+//   device               describeDevice of the start request's user agent, shown beside the label on the approval page.
+//   last_poll_at         epoch MILLISECONDS of the TV's last poll: the slow_down rule (2 s) lives in the row, and whole
+//                        seconds cannot judge it.
+//   created_at, expires_at, approved_at, denied_at   UTC 'YYYY-MM-DD HH:MM:SS' text from the JavaScript clock, like the
+//                        invites' times. pending = neither approved_at nor denied_at.
+//   user_id              the approver, NULL until approved. CASCADE: removing the account removes its pairings.
+//   approved_by_session  the session that approved. No foreign key: sessions are deleted by several paths, and the claim
+//                        checks it is still live instead (design §3 row 7).
+//   approved_from        describeDevice of the approving request; copied onto the TV session as paired_from.
+// No index beyond the two UNIQUE ones: the table holds at most 20 live rows (the global cap), so the per-bucket and
+// per-user statements read a handful of rows. CREATE IF NOT EXISTS is the fresh-install and the upgrade path, inside the
+// schema transaction like everything here; an older version ignores the table.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tv_pairings (
+    id TEXT PRIMARY KEY,
+    device_hash TEXT NOT NULL UNIQUE,
+    user_code TEXT NOT NULL UNIQUE,
+    label TEXT,
+    client_bucket TEXT NOT NULL,
+    device TEXT NOT NULL,
+    last_poll_at INTEGER,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+    approved_by_session TEXT,
+    approved_from TEXT,
+    approved_at TEXT,
+    denied_at TEXT
+  )
+`);
+
 // Optional child avatar photo — a browser-resized (~256px square) base64 data-URL, stored inline
 // (small; the frontend caps the size). Null = fall back to the coloured initials avatar.
 const childrenColumns = db.prepare('PRAGMA table_info(children)').all().map((c) => c.name);

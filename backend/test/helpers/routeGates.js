@@ -34,7 +34,8 @@ export const ROUTE_GATES = {
   'POST /api/setup/monitor-tests': ADMIN,
   'POST /api/setup/monitor-tests/:id/confirm': ADMIN,
   'POST /api/setup/complete': ADMIN,
-  // /api/auth — the login screen has to work before anyone can sign in, so its first five are public. Each
+  // /api/auth — the login screen has to work before anyone can sign in, so its first five are public (the invite and
+  // TV pairing routes below have public ones of their own, each with its reason). Each
   // carries its own rate limiter (not pinned here; login-rate-limit.test.js).
   'GET /api/auth/status': PUBLIC, //            needsSetup + demo flags, read by the login screen
   'POST /api/auth/guest': PUBLIC, //            demo mode only; a plain 404 otherwise (demo-guest.test.js)
@@ -67,6 +68,16 @@ export const ROUTE_GATES = {
   'DELETE /api/auth/users/:id/invite': ADMIN,
   'POST /api/auth/invite/check': PUBLIC,
   'POST /api/auth/invite/redeem': PUBLIC,
+  // #1237 signing in a TV by code (planning/tv-pairing-design.md §5). START and POLL are PUBLIC: the TV has no session yet
+  // (that is the point), and what it holds is the device_code (256 random bits, one pairing, ten minutes, useless until a
+  // signed-in person approves it; own limiters; tv-pairing.test.js). PENDING, APPROVE and DENY are SIGNED_IN, a caregiver
+  // included (the owner's decision, design §12.1: any signed-in user may connect the household's TV, and the TV is a
+  // view-only caregiver whoever approved it). A TV session is refused all three by the TV allowlist (tv-session.test.js).
+  'POST /api/auth/device/start': PUBLIC,
+  'POST /api/auth/device/poll': PUBLIC,
+  'POST /api/auth/device/pending': SIGNED_IN,
+  'POST /api/auth/device/approve': SIGNED_IN,
+  'POST /api/auth/device/deny': SIGNED_IN,
 
   // /api/children — `router.use(requireAuth)` gates the whole router; add and delete add requireAdmin.
   'GET /api/children': SIGNED_IN,

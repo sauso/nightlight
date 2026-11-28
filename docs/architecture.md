@@ -458,9 +458,10 @@ mutation). Tests: `account-disable.test.js`, plus the `#1233` cases in `auth-mid
 
 ### TV sessions (#1237)
 
-A TV (the Android TV screen, `/tv`) is meant to sign in with a **view-only** session: it can watch and listen to the
-cameras and do nothing else. This version has that kind of session, but **nothing creates one yet**: signing a TV in
-with a code from a phone is the next change (design: `planning/tv-pairing-design.md`). User-facing rules arrive with it.
+A TV (the Android TV screen, `/tv`) signs in with a **view-only** session: it can watch and listen to the cameras and
+do nothing else. Two routes create one: the pairing by code ("TV pairing" below) and a password sign-in that asks for
+it (`tv: true` on `/login`). Design: `planning/tv-pairing-design.md`. User-facing rules:
+[SECURITY.md, "Pairing a TV"](../SECURITY.md#pairing-a-tv).
 
 **Data.** `sessions` gains four columns in one guarded `ALTER` group (`db.js`): `kind` (TEXT NOT NULL, default
 `'user'`, so every existing session is an ordinary one), `label` (what the TV called itself), `paired_by_session` (the
@@ -509,10 +510,74 @@ with the rest and are unchanged. Both session lists add `kind`, `label` and `pai
 ordinary session); `paired_by_session` is not sent.
 
 **Known limit.** An older version ignores `kind`, so going back to one would turn a TV session into an ordinary
-session with its account's real role. That matters from the release that can create TV sessions. Tests:
-`tv-session.test.js` (every pinned route walked as a TV over the real routers, `tvAllowed` table-driven, the `/live`
-and `/hls` shapes, the projections against hostile values in every other column, the revoke cascade), plus the `#1237`
-cases in `talk-socket.test.js` and `alert-hold-migration.test.js`.
+session with its account's real role (SECURITY.md says to sign every TV out first). Tests:
+`tv-session.test.js` (every pinned route walked as a TV over the real routers, a hand-made TV and one minted by a real
+pairing, `tvAllowed` table-driven, the `/live` and `/hls` shapes, the projections against hostile values in every other
+column, the revoke cascade), plus the `#1237` cases in `talk-socket.test.js` and `alert-hold-migration.test.js`.
+
+### TV pairing (#1237)
+
+The device-code flow of RFC 8628: the TV starts a pairing and shows a short code, a signed-in person types the code and
+approves it, and the TV, polling, collects a TV session. All in `routes/auth.js` (the pairing section at the end: it
+needs the module-private `createSession` and `sign`, as the invite redeem does); the pure parts (codes, the label) are
+`lib/tvPairing.js`. Screens: the next change. User-facing rules: [SECURITY.md](../SECURITY.md#pairing-a-tv).
+
+**Data.** `tv_pairings`, one row per pairing (`CREATE TABLE IF NOT EXISTS` in `db.js`): `device_hash` (sha256 hex of
+the TV's `device_code`, UNIQUE; the code itself is never stored), `user_code` (upper case, no dash, UNIQUE), `label`,
+`client_bucket`, `device` (`describeDevice` of the TV's user agent), `last_poll_at` (epoch ms), `created_at` /
+`expires_at` / `approved_at` / `denied_at` (UTC text from the JavaScript clock), `user_id` (the approver, `ON DELETE
+CASCADE`), `approved_by_session` (no foreign key) and `approved_from`. No `claimed_at`: the claim deletes the row.
+
+**Codes.** `device_code`: 32 random bytes, base64url (43 characters), the TV's secret, sent only in POST bodies.
+`user_code`: 8 symbols of `BCDFGHJKMNPQRSTVWXYZ` (no vowels, digits or `L`) from `crypto.randomInt`, shown `BCDF-GHJK`,
+accepted in any case with or without a dash or spaces; a code another row holds is drawn again. A pairing lives 10
+minutes. The label is plain text: whitespace becomes a space, control characters (C0, DEL, C1), the bidirectional
+controls and lone surrogates are removed, and it is clamped to 40 code points.
+
+| Route | Gate | Request | Answer |
+|---|---|---|---|
+| `POST /api/auth/device/start` | public | `{ label? }` | `{ device_code, user_code, expires_in: 600, interval: 3 }`; `400` for a label that is not text; `429 { "error": "pair_busy" }` when nothing can be evicted |
+| `POST /api/auth/device/poll` | public | `{ device_code }` | always `200`: `{ status: "pending" \| "slow_down" \| "denied" \| "expired" }`, or `{ status: "approved", token, user }` (the `/login` shape, `role: "caregiver"`, `kind: "tv"`); only the limiter answers `429` |
+| `POST /api/auth/device/pending` | signed in | `{ user_code }` | `{ label, device, created_at }` |
+| `POST /api/auth/device/approve` | signed in | `{ user_code }` | `{ ok: true }`; `409 { "error": "tv_limit" }` at 5 live TV sessions (the pairing stays pending) |
+| `POST /api/auth/device/deny` | signed in | `{ user_code }` | `{ ok: true }` |
+
+The three signed-in routes answer every code that names nothing they can act on (unknown, malformed, expired, approved,
+denied, collected) with one `404 { "error": "pair_invalid" }`. A TV session is refused all three by the allowlist.
+
+**The state machine.** Each transition is one guarded statement whose row count is the verdict: approve and deny
+`UPDATE ... WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND expires_at > now`, the claim `DELETE
+... WHERE device_hash = ? AND approved_at IS NOT NULL AND denied_at IS NULL AND expires_at > now`. "Now" is
+`utcText(Date.now())`, read inside each transaction, never SQLite's `datetime('now')`. The poll tries the claim first,
+so the DELETE is the only check of whether a pairing can be collected; then, inside the same synchronous transaction:
+`isLiveSessionId(approved_by_session)` (the session exists, is within its lifetime, its account is not disabled) and the
+approver's `password_set = 1`, the cap of 5 live TV sessions, and `createSession(..., { kind: 'tv', label,
+pairedBySession, pairedFrom })`. A refusal there rolls everything back and then, in a separate committed write, marks
+the row `denied_at`, so the TV is told `denied` at once. Because the claim re-checks the approving session, anything
+that ends it first (its sign-out, a revoke, disabling or removing the account, a password change or reset from another
+session) cancels the approval with no hook in those paths; a password change made from the approving session keeps it,
+so its approval survives. Disabling also deletes the account's pairings, in its transaction. `slow_down` answers a poll of
+a pending pairing under 2 s after its previous one (`last_poll_at`, in the row; a clock moved back does not count as too
+fast); an approved pairing is collected at the first poll.
+
+**Caps** (live = not expired, not denied). Every start first deletes the expired and denied rows (a daily
+`purgeTvPairings` in `index.js` is the backstop), then: a bucket (`clientBucketKey`) at 3 live rows evicts its own oldest
+unapproved row; otherwise a table at 20 live rows evicts the oldest unapproved row of the bucket with the most live rows;
+with nothing unapproved to evict, `429 pair_busy`. An approved row that is not yet collected is never evicted.
+
+**Limits.** Their own `express-rate-limit` instances and `MemoryStore`s, none shared with `/login`: start 30 per 15
+minutes per socket address (`clientKey`, as `inviteLimiter`); poll 600 per 10 minutes per socket address; pending,
+approve and deny one budget of 20 wrong codes (`404`s) per 15 minutes per user, after `requireAuth`. In memory, and
+shared by everyone behind a reverse proxy without `TRUST_PROXY` ([mfa.md](mfa.md#signing-in-a-tv-1237)).
+
+**A TV's password sign-in.** `POST /login` with `{ tv: true, label? }` (the boolean only; anything else is a `400`
+before the password compare) makes the session `kind: 'tv'` and answers like the poll. With two-factor on, the flag and
+the label ride in the signed MFA token, and `/login/mfa` reads them from there, never from its own body. It counts
+toward the cap of 5 a pairing meets, but is never refused by it (the cap bounds what a borrowed session can leave
+behind; a password holder could sign in an ordinary session instead). Demo mode blocks all five pairing routes (unlisted mutations; `/login` stays allowed). Audit log lines
+(`[tv-pair]`): at approve, at a claim, at a refused claim and at a deny; never the `device_code` or a token. Tests:
+`tv-pairing.test.js`, plus the `#1237` cases in `tv-session.test.js`, `secrets-never-returned.test.js` (a marker in
+`device_hash`) and `demoMode.test.js`.
 
 ## Data layer (`backend/src/db.js`)
 

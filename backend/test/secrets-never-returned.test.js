@@ -85,6 +85,8 @@ const KNOWN_WHEN_WRITTEN = [
   'settings.gotify_app_token', 'settings.mqtt_password', 'settings.ntfy_password', 'settings.ntfy_token',
   'settings.pushover_app_token', 'settings.pushover_user_key',
   'users.mfa_backup_codes', 'users.mfa_secret', 'users.password_hash',
+  // Added since (the derivation found it the day it arrived; this pins that it still does):
+  'tv_pairings.device_hash', // #1237: sha256 of a TV's device_code, the secret that collects a paired TV's session
 ];
 
 const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()
@@ -203,9 +205,22 @@ const ROW_MAKERS = {
     ).run();
     return [{ where: "id = 'inv-planted'", params: [], label: 'user_invites' }];
   },
+  // #1237: a TV pairing approved by u-carer and not yet collected, so device_hash holds a marker every GET route is asked
+  // about, in a row tied to an account (the state a list of a person's pending TVs would read, if one is ever added).
+  // Unexpired, so nothing treats it as finished; its user_code is a real-shaped code (not a secret, so not planted).
+  tv_pairings: () => {
+    db.prepare(
+      `INSERT INTO tv_pairings (id, device_hash, user_code, label, client_bucket, device, created_at, expires_at,
+                                user_id, approved_by_session, approved_from, approved_at)
+       VALUES ('pair-planted', 'placeholder', 'BCDFGHJK', 'Planted TV', '127.0.0.1', 'Chrome on Android',
+               datetime('now'), datetime('now', '+10 minutes'), 'u-carer', 'no-such-session', 'Safari on iPhone', datetime('now'))`
+    ).run();
+    return [{ where: "id = 'pair-planted'", params: [], label: 'tv_pairings' }];
+  },
 };
-// Order matters only for push_tokens' and user_invites' user_id; derived tables are planted in this order when present.
-const PLANT_ORDER = ['settings', 'users', 'cameras', 'esphome_devices', 'push_tokens', 'user_invites'];
+// Order matters only for the user_id of push_tokens, user_invites and tv_pairings; derived tables are planted in this
+// order when present.
+const PLANT_ORDER = ['settings', 'users', 'cameras', 'esphome_devices', 'push_tokens', 'user_invites', 'tv_pairings'];
 
 describe('the secret columns are derived from the schema', () => {
   test('the derivation still finds every credential that existed when this was written', () => {
