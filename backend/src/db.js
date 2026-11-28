@@ -485,6 +485,28 @@ if (!usersColumns.includes('password_set')) {
 if (!usersColumns.includes('disabled')) {
   db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
 }
+// #1237 (phase 2 of the Android TV app, the restricted session; planning/tv-pairing-design.md §4.3). Four columns, all
+// additive:
+//   kind               'user' (every sign-in there has ever been, and the DEFAULT, so every existing row stays one) or
+//                      'tv', a TV's view-only session: middleware/auth.js forces its effective role to caregiver and lets
+//                      it reach only the allowlist in tvAllowed. NOTHING IN THIS VERSION CREATES A 'tv' ROW: the pairing
+//                      that will (the next change) is not built, so on its own this group changes no behaviour.
+//   label              what the TV called itself, plain text for the session lists. NULL for an ordinary session.
+//   paired_by_session  the id of the session that approved the TV. Revoking THAT session (DELETE /api/auth/sessions/:id)
+//                      also ends this one (routes/auth.js). No foreign key on purpose: ON DELETE CASCADE would also end
+//                      the TV on a plain sign-out of the phone that paired it, which the design says must not happen.
+//   paired_from        describeDevice() of the approving request ("Chrome on Android"), for the session lists.
+// ONE guard, on the last column: the group sits inside the schema transaction opened at the top of this file (#258),
+// so a boot that dies half-way leaves none of the four and the next boot adds them all. Downgrade: an older build
+// ignores `kind`, so it would treat a TV session as an ordinary one with its approver's real role (the design's §13;
+// SECURITY.md says so from the release that can create one).
+const sessionsColumns = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name);
+if (!sessionsColumns.includes('paired_from')) {
+  db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'");
+  db.exec('ALTER TABLE sessions ADD COLUMN label TEXT');
+  db.exec('ALTER TABLE sessions ADD COLUMN paired_by_session TEXT');
+  db.exec('ALTER TABLE sessions ADD COLUMN paired_from TEXT');
+}
 
 // Optional child avatar photo — a browser-resized (~256px square) base64 data-URL, stored inline
 // (small; the frontend caps the size). Null = fall back to the coloured initials avatar.

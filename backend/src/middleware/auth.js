@@ -184,9 +184,16 @@ const touchSession = db.prepare(
 // session that outlived that delete (a sign-in that finished in the same moment, a restored backup, a hand edit), and
 // it is what makes the refusal the usual 401 on every path at once: the web app and the Android app already treat a
 // 401 as "signed out".
+//
+// `s.kind` and the EFFECTIVE role (#1237, a TV's view-only session; planning/tv-pairing-design.md §6.1). A session of
+// kind 'tv' is a caregiver whatever role its account has: the role is forced HERE, in the one query every consumer
+// reads (requireAuth, requireAuthQueryOrHeader, verifyToken and through it optionalAuth, the talk socket and the
+// Tailscale routes' re-check), not on the two Express guards. The design's first draft put it on the guards, and
+// GET /api/settings (optionalAuth) and /api/auth/me then still answered an admin's TV with the admin's real role
+// (second design review, Codex 1 / Opus M2). The kind is read from the ROW, never from a token claim, like the role.
 const requestAge = sessionAgeCondition('s');
 const sessionWithUser = db.prepare(
-  `SELECT s.id AS sid, s.user_id AS user_id, u.role AS role FROM sessions s JOIN users u ON u.id = s.user_id AND u.password_set = 1 AND u.disabled = 0 WHERE s.id = ? AND ${requestAge.sql}`
+  `SELECT s.id AS sid, s.user_id AS user_id, s.kind AS kind, CASE WHEN s.kind = 'tv' THEN 'caregiver' ELSE u.role END AS role FROM sessions s JOIN users u ON u.id = s.user_id AND u.password_set = 1 AND u.disabled = 0 WHERE s.id = ? AND ${requestAge.sql}`
 );
 function liveSession(sessionId) {
   if (!sessionId) return null;
@@ -253,6 +260,81 @@ export function purgeOldInvites() {
   return changes;
 }
 
+// --- The TV session's allowlist (#1237; planning/tv-pairing-design.md §6) -------------------------------------
+//
+// A session of kind 'tv' (a TV's view-only sign-in) may reach ONLY what the TV screen (frontend/src/pages/TvMonitor.jsx,
+// its providers and the two players) calls, re-checked against that code when this was built (2026-11-28):
+//   GET /api/auth/me, POST /api/auth/media-token, POST /api/auth/logout   sign-in state, the media token, a sign-out
+//   GET /api/about, GET /api/settings                                     STUN servers (lib/iceServers.js), the app name
+//   GET /api/cameras                                                      the tiles and their status, polled
+//   POST /live/<camera path>/whep, DELETE /live/<camera path>/whep/<id>   WebRTC viewing (WhepPlayer.jsx)
+//   GET /hls/<camera path>-hls/<one file>                                 the HLS fallback (HlsPlayer.jsx, MediaMTX's files)
+// Everything else answers 403 TV_SESSION_RESTRICTED, including every write, children and sleep (a child's name and
+// birthday), recordings, clips, snapshots, users, sessions, push, remote access and the talk-back socket. Deny by
+// default: a route added later is refused to a TV until someone adds it here on purpose (tv-session.test.js walks
+// every route in the app as a TV and pins the result independently of this table).
+//
+// ⚠️ THE PATH IS THE PATH PART OF `originalUrl`, NOT `req.baseUrl + req.path`. On a router-root route Express 5.3
+// gives `baseUrl = /api/cameras` and `path = /`, so the pair rebuilds `/api/cameras/` and an exact compare would
+// refuse the TV its own camera list (second design review, Opus M3, verified by running Express 5.3). originalUrl is
+// the request line's target as it arrived, whichever router or app.use() mount is running this guard.
+//
+// ⚠️ NO NORMALISING, ONLY REFUSING. Express's routing is case-insensitive and not strict about a trailing slash, so
+// `/API/cameras` and `/api/cameras/` reach the camera list; an exact compare refuses both, which is the safe direction
+// (the TV app never sends them). A path that is not plain is refused before any compare: an empty segment (a doubled
+// or trailing slash), a dot segment (`.` or `..`), and ANY character outside letters, digits, `_`, `.` and `-` (so a
+// percent-encoded slash or dot, a backslash, a `#`, a space, an absolute-form `http://host/...` target). None of the
+// allowed paths needs one of those, and each is a way to make this compare and the router (or MediaMTX, which may
+// decode what Express does not: see whepOnlyGuard.js) read two different paths.
+//
+// Methods are exact. HEAD counts as GET (Express answers a HEAD from the GET route) for an allowed GET path only.
+// No method-override header is honoured anywhere in this app, so `req.method` is the request line's method.
+export const TV_SESSION_RESTRICTED = 'TV_SESSION_RESTRICTED';
+const TV_EXACT = new Set([
+  'GET /api/auth/me',
+  'POST /api/auth/media-token',
+  'POST /api/auth/logout',
+  'GET /api/about',
+  'GET /api/settings',
+  'GET /api/cameras',
+]);
+// The three media shapes are the only patterns. The camera-path class is whepOnlyGuard.js's CAMERA_PATH (this app's own
+// `cam_<id>` names, lib/mediamtx.js toPathName, lower case because camera ids are uuids). The WHEP session id is
+// MediaMTX's own value, kept permissive as whepOnlyGuard keeps it; the plain-path rule above already bounds its
+// characters. An HLS file is one segment (index.m3u8, a variant playlist, an init or media segment): never a folder.
+const TV_PATTERNS = [
+  ['POST', /^\/live\/[a-z0-9_-]+\/whep$/],
+  ['DELETE', /^\/live\/[a-z0-9_-]+\/whep\/[^/]+$/],
+  ['GET', /^\/hls\/[a-z0-9_-]+-hls\/[A-Za-z0-9_.-]+$/],
+];
+// One or more `/segment`, each segment non-empty and made only of the plain characters.
+const TV_PLAIN_PATH = /^(?:\/[A-Za-z0-9_.-]+)+$/;
+
+/** Is this request one a TV session may make? Pure: reads only req.method and req.originalUrl. */
+export function tvAllowed(req) {
+  const url = typeof req?.originalUrl === 'string' ? req.originalUrl : '';
+  const queryAt = url.indexOf('?');
+  const path = queryAt === -1 ? url : url.slice(0, queryAt);
+  if (!TV_PLAIN_PATH.test(path)) return false;
+  if (path.split('/').some((segment) => segment === '.' || segment === '..')) return false;
+  const method = req.method === 'HEAD' ? 'GET' : req.method;
+  if (TV_EXACT.has(`${method} ${path}`)) return true;
+  return TV_PATTERNS.some(([m, pattern]) => m === method && pattern.test(path));
+}
+
+// 403, not 401: the web app (and so the Android and TV app) treats ANY 401 as "signed out" (frontend lib/api.js), and a
+// TV that asks for something it may not have is still signed in. The code is what a screen keys on; the text is shown.
+function refuseTv(res) {
+  return res.status(403).json({ error: 'This TV sign-in can only show the live cameras.', code: TV_SESSION_RESTRICTED });
+}
+
+// Is this request a TV session's? For the routes that answer a TV with a smaller shape (GET /api/cameras,
+// GET /api/about, /api/auth/me). Own-property read, for isAdminRequest's reason below.
+export function isTvRequest(req) {
+  const user = req?.user;
+  return user != null && Object.hasOwn(user, 'kind') && user.kind === 'tv';
+}
+
 // Verify a raw JWT the same way the middleware does (signature + live session), for contexts
 // without an Express req/res - e.g. the WebSocket upgrade handshake. Returns the payload or null.
 // Pass { purpose } to require a specific token purpose (e.g. 'media' for the talk WebSocket, whose
@@ -264,8 +346,14 @@ export function verifyToken(token, { purpose } = {}) {
     if (purpose ? payload.purpose !== purpose : payload.purpose === 'media') return null;
     const sess = liveSession(payload.sid);
     if (!sess) return null;
-    // The role comes from the DB, never from the claim — see liveSession (issue #261).
-    return { ...payload, role: sess.role };
+    // #1237: a TV session is refused for the media purpose HERE, in the one function both talk-back checks call: the
+    // WebSocket handshake (index.js) and its 15 s re-check (lib/talkSocket.js). Here and not in either caller: the
+    // handshake lives in index.js, which no test can import, and a rule only in the re-check would let a TV talk for up
+    // to 15 seconds (second design review, Opus M1). Its only two media callers are those; HLS and the ?token= routes go
+    // through requireAuthQueryOrHeader below, whose allowlist lets a TV's media token reach HLS and nothing else.
+    if (purpose === 'media' && sess.kind === 'tv') return null;
+    // The role (and the kind) come from the DB, never from the claim — see liveSession (issue #261).
+    return { ...payload, role: sess.role, kind: sess.kind };
   } catch {
     return null;
   }
@@ -283,8 +371,10 @@ export function requireAuth(req, res, next) {
     if (payload.purpose === 'media') return res.status(401).json({ error: 'Invalid or expired session' });
     const sess = liveSession(payload.sid);
     if (!sess) return res.status(401).json({ error: 'Invalid or expired session' });
-    // ⚠️ The database's role overrides the token's (issue #261) — see liveSession.
-    req.user = { ...payload, role: sess.role };
+    // ⚠️ The database's role overrides the token's (issue #261) — see liveSession. So does its kind (#1237).
+    req.user = { ...payload, role: sess.role, kind: sess.kind };
+    // #1237: after the session is found, so a dead TV token is the usual 401 and only a live one is told "not here".
+    if (sess.kind === 'tv' && !tvAllowed(req)) return refuseTv(res);
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired session' });
@@ -310,8 +400,11 @@ export function requireAuthQueryOrHeader(req, res, next) {
     }
     const sess = liveSession(payload.sid);
     if (!sess) return res.status(401).json({ error: 'Invalid or expired session' });
-    // ⚠️ The database's role overrides the token's (issue #261) — see liveSession.
-    req.user = { ...payload, role: sess.role };
+    // ⚠️ The database's role overrides the token's (issue #261) — see liveSession. So does its kind (#1237).
+    req.user = { ...payload, role: sess.role, kind: sess.kind };
+    // #1237: the same allowlist as requireAuth. This is what confines a TV's MEDIA token (?token=) to HLS: the
+    // snapshot, clip, timelapse and recording routes behind this guard are not on the list.
+    if (sess.kind === 'tv' && !tvAllowed(req)) return refuseTv(res);
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired session' });
@@ -323,6 +416,8 @@ export function requireAuthQueryOrHeader(req, res, next) {
 // currently only GET /settings, whose public half feeds the login screen before anyone can sign in.
 // Reuses verifyToken, so a media-scoped token is rejected here exactly as it is in requireAuth: a
 // leaked media URL must never widen a response.
+// #1237: no TV allowlist here (GET /settings is on it anyway). A TV session is a signed-in CAREGIVER on such a route,
+// because verifyToken carries the effective role sessionWithUser forced, so it gets the caregiver's answer.
 export function optionalAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;

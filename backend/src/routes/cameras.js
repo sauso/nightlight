@@ -5,7 +5,7 @@ import { join as joinPath } from 'path';
 import { serveMediaFile } from '../lib/mediaFiles.js';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth, requireAdmin, requireAuthQueryOrHeader, isAdminRequest } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireAuthQueryOrHeader, isAdminRequest, isTvRequest } from '../middleware/auth.js';
 import { upsertPath, removePath, getPathStatus, toPathName, hlsPathName } from '../lib/mediamtx.js';
 import { startTranscoder, stopTranscoder } from '../lib/transcoder.js';
 import { recordCameraEvent, insertCameraEvent, pruneCameraEvents, EVENT } from '../lib/cameraEvents.js';
@@ -672,8 +672,29 @@ router.post('/:id/snooze', requireAuth, (req, res) => {
   res.json({ ok: true, alerts_snoozed_until: until, alerts_snoozed_by: by });
 });
 
+// What a TV session gets for each camera (#1237; planning/tv-pairing-design.md §6.4): ONLY what the TV screen reads
+// (frontend/src/pages/TvMonitor.jsx and lib/CamerasContext.jsx, read when this was built: the id, the name on the tile,
+// the stream path for the two players, `disabled` to leave a switched-off camera out, and `status.ready` /
+// `status.unknown` for the Live / Reconnecting / Status unknown line). Built field by field, never from publicCamera:
+// the caregiver shape spreads every camera column but the credentials, so it carries the camera's LAN address
+// (onvif_device_url), the bed zone, the child it is assigned to, MQTT readings, a Nightlight Camera's sensors and the
+// username of whoever muted it, none of which a TV shows and all of which a TV signed in by a stranger (the relay
+// attack, the design's §3 row 1) would hand over. A field the TV screen needs later is added here on purpose, and
+// tv-session.test.js pins this list independently. No MQTT reading or sensor read is made for a TV either.
+async function tvCamera(cam) {
+  const status = cam.disabled ? { ready: false } : await getPathStatus(cam.mediamtx_path);
+  return {
+    id: cam.id,
+    name: cam.name,
+    mediamtx_path: cam.mediamtx_path,
+    disabled: cam.disabled,
+    status: status.unknown ? { ready: !!status.ready, unknown: true } : { ready: !!status.ready },
+  };
+}
+
 router.get('/', asyncHandler(async (req, res) => {
   const cameras = db.prepare('SELECT * FROM cameras ORDER BY sort_order, created_at').all();
+  if (isTvRequest(req)) return res.json(await Promise.all(cameras.map(tvCamera)));
   const isAdmin = isAdminRequest(req);
   const withStatus = await Promise.all(
     cameras.map(async (cam) => ({
