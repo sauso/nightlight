@@ -4129,3 +4129,217 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
 @media (hover: hover) { .report-link:hover { text-decoration: underline; } }
 .report-link--child { margin: 0 0 8px -6px; }
 .report-link--sleep { margin: -6px 0 6px -6px; }
+/* ---- The TV screen (/tv, pages/TvMonitor.jsx) ----------------------------------------------------------------
+   Everything here is under .tv-* and applies to nothing else. docs/design-language.md "TV screen" has the rules.
+   SIZES ARE vh/vw, NEVER px: a TV's WebView reports a CSS viewport that depends on the panel and the device pixel
+   ratio (a 1080p panel at 2x is 960 x 540 CSS px), so a px size is double or half the intended size depending on the
+   device. The numbers below were written as 1080p pixels and divided by 10.8: 3vh = 32px at 1080p, which is the
+   camera-name size (the brief's minimum for reading from a sofa is 28px, 2.6vh). Judgement, not measured on a TV.
+   The 5% safe margin on every edge is for overscan (a TV may crop its picture edge). */
+.tv-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 5vh 5vw;
+  background: var(--bg);
+  color: var(--text-primary);
+  scrollbar-width: none;
+}
+.tv-screen::-webkit-scrollbar { display: none; }
+
+.tv-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3vw;
+  min-height: 8vh;
+  margin-bottom: 2.5vh;
+}
+.tv-bar__title { margin: 0; font-size: 4vh; line-height: 1.1; }
+
+/* The two buttons (Reconnect, the key hint) and the tile share one focus treatment, set by the page's own focus
+   (data-focused), not by :focus-visible: a remote has no pointer, and whether a script-focused element counts as
+   "focus-visible" differs between WebViews. The ring is TWO rings, a gap in the page colour and a thick line in
+   --accent-line (never the plain --accent: paletteTokens.test.jsx), so it reads on any frame of video; and the tile also grows a
+   little, so the focus is not carried by a colour alone. */
+.tv-btn,
+.tv-hint {
+  font: inherit;
+  cursor: default;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 0.3vh solid var(--border);
+  border-radius: 1.4vh;
+}
+.tv-btn[data-focused='true'],
+.tv-hint[data-focused='true'],
+.tv-tile--focused {
+  box-shadow: 0 0 0 0.4vh var(--bg), 0 0 0 1.4vh var(--accent-line);
+}
+.tv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.2vh;
+  min-height: 7vh;
+  padding: 1.2vh 3vh;
+  font-size: 2.8vh;
+  font-weight: 700;
+}
+.tv-btn svg { width: 3.4vh; height: 3.4vh; }
+
+.tv-message {
+  max-width: 70vw;
+  margin: 12vh auto;
+  font-size: 3.4vh;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.tv-message--error {
+  padding: 3vh 4vh;
+  color: var(--text-primary);
+  border: 0.4vh solid var(--offline);
+  border-radius: 1.6vh;
+}
+/* A refresh failed but the last list is on screen below: a quiet line, not the blocking failure above. */
+.tv-message--stale { margin: 0 auto 2.5vh; font-size: 2.6vh; }
+
+/* Tile grid. The columns come from lib/tvLayout.js (--tv-cols) and the rows it fills (--tv-rows, at most 2: a longer
+   list scrolls by row). max-width keeps the rows that SHOULD fit on one screen (1 camera, 2, a 2 x 2) inside it: 16:9
+   tiles filling the width would be taller than the screen. It is the width at which that many rows (a 16:9 video plus
+   the name strip, --tv-info, per tile) and the gaps between them fit in --tv-avail: the screen less the margins and the
+   bar (100 - 10 - 10.5 = 79.5vh), less 2vh for the focus ring = 77vh; and 10vh less again while the hint bar is
+   showing (.tv-grid--hint), so the first-launch screen does not scroll either. The numbers are arithmetic checked in a
+   1920x1080 desktop window (the name strip measured 6.8vh, allowed 7.2vh), not measured on a TV. */
+.tv-grid {
+  --tv-gap: 3vh;
+  --tv-info: 7.2vh;
+  --tv-avail: 77vh;
+  display: grid;
+  grid-template-columns: repeat(var(--tv-cols, 1), minmax(0, 1fr));
+  gap: var(--tv-gap);
+  margin: 0 auto;
+  max-width: min(100%, calc(var(--tv-cols, 1) * ((var(--tv-avail) - (var(--tv-rows, 1) - 1) * var(--tv-gap)) / var(--tv-rows, 1) - var(--tv-info)) * 16 / 9 + (var(--tv-cols, 1) - 1) * var(--tv-gap)));
+}
+.tv-grid--hint { --tv-avail: 67vh; }
+
+.tv-tile {
+  position: relative;
+  border-radius: 1.6vh;
+  background: var(--bg-elevated);
+  transition: transform 0.15s ease;
+}
+.tv-tile--focused { transform: scale(1.02); }
+.tv-tile__video {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 1.6vh 1.6vh 0 0;
+  background: #0a0d1c; /* the player's own blank colour (whep-player, BLANK_POSTER) */
+}
+/* The player overlay ("Connecting…", "No signal") and the streaming-service notice, in TV type. Their Retry buttons
+   are hidden: a remote cannot reach a button inside a tile, and Reconnect (top right) does the same job. */
+.tv-tile .whep-overlay { font-size: 3vh; text-align: center; padding: 0 3vh; }
+.tv-tile .whep-overlay button { display: none; }
+.tv-tile .stream-unavailable { font-size: 2.6vh; }
+
+.tv-badge {
+  position: absolute;
+  top: 1.6vh;
+  left: 1.6vh;
+  display: inline-flex;
+  align-items: center;
+  gap: 1vh;
+  padding: 1vh 2vh;
+  font-size: 2.8vh;
+  font-weight: 800;
+  line-height: 1;
+  border-radius: 99px;
+  border: 0.3vh solid var(--bar-text);
+}
+.tv-badge svg { width: 3.6vh; height: 3.6vh; }
+/* Listening = the accent fill (text --on-accent, the pair the design language fixes); Muted = the header navy with its
+   text. Different words, icons AND fills. */
+.tv-badge--on { background: var(--accent); color: var(--on-accent); }
+.tv-badge--off { background: var(--bar); color: var(--bar-text); }
+
+.tv-tile__info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2vh;
+  padding: 1.6vh 2.4vh;
+}
+.tv-tile__name {
+  font-size: 3vh;
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tv-tile__status {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 1vh;
+  font-size: 2.6vh;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.tv-tile__dot { width: 1.6vh; height: 1.6vh; border-radius: 50%; background: var(--text-secondary); }
+.tv-tile__status--live { color: var(--live); }
+.tv-tile__status--live .tv-tile__dot { background: var(--live); }
+.tv-tile__status--offline { color: var(--offline); }
+.tv-tile__status--offline .tv-tile__dot { background: var(--offline); }
+.tv-tile__status--connecting .tv-tile__dot { background: var(--accent-line); }
+
+/* Full screen: the tile covers the whole screen (no safe-margin padding: the video is the point), the name and status
+   sit over a scrim at the bottom, inside the safe margin. Not the browser's Fullscreen API: that needs a gesture and
+   behaves differently between WebViews, and a plain fixed layer needs neither. */
+.tv-tile--full {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  transform: none;
+  box-shadow: none;
+  border-radius: 0;
+  background: var(--bar);
+}
+.tv-tile--full .tv-tile__video { position: absolute; inset: 0; aspect-ratio: auto; border-radius: 0; }
+.tv-tile--full .whep-video { object-fit: contain; }
+.tv-tile--full .tv-badge { top: 5vh; left: 5vw; }
+.tv-tile--full .tv-tile__info {
+  position: absolute;
+  left: 5vw;
+  right: 5vw;
+  bottom: 5vh;
+  padding: 1.6vh 2.4vh;
+  border-radius: 1.6vh;
+  background: var(--bar);
+  color: var(--bar-text);
+}
+.tv-tile--full .tv-tile__name { color: var(--bar-text); }
+
+.tv-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1vh 4vh;
+  width: 100%;
+  margin-top: 3vh;
+  min-height: 7vh;
+  padding: 1.6vh 3vh;
+  font-size: 2.6vh;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.tv-hint__hide { display: inline-flex; align-items: center; gap: 0.8vh; margin-left: auto; font-weight: 700; color: var(--text-primary); }
+.tv-hint__hide svg { width: 3vh; height: 3vh; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-tile { transition: none; }
+}

@@ -1154,6 +1154,35 @@ and not the quartiles, so it can sit off-centre for lopsided nights. A report ni
 estimate is drawn in its band like any number (its figure is in the bar's name). Checked at 390px and 1280px in a desktop browser against canned
 data, in the day theme; not on a phone, not in the night theme by eye, and not with a screen reader.
 
+### TV screen (`pages/TvMonitor.jsx`, route `/tv`, #1237)
+
+A separate screen for a remote control, read from across a room. It shares the tokens and the players with the rest of the app and
+nothing else: no `CameraTile`, no nav bar, no header. Everything is under `.tv-*` in `index.css`.
+
+- **Sizes are `vh`/`vw`, never px.** A TV's WebView reports a CSS viewport that depends on the panel and the pixel ratio (a 1080p
+  panel at 2x is 960 x 540), so a px size is twice too big or too small on some devices. The numbers are 1080p pixels divided by
+  10.8: **camera name 3vh (32px at 1080p; the floor for reading from a sofa is 28px, 2.6vh)**, status line and speaker badge 2.6-2.8vh,
+  buttons 2.8vh, page title 4vh. Chosen by judgement and looked at in a 1920x1080 desktop window; not measured on a TV.
+- **Safe margin: 5vh / 5vw on every edge** (a TV may crop its picture edge). Full screen is the one exception for the video itself;
+  its name and status still sit inside the margin.
+- **Minimum sizes:** nothing a person must read or press is below 2.6vh; the Reconnect button and the hint bar are at least 7vh tall.
+  There are no 44px touch targets here, because nothing is touched.
+- **Focus is the page's own, not the browser's.** Exactly one target is highlighted: the camera tile (first on load), the **Reconnect**
+  button, or the hint bar. The ring is **two rings**, a gap in the page colour (`--bg`, 0.4vh) and a line in `--accent-line` (1.4vh), so it
+  reads over any frame of video, and the tile also grows 2%, so the focus does not rest on colour alone. It is drawn from
+  `data-focused`, not `:focus-visible`, because whether a script-focused element counts as "focus-visible" differs between WebViews.
+  Never the plain `--accent` (`paletteTokens.test.jsx`).
+- **State is words and an icon, never colour alone:** the speaker badge says **Listening** (`--accent` fill, `--on-accent` text) or **Muted**
+  (`--bar` fill, `--bar-text`), and the status line says **Live**, **Reconnecting**, **Offline** or **Status unknown** (a timed-out status
+  check, drawn like Reconnecting, never red).
+- **Loading, failed and empty are three different screens**, as everywhere (see above), each in TV type: "Loading…", a bordered alert
+  naming the cause and saying to choose **Reconnect**, and "No cameras yet. Add one in the Nightlight app or website." A failed refresh
+  after a good load keeps the tiles and adds a quiet line. **Reconnect** is on all of them and is the focused thing when there are no tiles.
+- **Keys** (docs/mobile.md has the table): arrows move by `lib/tvNav.js` (nearest target in that direction, never wrapping; Left/Right stay
+  on their row, Up/Down may reach a lone tile in a ragged last row), OK toggles listening, a hold of 600 ms or Menu opens full screen,
+  Back/Escape closes it. The WebView's tab order is not used.
+- **No motion except the 2% grow**, which `prefers-reduced-motion` turns off.
+
 ---
 
 ## 7. Motion

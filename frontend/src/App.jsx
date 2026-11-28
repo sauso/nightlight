@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './lib/AuthContext.jsx';
 import { SettingsProvider } from './lib/SettingsContext.jsx';
 import { CamerasProvider } from './lib/CamerasContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import { isNativeApp, hasActiveBackgroundAudio, syncTailscaleEndpoint, saveNativeSession } from './lib/nativeBridge.js';
+import { isNativeApp, isTelevision, hasActiveBackgroundAudio, syncTailscaleEndpoint, saveNativeSession } from './lib/nativeBridge.js';
 import { isReloadHeld } from './lib/reloadGuard.js';
 import { initPushNotifications } from './lib/pushNotifications.js';
 import { applyViewportPolicy } from './lib/viewport.js';
@@ -60,6 +60,8 @@ const UserSettings = lazyPage(() => import('./pages/UserSettings.jsx'));
 const SettingsLogs = lazyPage(() => import('./pages/SettingsLogs.jsx'));
 const ClipManagement = lazyPage(() => import('./pages/ClipManagement.jsx'));
 const About = lazyPage(() => import('./pages/About.jsx'));
+// The Android TV screen (docs/mobile.md "Android TV"). Lazy: nobody on a phone or a desktop ever opens it, so it stays out of the entry chunk.
+const TvMonitor = lazyPage(() => import('./pages/TvMonitor.jsx'));
 
 // How long the app needs to have been backgrounded before we reload on return. Short
 // enough to catch a real "put the phone away for a bit" gap, long enough that quickly
@@ -176,6 +178,41 @@ function Shell() {
   useSwipeBack();
   useHardwareBack();
 
+  // The TV screen (/tv). A signed-in user who lands on `/` is sent to it, ONCE per launch, when the native shell
+  // says it is running on a television (nativeBridge.isTelevision) or the address carries `?tv=1` (so the screen can be
+  // developed and looked at in any desktop browser: `#/?tv=1`). Nothing else about `/` changes for anyone else.
+  //   - `?tv=1` is read ONCE, when the app starts: a signed-out visitor is sent to /login, which drops the query,
+  //     and they must still land on /tv after signing in.
+  //   - Once, not on every visit to `/`: the redirect is a landing, not a lock. A person who goes to `/` by hand
+  //     (the TV screen has no link there) is not bounced back.
+  //   - `replace`, so /tv is the only history entry and the remote's Back leaves the app (useHardwareBack treats
+  //     /tv as a root).
+  //   - Where the native app waits for the shell's answer, it renders nothing until it has one: the phone's live grid
+  //     would otherwise mount, open a stream per camera, and drop them a moment later on a TV. A browser has no shell
+  //     to ask and never waits. isTelevision() has its own deadline, so a shell that never answers cannot leave the
+  //     app blank.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [tvRequested] = useState(() => new URLSearchParams(location.search).get('tv') === '1');
+  const [isTv, setIsTv] = useState(() => (isNativeApp() ? null : false));
+  const [tvArrived, setTvArrived] = useState(false);
+  useEffect(() => {
+    if (isTv !== null) return undefined;
+    let cancelled = false;
+    isTelevision().then((tv) => { if (!cancelled) setIsTv(tv); });
+    return () => { cancelled = true; };
+  }, [isTv]);
+  // "Once" is recorded when /tv has actually been reached, NOT when the redirect is requested: the router applies a
+  // navigation in a React transition, so for a render or two after navigate() the address is still `/`. Recording it
+  // at the request let the phone grid mount in that gap and open a stream per camera (caught by tvRoute.test.jsx).
+  useEffect(() => {
+    if (location.pathname === '/tv') setTvArrived(true);
+  }, [location.pathname]);
+  const goToTv = !!user && !tvArrived && (isTv === true || tvRequested) && location.pathname === '/';
+  useEffect(() => {
+    if (goToTv) navigate('/tv', { replace: true });
+  }, [goToTv, navigate]);
+
   // #562 bullet 3: give a browser its pinch-zoom back; the native app keeps index.html's locked viewport (the
   // PiP double-tap bug). Here, once, on mount, rather than in main.jsx: main.jsx is the bootstrap and is not
   // covered by the tests, and appShell.test.jsx must be able to prove this runs. Runs whether or not anyone is
@@ -202,6 +239,8 @@ function Shell() {
   }, [user]);
 
   if (loading) return null;
+  // Still asking the shell whether this is a TV, or about to be sent to /tv: draw nothing rather than the phone grid.
+  if (isTv === null || goToTv) return null;
 
   // #382: a stored sign-in could not be checked because the server did not answer. Without this the
   // Protected wrapper below sent such a device to the sign-in form. Only while nobody is signed in: a
@@ -219,6 +258,13 @@ function Shell() {
             and `/invite` ONE route, so the page stays mounted when it replaces the address with `/invite` to take the token out of
             history; two routes would remount it and ask the server twice. The server blocks the underlying calls in the public demo. */}
         <Route path="/invite/:token?" element={<AcceptInvite />} />
+        {/* The TV screen: any signed-in user (a caregiver watches the TV too), read-only, no admin gate. Deliberately NOT
+            inside the `/*` shell below, which mounts LiveMonitor: that screen is always mounted and only pushed off-screen
+            when another route is showing, so it would keep one WebRTC session per camera open behind the TV screen's own,
+            doubling the load on the server and the cameras, and on a TV's small decoder budget that can starve the tiles
+            that are visible. It also keeps the nav bar and the admin set-up banner off the TV. The cost is that going from
+            /tv to another screen builds the shell afresh (one camera-list read); nothing on the TV screen links there. */}
+        <Route path="/tv" element={<Protected><CamerasProvider><TvMonitor /></CamerasProvider></Protected>} />
         <Route
           path="/*"
           element={
