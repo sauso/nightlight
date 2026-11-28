@@ -286,7 +286,9 @@ can use it"). `docs/caregivers.md` (who can pair a TV, how to disconnect one). `
 `CHANGELOG.md` under the existing `### Added`. The Connect document §8.5 gets a pointer to this design (that document says the
 v1 QR "must not grow into" sign-in; the pairing QR here is a separate mechanism and carries no credential).
 
-## 12. Open decisions (recommendations marked)
+## 12. Decisions (owner, 2026-11-28: all six as recommended)
+
+The owner accepted every recommendation below, so these are decided, not open. The alternatives stay written down for the reviewers.
 
 1. **Who may approve?** *Recommended: any signed-in user, and the TV signs in as that user* (a caregiver can pair the living-room TV).
    The TV session is view-only with the effective role `caregiver` whoever approved it. Alternative: admins only (smaller exposure; a
@@ -334,4 +336,4 @@ First review, Codex `gpt-6-sol`, read-only, against the code (2026-11-28). What 
 | Test plan: `route-permissions` does not run the proxies or the WebSocket; path normalisation unspecified | correction | separate proxy/WebSocket/media-route cases; exact path rules in §6.1; tests in §10 |
 | Code alphabet contained `L`; the sample code used characters outside it | correction | alphabet and samples corrected (§4.2) |
 
-A second review (Codex and Opus in parallel) is still to run, after the owner has decided §12.
+The owner decided §12 on 2026-11-28 (all six as recommended). A second review (Codex and Opus in parallel) is still to run before any code.
