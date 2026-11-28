@@ -15,6 +15,7 @@ import SensorHistoryCard from '../components/SensorHistoryCard.jsx';
 import { usesCameraClimate } from '../lib/nightlightSensors.js';
 import SleepSummaryCard from '../components/SleepSummaryCard.jsx';
 import RecordingsCard from '../components/RecordingsCard.jsx';
+import ReportLink from '../components/ReportLink.jsx';
 import MorningReviewCard from '../components/MorningReviewCard.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { ageLabel } from '../lib/age.js';
@@ -162,6 +163,10 @@ export default function ChildDetail() {
               about the night the card above shows and no other (`forNight`: nothing while tonight is in progress). */}
           <MorningReviewCard key={`review-${id}`} childId={id} fmtTime={fmtTime} forNight={reviewNight} />
         </div>
+        {/* #1236: a quiet link into the weekly and monthly report, right under the night card it summarises beyond one night. It is
+            inside this wrapper so the two-column layout keeps it with the night card, and its margin is its own (an absent
+            link would leave no gap). Shown to every signed-in user: a caregiver reads the nights, so they read this. */}
+        <ReportLink childId={id} className="report-link--child" />
         </div>
 
         {/* The camera(s): one large tile each, no "Cameras · n" heading (a child's page is about the child; the count and the

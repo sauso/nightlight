@@ -15,6 +15,7 @@ import { audioLabelText } from '../lib/audioLabel.js';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
+import ReportLink from '../components/ReportLink.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import SleepScoreCard from '../components/SleepScoreCard.jsx';
 import TimelapseCard from '../components/TimelapseCard.jsx';
@@ -292,6 +293,10 @@ export default function SleepDetail() {
         </div>
 
         <SleepNightStrip childId={id} maxDate={maxDate} minDate={minDate} selected={date} onSelect={setDate} version={stripVersion} />
+
+        {/* #1236: the way to the weekly and monthly report. Under the strip, which it continues (one night, seven nights, a week or
+            a month), and always shown: it needs no night, so it is there while the night loads or has failed. */}
+        <ReportLink childId={id} className="report-link--sleep" />
 
         {/* Recompute (admin-only) lives in the "⋯" menu. Mounted once, here, for every status but `off` and for a night
             that has been answered (null / loading: nothing to recompute): it was in each status's card before, which is the

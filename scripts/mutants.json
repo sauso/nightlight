@@ -26886,5 +26886,60 @@
     "tests": ["account-disable.test.js"],
     "namePattern": "#1233 /invite/check and /invite/redeem refuse",
     "note": "Codex plan review: /invite/check must not show a disabled account's name. The redeem's own compare-and-swap (disabled = 0) still refuses the redeem without this, so it is the check that tells."
+  },
+  {
+    "label": "#1236 report: summarises the detector's raw rows instead of the corrected nights",
+    "file": "backend/src/lib/sleepReport.js",
+    "find": "  for (const row of applyCorrections(child.id, rangeStmt.all(child.id, prev.from, current.to))) {",
+    "replace": "  for (const row of rangeStmt.all(child.id, prev.from, current.to)) {",
+    "expect": "killed",
+    "tests": ["sleep-report.test.js"],
+    "namePattern": "a corrected night"
+  },
+  {
+    "label": "#1236 report: the night in progress counts (the in-progress clause of nightQualifies dropped)",
+    "file": "backend/src/lib/sleepBaseline.js",
+    "find": "    && !input.in_progress\r\n    && !input.promoted_from_empty\r\n    && input.coverage_frac != null && input.coverage_frac >= SCORE_CONFIG.baseline.min_coverage;",
+    "replace": "    && !input.promoted_from_empty\r\n    && input.coverage_frac != null && input.coverage_frac >= SCORE_CONFIG.baseline.min_coverage;",
+    "expect": "killed",
+    "tests": ["sleep-report.test.js"],
+    "namePattern": "the night in progress is a gap",
+    "note": "The fixture's night in progress is fully watched, so this clause alone keeps it out. sleep-baseline.test.js would kill it too; the report's own test is the one named here."
+  },
+  {
+    "label": "#1236 report: a figure is ready with 2 nights instead of 3",
+    "file": "backend/src/lib/sleepReport.js",
+    "find": "  const ready = n >= REPORT_CONFIG.min_values;",
+    "replace": "  const ready = n >= REPORT_CONFIG.min_values - 1;",
+    "expect": "killed",
+    "tests": ["sleep-report.test.js"],
+    "namePattern": "the 3-night minimum"
+  },
+  {
+    "label": "#1236 report: every month ends on the 30th",
+    "file": "backend/src/lib/sleepReport.js",
+    "find": "    const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);",
+    "replace": "    const last = new Date(Date.UTC(y, m - 1, 30)).toISOString().slice(0, 10);",
+    "expect": "killed",
+    "tests": ["sleep-report.test.js"],
+    "namePattern": "period bounds, month"
+  },
+  {
+    "label": "#1236 report: week_start ignored (every week starts on Monday)",
+    "file": "backend/src/lib/sleepReport.js",
+    "find": "  const from = shiftDate(date, -((isoWeekday(date) - weekStart + 7) % 7));",
+    "replace": "  const from = shiftDate(date, -((isoWeekday(date) - 1 + 7) % 7));",
+    "expect": "killed",
+    "tests": ["sleep-report.test.js"],
+    "namePattern": "period bounds, week"
+  },
+  {
+    "label": "#1236 report: a change exactly at the steady floor reads as steady",
+    "file": "backend/src/lib/sleepReport.js",
+    "find": "  if (Math.abs(delta) < floor) return { direction: 'steady', delta };",
+    "replace": "  if (Math.abs(delta) <= floor) return { direction: 'steady', delta };",
+    "expect": "killed",
+    "tests": ["sleep-report.test.js"],
+    "namePattern": "steady, up and down at each floor"
   }
 ]

@@ -4027,6 +4027,108 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
 .nlcam-readings dt { color: var(--text-secondary); }
 .nlcam-readings dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
 
+/* ---- The weekly and monthly sleep report page (#1236). Every rule here is `.report-*`; the page's rules are in
+   docs/design-language.md, "Weekly and monthly report page". Only existing tokens: the --band-* tokens paint bars as a
+   `background` (never as text colour or SVG fill: test/paletteTokens.test.jsx forbids both), the timeline's --sleep-asleep paints
+   the time-asleep bars and the drift dots, everything else is the card, border, text and accent tokens. ---- */
+
+/* The controls: a Week | Month switch (the shared .seg-track) and the previous / title / next row. The empty `actions` box is room for
+   the Download button a later change adds; empty, it takes no space. */
+.report-controls { display: flex; flex-direction: column; gap: 12px; margin: 4px 0 14px; }
+.report-controls__row { display: flex; align-items: center; gap: 10px; }
+.report-seg { flex: 1 1 auto; max-width: 280px; }
+.report-controls__actions { margin-left: auto; display: flex; align-items: center; }
+.report-controls__actions:empty { display: none; }
+.report-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.report-nav__btn { flex: none; width: var(--tap); height: var(--tap); display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); color: var(--accent-text); font: inherit; cursor: pointer; }
+.report-nav__btn:disabled { opacity: 0.4; cursor: default; }
+.report-nav__btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.report-nav__btn:active:not(:disabled) { background: var(--child-action-active); }
+@media (hover: hover) { .report-nav__btn:hover:not(:disabled) { background: var(--child-action-hover); } }
+/* The title wraps and is balanced: "28 Dec 2026 – 3 Jan 2027" is long at 360px, and text that carries meaning wraps (design-language, "Phone rules"). */
+.report-nav__title { flex: 1 1 auto; min-width: 0; margin: 0; text-align: center; font-size: 18px; font-weight: 700; line-height: 1.25; color: var(--text-primary); text-wrap: balance; }
+
+/* A calm line above the figures: "So far: 4 of 7 nights", and the camera / sleep window note. */
+.report-note { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elevated); color: var(--text-secondary); font-size: 13px; line-height: 1.45; }
+.report-hint { margin: 0 0 12px; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+.report-hint--after { margin: 10px 0 0; }
+.report-card { margin-bottom: 14px; }
+
+/* The tiles: one figure each, two to a row on a phone. Tabular numbers (design-language, Typography). The change line is words
+   beside an arrow in the text colour: a change is never judged by colour, so up and down look alike apart from the arrow. */
+.report-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 0 0 8px; }
+.report-tile { min-width: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
+.report-tile dd { margin: 0; }
+.report-tile__label { font-size: 12px; color: var(--text-secondary); }
+.report-tile__value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin-top: 2px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.report-tile__value--none { font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+.report-tile__num { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.report-tile__unit { font-size: 13px; color: var(--text-secondary); }
+.report-tile__sub { margin-top: 2px; font-size: 12px; line-height: 1.35; color: var(--text-secondary); }
+.report-tile__change { display: flex; align-items: flex-start; gap: 4px; margin-top: 6px; font-size: 13px; line-height: 1.35; color: var(--text-primary); }
+.report-tile__change svg { flex: none; margin-top: 2px; }
+.report-tile__change--none { color: var(--text-secondary); }
+/* A short band mark beside the score (a mark, never text: the number and its word are printed). */
+.report-tile__mark { align-self: center; width: 4px; height: 20px; border-radius: 2px; background: var(--border); }
+.report-tile__mark--great { background: var(--band-great); }
+.report-tile__mark--good { background: var(--band-good); }
+.report-tile__mark--fair { background: var(--band-fair); }
+.report-tile__mark--low { background: var(--band-low); }
+.report-tile__mark--early { background: var(--band-early); }
+
+/* The two ends of the period: NavRow rows in a card with no padding of its own. */
+.report-links { padding: 0; overflow: hidden; }
+.report-insufficient p { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
+.report-est { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 12px 8px 20px; font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
+.report-est svg { flex: none; margin-top: 2px; }
+
+/* Night by night: one slot per calendar date, oldest first. A slot is a track (the inset colour) holding a bar from the bottom, or a
+   dashed mark for a night that did not count: NEVER a zero-height bar. The track is 120px tall; a week's slot is about 44px wide, a
+   month's about 10px (a known limit, design-language). The label under a bar is 11px; a month prints a number on every fifth day
+   only, centred on its slot and allowed to overflow it. */
+.report-bars { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.report-bars--month { gap: 2px; }
+.report-slot { flex: 1 1 0; min-width: 0; }
+.report-slot__link, .report-slot__plain { display: flex; flex-direction: column; color: inherit; text-decoration: none; border-radius: 8px; }
+.report-slot__link:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.report-slot__track { display: flex; align-items: flex-end; height: 120px; border-radius: 6px; background: var(--bg-elevated-2); overflow: hidden; }
+.report-bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--border); }
+.report-bar--great { background: var(--band-great); }
+.report-bar--good { background: var(--band-good); }
+.report-bar--fair { background: var(--band-fair); }
+.report-bar--low { background: var(--band-low); }
+.report-bar--early { background: var(--band-early); }
+.report-bar--time { background: var(--sleep-asleep); }
+/* A night that counted but has no figure for the chart: a hollow stub, a link like any counted night. */
+.report-bar--stub { height: 10px; background: transparent; border: 2px solid var(--text-secondary); border-bottom: 0; }
+/* A night that did not count: a short dashed line near the foot of an empty track. Its reason is the slot's accessible name and the line under the chart. */
+.report-gap { display: block; width: 60%; height: 0; margin: 0 auto 8px; border-top: 2px dashed var(--text-secondary); }
+.report-slot__label { display: flex; flex-direction: column; align-items: center; min-height: 32px; margin-top: 4px; font-size: 11px; line-height: 1.3; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.report-slot__label span { flex: none; white-space: nowrap; }
+
+/* Fell asleep and got up: one small SVG each (the page's own viewBox, scaled to the card). The axis is text in the secondary colour,
+   the band a light wash of the accent line, the typical time a dashed line, a night a ringed dot. */
+.report-drift { margin: 0 0 14px; }
+.report-drift__title { margin-bottom: 2px; font-size: 13px; font-weight: 700; color: var(--text-primary); }
+/* Capped so the 11px axis text is not blown up to 20px on a wide screen (checked at 1280px, where the unscaled chart read as a poster). */
+.report-drift__svg { display: block; width: 100%; max-width: 420px; height: auto; }
+.report-axis__line { stroke: var(--border); stroke-width: 1; }
+.report-axis__text { fill: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.report-drift__band { fill: var(--accent-line); fill-opacity: 0.16; }
+.report-drift__typical { stroke: var(--accent-line); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.report-drift__dot { fill: var(--sleep-asleep); stroke: var(--bg-elevated); stroke-width: 1.5; }
+
+/* The same numbers for a screen reader: visible to assistive technology, not drawn. */
+.report-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* The quiet link in: a 44px line of accent text with an icon and a chevron, on the child's page and the sleep page. No fill on hover (a
+   phone leaves a tapped link in :hover); an underline only where a pointer can hover. */
+.report-link { display: inline-flex; align-items: center; gap: 6px; min-height: var(--tap); padding: 0 6px; border-radius: 8px; color: var(--accent-text); font-size: 14px; font-weight: 600; text-decoration: none; }
+.report-link:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.report-link:active { background: var(--child-action-active); }
+@media (hover: hover) { .report-link:hover { text-decoration: underline; } }
+.report-link--child { margin: 0 0 8px -6px; }
+.report-link--sleep { margin: -6px 0 6px -6px; }
 /* ---- The TV screen (/tv, pages/TvMonitor.jsx) ----------------------------------------------------------------
    Everything here is under .tv-* and applies to nothing else. docs/design-language.md "TV screen" has the rules.
    SIZES ARE vh/vw, NEVER px: a TV's WebView reports a CSS viewport that depends on the panel and the device pixel
