@@ -27012,7 +27012,7 @@
   {
     "label": "#1237 TV: revoking a session leaves the TV sessions it paired",
     "file": "backend/src/routes/auth.js",
-    "find": "  db.prepare('DELETE FROM sessions WHERE paired_by_session = ? AND user_id = ?').run(sessionId, userId);",
+    "find": "  db.prepare(\"DELETE FROM sessions WHERE paired_by_session = ? AND user_id = ? AND kind = 'tv'\").run(sessionId, userId);",
     "replace": "  void db;",
     "expect": "killed",
     "tests": ["tv-session.test.js"],
