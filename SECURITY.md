@@ -134,10 +134,14 @@ the longer lifetime. Nor does raising it bring a signed-out device back; that de
   it, so a cross-site scripting bug would be a stolen sign-in. The page's Content Security Policy is
   enforcing (no inline scripts, no `eval`) to make that hard, and a stolen token is only as good as its
   session: it is checked against the server on **every** request, so ending the session (below) ends it.
+  **One exception:** a TV that a sign-in [connected](#pairing-a-tv) has a sign-in of its own, and a plain sign-out
+  does not end it (revoking does, below).
 - **Every sign-in can be ended from the server, at once:** sign out (on that device, or that device's
   **Sign out** in your Account's session list), an admin signing out any device (Settings → Users),
   removing the account, disabling it (it is kept, and cannot sign in until an admin enables it again;
-  enabling it brings no sign-in back), or changing your password (signs out your other devices). Changing
+  enabling it brings no sign-in back), or changing your password (signs out your other devices). Signing a
+  device out **from the session list** also signs out every TV it connected; signing out on the device itself
+  does not ([Pairing a TV](#pairing-a-tv)). Changing
   someone's role takes effect at their next request without signing them out. Ending a sign-in stops the
   Nightlight app's push alerts on that device; it cannot stop Pushover, ntfy or Gotify, which are one
   destination for the whole household, so remove a person there yourself.
@@ -162,6 +166,76 @@ shared chat, a screenshot of the QR code) holds it until it is used or cancelled
 or cancelled link work again until its 7 days are up, so cancel unexpected invites after a restore
 ([details](docs/caregivers.md#after-restoring-a-backup-or-going-back-to-an-older-version)).
 
+## Pairing a TV
+
+A TV (the Nightlight Android app on a television) can be signed in without typing a password on it (#1237). The TV
+shows a code; someone already signed in on their phone or computer types that code and approves it; the TV is then
+signed in **as that person**, with a **view-only** sign-in. This version has the server side; the screens for it (the
+TV's pairing screen, the approval page) come in the next update.
+
+**What a TV sign-in can do:** watch and listen to the live cameras, and nothing else. No settings, children, sleep,
+recordings, clips, snapshots, accounts, sign-ins or alerts, and no talking back. It is a caregiver whichever account
+approved it, so an admin's TV is not an admin. A password typed into the TV's own sign-in form (on the pairing screen)
+makes the same kind of sign-in.
+
+**How long it lasts:** like any sign-in (`SESSION_TTL_DAYS`, default 30 days from when the TV was connected, never
+extended). The code on the TV works once, for 10 minutes.
+
+**How to end it:** it is in the session lists (Account, and Settings → Users for an admin) like any sign-in; the next
+update marks its row as a TV, with the device that approved it (as that device's browser described itself: see the
+limits below). **Sign out** on its row ends it. Signing out the phone
+or computer that approved it **from the session list** also ends the TV; signing out on that phone itself does not, so
+signing out your phone does not switch off the living-room TV. Disabling or removing the account ends it, and so does
+changing the password from another device.
+
+**What protects it:** the code on the TV is not a password. It only lets a person who is **already signed in** choose to
+connect that TV, and they must type it (a QR code only opens the page; nothing fills the code in). The TV's own half of
+the pairing is 256 random bits that only the TV holds and the server stores only as a hash; it is in no log, list or
+link. When the TV collects its sign-in, the approval is checked again: if the sign-in that approved it has ended since,
+or the account was disabled, the TV is refused. An account can have at most 5 TVs, counting the ones it has approved
+that have not connected yet. Each approval and each TV that signs in is written to the server log, with the account,
+the TV's name and device, and the approving device.
+
+**Known limits:**
+
+- **Only approve a code you can see on your own TV.** Approving a code someone sent you gives them view-only access to
+  your cameras until it is signed out. The approval page shows the TV's name in quotes beside its device; the name is
+  whatever the TV chose to call itself, so a laptop can call itself "Living room TV".
+- **The device strings are not proof of anything.** The TV's device on the approval page, and the approving device on
+  the TV's row and in the log, are each read from what that device's own browser reports about itself (its User-Agent),
+  so they can be made up, and different devices can look the same: a phone and an Android TV can both read "Chrome on
+  Android". Treat them as a hint, never as a check that it is your TV or your phone.
+- **A phone left unlocked and signed in, or a stolen sign-in, can connect a TV that outlives it.** Everything else that
+  sign-in can do ends when it ends; a TV it connected lasts up to 30 days (a sign-in on its 29th day can connect a TV
+  that lasts to day 59). Approving asks for no password or code. What ends that TV: signing out its row, signing out the
+  sign-in that connected it **from the session list** (a plain sign-out does not), disabling or removing the account, or
+  a password change made from another device. The approving sign-in may also be older than the account's two-factor:
+  turning two-factor on signs nobody out.
+- Changing your own password, or an admin resetting their own, keeps the device it was done from, so a TV that device
+  connected stays connected. Sign it out from the list.
+- The limits on pairing are kept in memory (a restart empties them), and behind a reverse proxy without `TRUST_PROXY`
+  every remote device has the same address. **A TV that is not on your home network needs `TRUST_PROXY` set**
+  ([remote access](docs/remote-access.md#trust_proxy--telling-nightlight-your-real-client-addresses)), or one internet
+  client can keep remote pairing busy. Even with it set, at most 20 pairings wait at once, and when every address holds
+  just one, a new start pushes out the oldest waiting pairing, which can be yours: someone with about 20 internet
+  addresses (easy with IPv6), many devices on your network, or many Tailscale accounts can keep doing that and delay a
+  pairing. The TV's password sign-in is the fallback.
+- If the TV never receives its sign-in after it was approved (a dropped connection), the TV pairs again, and the unused
+  TV sign-in stays in the list until it expires. Nobody holds it, so it is harmless; sign it out.
+- A password typed on a TV in the ordinary sign-in page makes an ordinary sign-in; only the pairing and the pairing
+  screen's own password form make a TV sign-in. A TV signed in by password before that screen arrives keeps its ordinary
+  sign-in until it is signed out once.
+- **Going back to an older version turns every TV sign-in into an ordinary one with the approver's real role** (older
+  versions do not know the kind). Sign every TV out before going back.
+- A clock moved backwards can make a code that has run out work again, until the real time passes its expiry.
+- Restoring a database backup restores its sign-ins and any waiting pairings; a TV you signed out comes back with an old
+  backup if the signing secret is restored too. Sign it out again.
+- The TV's name is plain text, at most 40 characters, with line breaks, control and text-direction characters and
+  characters that draw nothing (zero-width spaces, Hangul fillers and the like) taken out; a name with nothing visible
+  left is no name. Nothing shows it as markup. Names in other alphabets are shown as typed.
+- Not tried yet: a real TV remote with the pairing screen, a phone on mobile data scanning a QR code for a home-network
+  address (it will not open; typing the code in Nightlight at your usual address works), a TV behind a reverse proxy.
+
 ## If you suspect a credential was exposed
 
 Rotate it — Nightlight doesn't have a way to know a credential was compromised, so this is
@@ -173,6 +247,8 @@ manual:
   have an admin reset another account's.
 - **A caregiver invite link** that went to the wrong place: an admin cancels the invite or makes a new one (the old
   link stops working at once). If it was already used by someone else, remove that account.
+- **A TV you do not recognise** in a session list: sign it out there, and sign out the device it says approved it (from
+  the list, so its TVs go too). See [Pairing a TV](#pairing-a-tv).
 - **An account that should not have access for now** (while you find out what happened, say): an admin disables it (Settings → Users → the account → **Disable account**). It is signed out everywhere
   at once, its open live views close within about 15 seconds, and its invite link stops working; the account and
   its history are kept. With the right password the sign-in screen then says the account is disabled; a wrong

@@ -71,6 +71,9 @@ before(async () => {
   router.post('/api/auth/users', record('create-user'));
   // #1233: disabling or re-enabling an account. Not on the allowlist: the demo's shared admin must not lock others out.
   router.put('/api/auth/users/:id/disabled', record('disable-user'));
+  // #1237: signing in a TV by code. Not on the allowlist: a demo visitor signs in as the shared admin, and a pairing would
+  // hand some other device a session of that account that outlives the visit.
+  for (const step of ['start', 'poll', 'pending', 'approve', 'deny']) router.post(`/api/auth/device/${step}`, record(`device-${step}`));
 
   // Mounted at '/' with demoGuard as global middleware, matching index.js's real registration
   // order (after express.json(), before every router) rather than nesting demoGuard inside a
@@ -217,6 +220,18 @@ describe('demoGuard — DEMO_MODE=true, mutation allowlist', () => {
       assert.match(res.body.error, /read-only public demo/);
     }
     assert.equal(hits['disable-user'], undefined, 'the disable route reached its handler');
+  });
+
+  // The same kind of GUARD (#1237): all five pairing routes are POSTs, so the default rule blocks them (design §5: no
+  // GET blocklist entry is needed, the approval page's lookup is a POST too). On the allowlist, any visitor could pair a
+  // device of their own as the demo's shared admin, and that TV session would outlive the visit.
+  test('#1237: every TV pairing route is blocked, handlers never invoked', async () => {
+    for (const step of ['start', 'poll', 'pending', 'approve', 'deny']) {
+      const res = await call(`${server.url}/api/auth/device/${step}`, { method: 'POST', body: { user_code: 'BCDFGHJK', device_code: 'x'.repeat(43) } });
+      assert.equal(res.status, 403, `${step} was not blocked`);
+      assert.match(res.body.error, /read-only public demo/);
+      assert.equal(hits[`device-${step}`], undefined, `${step} reached its handler`);
+    }
   });
 });
 

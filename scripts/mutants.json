@@ -26077,8 +26077,8 @@
   {
     "label": "#1094 invite redeem: the clock is read BEFORE the hash await, not after",
     "file": "backend/src/routes/auth.js",
-    "find": "const now = utcText(Date.now());",
-    "replace": "const now = checkedAt;",
+    "find": "    const now = utcText(Date.now());\r\n    let user;",
+    "replace": "    const now = checkedAt;\r\n    let user;",
     "expect": "killed",
     "tests": ["auth-invite.test.js"],
     "namePattern": "runs out WHILE its password is hashing",
@@ -27027,5 +27027,338 @@
     "tests": ["tv-session.test.js"],
     "namePattern": "only id, name, mediamtx_path",
     "note": "The caregiver shape carries the camera's LAN address, bed zone, assigned child, MQTT readings and who muted it (the design's §6.4)."
+  },
+  {
+    "label": "#1237 pairing: the claim's DELETE row-count guard is gone (single use, and pending pairings reach the claim)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (claimPairingRow.run(deviceHash, now).changes !== 1) return null;",
+    "replace": "  claimPairingRow.run(deviceHash, now);",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "single use|slow_down: a poll",
+    "note": "A replayed device code then reaches the claim with no row (a 500, not expired), and a pending one is refused and marked denied."
+  },
+  {
+    "label": "#1237 pairing: the claim collects a pending pairing (its DELETE drops approved_at IS NOT NULL)",
+    "file": "backend/src/routes/auth.js",
+    "find": "'DELETE FROM tv_pairings WHERE device_hash = ? AND approved_at IS NOT NULL AND denied_at IS NULL AND expires_at > ?'",
+    "replace": "'DELETE FROM tv_pairings WHERE device_hash = ? AND (approved_at IS NOT NULL OR 1) AND denied_at IS NULL AND expires_at > ?'",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "slow_down: a poll"
+  },
+  {
+    "label": "#1237 pairing: the claim collects a denied pairing (its DELETE drops denied_at IS NULL)",
+    "file": "backend/src/routes/auth.js",
+    "find": "'DELETE FROM tv_pairings WHERE device_hash = ? AND approved_at IS NOT NULL AND denied_at IS NULL AND expires_at > ?'",
+    "replace": "'DELETE FROM tv_pairings WHERE device_hash = ? AND approved_at IS NOT NULL AND expires_at > ?'",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "exclude each other",
+    "note": "Killed by the hostile row both approved and denied, approved by a session that is still live."
+  },
+  {
+    "label": "#1237 pairing: the claim collects an expired pairing (its DELETE ignores expires_at)",
+    "file": "backend/src/routes/auth.js",
+    "find": "'DELETE FROM tv_pairings WHERE device_hash = ? AND approved_at IS NOT NULL AND denied_at IS NULL AND expires_at > ?'",
+    "replace": "'DELETE FROM tv_pairings WHERE device_hash = ? AND approved_at IS NOT NULL AND denied_at IS NULL AND (expires_at > ? OR 1)'",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "expiry is the JavaScript clock"
+  },
+  {
+    "label": "#1237 pairing: approve accepts an approved pairing again (drops approved_at IS NULL)",
+    "file": "backend/src/routes/auth.js",
+    "find": "approved_at = ?\r\n   WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND expires_at > ?",
+    "replace": "approved_at = ?\r\n   WHERE user_code = ? AND (approved_at IS NULL OR 1) AND denied_at IS NULL AND expires_at > ?",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "one 404 pair_invalid"
+  },
+  {
+    "label": "#1237 pairing: approve accepts a denied pairing (drops denied_at IS NULL)",
+    "file": "backend/src/routes/auth.js",
+    "find": "approved_at = ?\r\n   WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND expires_at > ?",
+    "replace": "approved_at = ?\r\n   WHERE user_code = ? AND approved_at IS NULL AND (denied_at IS NULL OR 1) AND expires_at > ?",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "exclude each other"
+  },
+  {
+    "label": "#1237 pairing: approve accepts an expired pairing (ignores expires_at)",
+    "file": "backend/src/routes/auth.js",
+    "find": "approved_at = ?\r\n   WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND expires_at > ?",
+    "replace": "approved_at = ?\r\n   WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND (expires_at > ? OR 1)",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "expiry is the JavaScript clock"
+  },
+  {
+    "label": "#1237 pairing: approve reads SQLite's clock instead of the JavaScript one",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const now = utcText(Date.now());\r\n  if (approvePairingRow.run(",
+    "replace": "  const now = db.prepare(\"SELECT datetime('now') AS t\").get().t;\r\n  if (approvePairingRow.run(",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "expiry is the JavaScript clock",
+    "note": "Mock timers move Date and not SQLite, so the approve at the expiry succeeds on SQLite's (unmoved) clock."
+  },
+  {
+    "label": "#1237 pairing: deny accepts an approved pairing (drops approved_at IS NULL: approve and deny no longer exclude each other)",
+    "file": "backend/src/routes/auth.js",
+    "find": "SET denied_at = ?\r\n   WHERE user_code = ? AND approved_at IS NULL",
+    "replace": "SET denied_at = ?\r\n   WHERE user_code = ? AND (approved_at IS NULL OR 1)",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "exclude each other"
+  },
+  {
+    "label": "#1237 pairing: the claim skips isLiveSessionId (an ended or disabled approver's pairing is collected)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (!isLiveSessionId(row.approved_by_session)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "gets the TV nothing|cancel an approval"
+  },
+  {
+    "label": "#1237 pairing: the claim skips the approver's password_set check",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (!user || user.password_set !== 1) throw new ClaimRefused(",
+    "replace": "  if (!user) throw new ClaimRefused(",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "password_set = 0",
+    "note": "isLiveSessionId does not read password_set, so this check is the only one for an account that cannot sign in."
+  },
+  {
+    "label": "#1237 pairing: the claim skips the cap of 5 TV sessions",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (liveTvSessionCount(user.id) >= TV_SESSIONS_PER_USER) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "the claim checks it again"
+  },
+  {
+    "label": "#1237 pairing: approve allows a 6th TV session (the cap's boundary)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (held >= TV_SESSIONS_PER_USER) throw new TvLimitError();",
+    "replace": "  if (held > TV_SESSIONS_PER_USER) throw new TvLimitError();",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "at 5, approve answers 409|approvals not yet collected count too"
+  },
+  {
+    "label": "#1237 pairing: approve counts TV sessions only (approvals not yet collected are free, so one account can fill every slot)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const held = liveTvSessionCount(userId) + approvedNotCollected.get(userId, row.id, now).n;",
+    "replace": "  const held = liveTvSessionCount(userId);",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "approvals not yet collected count too",
+    "note": "Review of PR 1b, Opus probe P2."
+  },
+  {
+    "label": "#1237 pairing: approve counts the pairing being approved against its own cap (the 5th approval is refused)",
+    "file": "backend/src/routes/auth.js",
+    "find": "approved_at IS NOT NULL AND id != ? AND ${LIVE_PAIRING}",
+    "replace": "approved_at IS NOT NULL AND (id != ? OR 1) AND ${LIVE_PAIRING}",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "approvals not yet collected count too"
+  },
+  {
+    "label": "#1237 pairing: the claim makes an ORDINARY session (kind user)",
+    "file": "backend/src/routes/auth.js",
+    "find": "    kind: 'tv', label: row.label, pairedBySession: row.approved_by_session, pairedFrom: row.approved_from,",
+    "replace": "    kind: 'user', label: row.label, pairedBySession: row.approved_by_session, pairedFrom: row.approved_from,",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "EFFECTIVE role caregiver and kind tv",
+    "note": "An admin's paired TV would then be a full admin session."
+  },
+  {
+    "label": "#1237 pairing: the claimed TV session forgets the session that paired it (the revoke cascade cannot reach it)",
+    "file": "backend/src/routes/auth.js",
+    "find": "    kind: 'tv', label: row.label, pairedBySession: row.approved_by_session, pairedFrom: row.approved_from,",
+    "replace": "    kind: 'tv', label: row.label, pairedBySession: null, pairedFrom: row.approved_from,",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "a real pairing made"
+  },
+  {
+    "label": "#1237 pairing: the poll answers TV the admin's real role (the answer's effective role is gone)",
+    "file": "backend/src/routes/auth.js",
+    "find": "    user: { ...toPublicUser(user), role: TV_EFFECTIVE_ROLE, kind: 'tv' },",
+    "replace": "    user: { ...toPublicUser(user), kind: 'tv' },",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "EFFECTIVE role caregiver and kind tv"
+  },
+  {
+    "label": "#1237 pairing: a refused claim is not marked denied",
+    "file": "backend/src/routes/auth.js",
+    "find": "    markClaimRefused.run(utcText(Date.now()), hash);",
+    "replace": "    void markClaimRefused;",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "gets the TV nothing",
+    "note": "Unmarked, a pairing refused for the cap would be collected the moment a TV slot frees up."
+  },
+  {
+    "label": "#1237 pairing: an unknown code answers something other than the uniform expired",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (!row || !(row.expires_at > utcText(nowMs))) return res.json(POLL_EXPIRED);",
+    "replace": "  if (!row) return res.json({ status: 'unknown' });\r\n  if (!(row.expires_at > utcText(nowMs))) return res.json(POLL_EXPIRED);",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "always HTTP 200"
+  },
+  {
+    "label": "#1237 pairing: slow_down loses its state (the poll is not recorded in the row)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  recordPoll.run(nowMs, row.id);",
+    "replace": "  void recordPoll;",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "slow_down: a poll"
+  },
+  {
+    "label": "#1237 pairing: a start no longer deletes the expired and denied pairings first",
+    "file": "backend/src/routes/auth.js",
+    "find": "  purgeDeadPairings.run(utcText(Date.now()));\r\n  const started = startPairing(",
+    "replace": "  const started = startPairing(",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "every start first deletes"
+  },
+  {
+    "label": "#1237 pairing: the per-bucket cap is gone",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (liveInBucket.get(bucket, now).n >= PAIRINGS_PER_BUCKET) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "fourth start from one bucket|reloads three times"
+  },
+  {
+    "label": "#1237 pairing: the per-bucket eviction takes an APPROVED pairing",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE client_bucket = ? AND approved_at IS NULL AND ${LIVE_PAIRING}",
+    "replace": "WHERE client_bucket = ? AND ${LIVE_PAIRING}",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "fourth start from one bucket"
+  },
+  {
+    "label": "#1237 pairing: the global cap is gone",
+    "file": "backend/src/routes/auth.js",
+    "find": "  } else if (liveInAll.get(now).n >= PAIRINGS_IN_ALL) {",
+    "replace": "  } else if (false) {",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "FULLEST bucket"
+  },
+  {
+    "label": "#1237 pairing: the global eviction takes the oldest pairing anywhere, not the fullest bucket's",
+    "file": "backend/src/routes/auth.js",
+    "find": "   ORDER BY b.n DESC, p.created_at, p.rowid LIMIT 1`",
+    "replace": "   ORDER BY p.created_at, p.rowid LIMIT 1`",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "FULLEST bucket"
+  },
+  {
+    "label": "#1237 pairing: the wrong-code limit is keyed by source address instead of the user",
+    "file": "backend/src/routes/auth.js",
+    "find": "  keyGenerator: (req) => `tv-pair-user:${req.user.id}`,",
+    "replace": "  keyGenerator: clientKey,",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "20 wrong codes per 15 minutes"
+  },
+  {
+    "label": "#1237 pairing: disabling an account leaves the pairings it approved",
+    "file": "backend/src/routes/auth.js",
+    "find": "        db.prepare('DELETE FROM tv_pairings WHERE user_id = ?').run(req.params.id);",
+    "replace": "        void db;",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "disabling an account deletes"
+  },
+  {
+    "label": "#1237 pairing: the TV login flag is ignored (tv: true on /login makes an ordinary session)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (!ask.tv) {",
+    "replace": "  if (true) {",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "with tv: true makes a TV session|rides in the MFA token"
+  },
+  {
+    "label": "#1237 pairing: the MFA step reads the TV flag from its own body, not the signed token",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const tvAsk = payload.tv === true",
+    "replace": "  const tvAsk = req.body?.tv === true",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "rides in the MFA token"
+  },
+  {
+    "label": "#1237 pairing: a label keeps its format characters (bidi controls, zero-width spaces, tag characters)",
+    "file": "backend/src/lib/tvPairing.js",
+    "find": "\\p{Cc}\\p{Cf}\\p{Cs}",
+    "replace": "\\p{Cc}\\p{Cs}",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "sanitiseLabel"
+  },
+  {
+    "label": "#1237 pairing: a label of nothing but joiners is kept (it shows blank)",
+    "file": "backend/src/lib/tvPairing.js",
+    "find": "  return SOMETHING_VISIBLE.test(clamped) ? clamped : null;",
+    "replace": "  return clamped || null;",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "a label of nothing visible is null"
+  },
+  {
+    "label": "#1237 pairing: a typed code is upper-cased before the ASCII check (the long s and the ligatures pass)",
+    "file": "backend/src/lib/tvPairing.js",
+    "find": "  if (!TYPED_CODE_SHAPE.test(stripped)) return null;",
+    "replace": "  void TYPED_CODE_SHAPE;",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "upper-case INTO the alphabet",
+    "note": "Review of PR 1b, Codex and Opus."
+  },
+  {
+    "label": "#1237 pairing: the per-bucket eviction takes another bucket's pairing",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE client_bucket = ? AND approved_at IS NULL AND ${LIVE_PAIRING}",
+    "replace": "WHERE (client_bucket = ? OR 1) AND approved_at IS NULL AND ${LIVE_PAIRING}",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "fourth start from one bucket",
+    "note": "Survived review of PR 1b until the other bucket's pairing was made the oldest of all."
+  },
+  {
+    "label": "#1237 pairing: a refused claim marks every pairing denied, not only its own",
+    "file": "backend/src/routes/auth.js",
+    "find": "'UPDATE tv_pairings SET denied_at = ? WHERE device_hash = ? AND denied_at IS NULL'",
+    "replace": "'UPDATE tv_pairings SET denied_at = ? WHERE (device_hash = ? OR 1) AND denied_at IS NULL'",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "refused claim answers"
+  },
+  {
+    "label": "#1237 pairing: the global cap is 5, not 20",
+    "file": "backend/src/routes/auth.js",
+    "find": "const PAIRINGS_IN_ALL = 20;",
+    "replace": "const PAIRINGS_IN_ALL = 5;",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "below 20 live pairings"
   }
 ]

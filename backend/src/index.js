@@ -8,6 +8,9 @@ import { listenOrFail } from './lib/listenOrFail.js';
 import { defaultBody } from './middleware/defaultBody.js';
 import { WebSocketServer } from 'ws';
 import authRoutes from './routes/auth.js';
+// A line of its own: the route-table scanner in backend/test/helpers/routeTable.js reads only the plain
+// `import <name> from` form, and the router's default import just above must stay readable to it.
+import { purgeTvPairings } from './routes/auth.js';
 import childrenRoutes from './routes/children.js';
 import camerasRoutes from './routes/cameras.js';
 import setupRoutes from './routes/setup.js';
@@ -421,6 +424,10 @@ safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
 // and its why are in middleware/auth.js, beside the session purge).
 purgeOldInvites();
 safeInterval('purge-invites', 24 * 60 * 60 * 1000, purgeOldInvites);
+// #1237: TV pairings that are finished (expired or denied). Only a backstop: every pairing start deletes them first
+// (routes/auth.js, where the rule and its why live, beside the statements it shares).
+purgeTvPairings();
+safeInterval('purge-tv-pairings', 24 * 60 * 60 * 1000, purgeTvPairings);
 
 // Closes the gap recordWebrtcSessionOwner exists for (see the /live mount's own comment): a login
 // session revoked while its owner is already watching a camera doesn't tear down that view on its

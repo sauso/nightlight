@@ -294,6 +294,42 @@ as they keep at it. They cannot guess any faster. Ways out:
 - Sign-in is looked up by the exact name, so two accounts whose names differ only by capital letters are two
   accounts with separate counts.
 
+## Signing in a TV (#1237)
+
+A TV can be signed in two ways, both giving it a view-only sign-in ([SECURITY.md, Pairing a TV](../SECURITY.md#pairing-a-tv)):
+
+- **With a code from your phone.** The TV shows a code and someone already signed in approves it. **No password or
+  two-factor code is asked for**: the TV's sign-in is only as strong as the sign-in that approved it. A sign-in made
+  before two-factor was turned on never passed it (turning two-factor on signs nobody out).
+- **With the account's password, on the TV's own sign-in form.** The usual two steps: with two-factor on, the TV asks
+  for the code too, and every limit above applies.
+
+Pairing has limits of its own, separate from the sign-in limits above (junk sent at pairing does not use up anyone's
+sign-in budget, and the other way round):
+
+| What | Limit | Counted per | Notes |
+|---|---|---|---|
+| Starting a pairing (the TV) | **30 per 15 minutes** | source address | Every start counts. |
+| Asking whether it is approved (the TV) | **600 per 10 minutes** | source address | A TV that waits the whole 10 minutes asks about 200 times. |
+| Looking up, approving or refusing a code (the phone) | **20 wrong codes per 15 minutes** | the signed-in account | One budget for the three. A code that works costs nothing. It can only block the account that used it up. |
+| Waiting pairings | **3** per source, **20** in all | source address / everything | A new start replaces the source's oldest one that is not yet approved, so a TV that was reloaded recovers by itself; at 20 the oldest waiting pairing of the busiest source goes. When every source holds just one, that is simply the oldest waiting pairing, which can be yours. An approved one is never replaced. |
+| TVs per account | **5** | the signed-in account | Its TV sign-ins and its approvals that no TV has collected yet, together. Approving a 6th answers `409 {"error":"tv_limit"}`. |
+
+Over the first three limits, the answer is the usual "Too many attempts - please wait a few minutes and try again."
+(HTTP 429). When the waiting slots are full and none can be replaced (every one is approved and not yet collected),
+starting a pairing answers `429 {"error":"pair_busy"}` instead. There are no settings for these numbers; they are
+judgements, not measurements.
+
+**Known limits:** they are kept in memory, so a restart of the container resets them. Behind a reverse proxy
+without [`TRUST_PROXY`](remote-access.md#trust_proxy--telling-nightlight-your-real-client-addresses), every remote device
+has the proxy's address, so they share one budget and one set of waiting slots: one internet client can keep remote
+pairing busy. **A TV that is not on your home network needs `TRUST_PROXY` set.** Through Tailscale every device
+reaches Nightlight from the same address, so TVs on your tailnet share the start and poll budgets whatever
+`TRUST_PROXY` says (the waiting slots are kept per Tailscale account). With `TRUST_PROXY` set, someone on the internet
+with about 20 addresses (IPv6 addresses are grouped by /56, so one /48 gives 256) can fill the waiting slots and keep
+pushing out the oldest waiting pairing, a TV at home included; so can many devices on your own network. The TV's
+password sign-in is the fallback ([details](remote-access.md#trust_proxy--telling-nightlight-your-real-client-addresses)).
+
 ## Notes for operators
 
 - The TOTP secret and the (hashed) backup codes live in the `users` table of the app database
