@@ -156,3 +156,46 @@ What this does not cover:
 - **Only home-network addresses of the form `http://192.168.1.20:4000` are checked.** A saved name or `https` address is opened as before.
 - **The check runs when the app builds its screen** (opening the app, a restart, a move between addresses), not on a later reload of the same address while the app stays open.
 - **If your server's id changes** (a new database, or a restore without its data), the app will refuse it. On the setup screen, remove the saved server with the **✕** and add it again.
+
+### Android TV
+
+Watch your cameras on a TV with a remote: big live tiles, no menus, one button to listen. It is the same Android app as on your phone. It needs a version of the app that adds TV support; the [nightlight-mobile Releases](https://github.com/sauso/nightlight-mobile/releases) and its changelog say which one.
+
+**Installing.** Sideload the Android APK onto the TV the same way as on a phone (for example with `adb install`, or a file-transfer app). The app then appears in the TV's apps row. On first launch enter your server's address and sign in with your usual username and password. There is no pairing yet: typing a password with a remote is awkward, and signing in by approving a code from your phone is planned, not built.
+
+**What you see.** The screen opens by itself when the app starts on a TV. One camera is highlighted at a time with a thick border. Each tile shows the camera name, whether it is Live, Reconnecting or Offline, and a badge that says **Listening** or **Muted**. With one camera you get one big tile, two sit side by side, three or four make a grid of two by two, and from five up the page scrolls a row at a time, three tiles across.
+
+| Remote key | What it does |
+|---|---|
+| Arrow keys | Move the highlight to the nearest tile in that direction. They stop at the edges and never wrap around. Up from the top row reaches **Reconnect**. |
+| **OK** (Enter) | Listen to the highlighted camera. It becomes the only camera with sound; press OK again to mute it. Pressing OK on another camera moves the sound to that one. |
+| **Play/Pause** | The same as OK. |
+| **Hold OK** (about 0.6 seconds) or **Menu** | Open the highlighted camera full screen. Do the same again to close it. |
+| **Back** | Closes full screen. From the tiles, Back leaves the app. |
+| **Reconnect** (top right) | Reconnects every camera and reads the camera list again. Use it after the network or a camera comes back. |
+
+A one-line reminder of the keys sits under the tiles on your first launches. Move down to it and press OK to hide it; it stays hidden on that TV.
+
+**What is not on the TV.** Live cameras only. There are no settings, sleep, history, alerts or recordings, no talking back through a camera, no Picture-in-Picture, no reordering and no zoom. Cameras appear in the order set on your server, and cameras an admin has turned off are not shown. The TV never changes your cameras, settings or data: it only watches. (Watching does open a live stream with the server for each tile and closes it again, as the phone does.) To change something, use the app on your phone or the website.
+
+**Sound works differently from the phone app.**
+
+| | Phone app | TV |
+|---|---|---|
+| At start | Each camera remembers its own sound setting | Always starts muted |
+| How many cameras have sound | Any number | One at a time |
+| Remembered | Yes, per camera | No: not saved on the TV and never sent to your server |
+| Background listening | Yes (Android) | No. When the app is not on screen the streams are released, as on the phone when it is minimised |
+
+It always starts muted on purpose: a baby monitor that suddenly plays sound when you open it is worse than a quiet one.
+
+**Anyone signed in can use it.** Caregivers see the TV screen too; it is not an admin screen.
+
+**Known limits.**
+
+- **Hardware differs, and this was not tested on every TV.** Android TV, Google TV and Fire TV devices have different remotes, different video decoders and different overscan (some TVs crop the edge of the picture; the screen keeps about 5% clear on every side). Whether every remote sends the keys in the table, how many streams a given TV can play at once, and whether the picture and sound recover after a camera or network drop were not checked on a real TV when this was written. If a tile stays black, choose **Reconnect**. If that does not help, please report what TV you have and what happened.
+- **Many cameras scroll.** The layout is tuned for up to four cameras on one screen. Beyond that you scroll by row.
+- **Screen sleep.** The TV screen asks the TV to stay awake while it is open (the same request the phone's live screen makes). Whether a TV honours it is not verified: some TVs and their built-in browsers ignore it, and their own screensaver or sleep timer then still applies. If yours blanks the picture, turn off the TV's sleep timer or screensaver for this app.
+- **Typing is slow.** Until pairing exists, signing in means typing your password with the remote.
+
+**Trying the screen on a computer.** Open `http://<your-server>:<port>/#/?tv=1` in a desktop browser and sign in: you get the same screen. The arrow keys, Enter (OK) and Escape (Back from full screen) work; hold Enter for full screen; the Menu key is the context-menu key if your keyboard has one. This is for looking at the layout; it does not show how your TV behaves.

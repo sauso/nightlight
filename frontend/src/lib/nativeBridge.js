@@ -178,6 +178,38 @@ export async function changeServer() {
   }
 }
 
+// Whether the native shell is running on a television (Android TV / Google TV / Fire TV), so the app can open
+// the big-tile TV screen (pages/TvMonitor.jsx) instead of the phone layout. The shell answers it:
+// ServerConfig.isTelevision() resolves { tv: boolean } (UiModeManager's television mode, in nightlight-mobile).
+//
+// Resolves FALSE, never rejects, in every case where the answer is not a clear yes: a browser, a shell built before
+// the method existed (the web UI loads live from the server, so a new page often meets an old installed app and the
+// plugin then rejects "not implemented"), iOS, a rejection, or an answer that is not exactly `{ tv: true }`.
+// A phone must never be sent to the TV screen by a missing answer.
+//
+// WHY the deadline: App.jsx holds back the first screen of the native app until this settles (so a TV does not
+// open the phone grid's streams for a moment and then drop them). A call into the shell that never answered would
+// otherwise leave a blank app, so after TV_PROBE_MS it is treated as "not a TV". The shell answers in a few
+// milliseconds; the limit is far above that and only ever matters when something is already wrong.
+export const TV_PROBE_MS = 1500;
+export async function isTelevision() {
+  if (!isNativeApp()) return false;
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (typeof p?.isTelevision !== 'function') return false;
+  let timer;
+  try {
+    const res = await Promise.race([
+      p.isTelevision(),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), TV_PROBE_MS); }),
+    ]);
+    return res?.tv === true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // The origin the app is currently pointed at, normalised (no trailing slash) for comparison against
 // a server address carried in a deep link / push. In the native shell this is the loaded server URL.
 export function currentServerOrigin() {
