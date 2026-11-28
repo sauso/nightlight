@@ -913,9 +913,12 @@ router.get('/sessions/all', requireAuth, requireAdmin, (req, res) => {
 // every other revocation path (push_tokens has no foreign key to sessions).
 const revokeSession = db.transaction((sessionId, userId) => {
   db.prepare(
-    'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE paired_by_session = ? AND user_id = ?)'
+    "DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE paired_by_session = ? AND user_id = ? AND kind = 'tv')"
   ).run(sessionId, userId);
-  db.prepare('DELETE FROM sessions WHERE paired_by_session = ? AND user_id = ?').run(sessionId, userId);
+  // `kind = 'tv'`: only a TV is ended by the session that paired it. The column is also filled by createSession for any
+  // kind, and a row of another kind that happened to name this session must not be deleted by a revoke (code review,
+  // Codex, low: no shipped route makes such a row, but nothing in the schema forbids one).
+  db.prepare("DELETE FROM sessions WHERE paired_by_session = ? AND user_id = ? AND kind = 'tv'").run(sessionId, userId);
   // Same reasoning as /logout above - ending a session (here, possibly someone ELSE'S device)
   // must also stop that device's push registration.
   db.prepare('DELETE FROM push_tokens WHERE session_id = ?').run(sessionId);

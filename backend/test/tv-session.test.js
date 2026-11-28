@@ -199,6 +199,9 @@ describe('★ #1237 tvAllowed, table-driven', () => {
     ['POST', '/live/cam_abc/whep/0b9c'], ['POST', '/hls/cam_abc-hls/index.m3u8'], ['DELETE', '/hls/cam_abc-hls/index.m3u8'],
     // A trailing slash or another case reaches the handler in Express; an exact compare refuses it (the safe side).
     ['GET', '/api/cameras/'], ['GET', '/API/cameras'], ['GET', '/api/Cameras'], ['GET', '/api/auth/ME'],
+    // Semicolon parameters, an OPTIONS on an allowed HLS file, and HEAD on a path that is not an allowed GET (code review).
+    ['GET', '/hls/cam_abc-hls/index.m3u8;foo'], ['GET', '/api/cameras;x=1'], ['OPTIONS', '/hls/cam_abc-hls/index.m3u8'],
+    ['HEAD', '/api/children'], ['HEAD', '/api/auth/sessions'],
     ['POST', '/live/CAM_abc/whep'], ['POST', '/live/cam_abc/WHEP'], ['POST', '/live/cam_abc/whep/'],
     ['GET', '/hls/cam_abc-HLS/index.m3u8'], ['GET', '/HLS/cam_abc-hls/index.m3u8'], ['GET', '/hls/cam_abc-hls/index.m3u8/'],
     // Doubled slashes.
@@ -555,6 +558,18 @@ describe('★ #1237 the revoke cascade', () => {
     assert.equal((await call(`${base}/api/auth/me`, { token: tv.token })).status, 401, 'the TV token still works');
     assert.ok(sessionRow(otherTv.sid), 'a TV paired by ANOTHER session was ended');
     assert.ok(sessionRow(other.sid));
+  });
+
+  test('every TV the revoked session paired is ended, and only TVs (an ordinary session that names it is not)', async () => {
+    const phone = userSession(carer);
+    const tvA = tvSession(carer, { pairedBySession: phone.sid });
+    const tvB = tvSession(carer, { pairedBySession: phone.sid });
+    // Hand-made: no shipped route makes an ordinary session with a paired_by_session. The cascade must still not take it.
+    const ordinary = createSession(carer.id, TV_UA, { kind: 'user', pairedBySession: phone.sid });
+    assert.equal((await revoke(phone.sid, phone.token)).status, 204);
+    assert.equal(sessionRow(tvA.sid), undefined, 'the first TV outlived the revoke');
+    assert.equal(sessionRow(tvB.sid), undefined, 'the second TV outlived the revoke');
+    assert.ok(sessionRow(ordinary), 'the cascade deleted an ordinary session that merely named the revoked one');
   });
 
   test('a plain sign-out of the pairing session does not end the TV', async () => {
