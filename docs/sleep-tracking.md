@@ -1079,11 +1079,11 @@ stored and no other answer changed. Any signed-in user, and an admin and a careg
 | Parameter | Required | Values | Default |
 | --- | --- | --- | --- |
 | `period` | yes | `week` or `month` | none |
-| `date` | no | a real calendar date, any night date inside the wanted period | today, in the app timezone (Settings → General) |
+| `date` | no | a real calendar date from 2000 to 2100, any night date inside the wanted period | today, in the app timezone (Settings → General) |
 | `week_start` | no | `1` (Monday) to `7` (Sunday), ISO numbering; ignored for a month | `1` |
 
 `404` for an unknown child; `400` with a plain `error` for a missing or unknown `period`, a `date` that is not
-a real date (`2026-02-31` is refused), or a `week_start` outside 1 to 7.
+a real date (`2026-02-31` is refused) or lies outside 2000 to 2100, or a `week_start` outside 1 to 7.
 
 ```json
 {
@@ -1093,17 +1093,29 @@ a real date (`2026-02-31` is refused), or a `week_start` outside 1 to 7.
     { "date": "2025-03-10", "status_class": "counted", "score": 82, "asleep_minutes": 610, "wake_count": 2,
       "longest_stretch_minutes": 330, "onset_clock": 450, "wake_clock": 1110,
       "onset_at": "2025-03-10 08:30:00", "wake_at": "2025-03-10 19:30:00" },
-    { "date": "2025-03-11", "status_class": "low_coverage" }
+    { "date": "2025-03-11", "status_class": "low_coverage" },
+    { "date": "2025-03-12", "status_class": "counted", "score": 71, "asleep_minutes": 560, "wake_count": 4,
+      "longest_stretch_minutes": 210, "onset_clock": 470, "wake_clock": 1100,
+      "onset_at": "2025-03-12 08:50:00", "wake_at": "2025-03-12 19:20:00" },
+    { "date": "2025-03-13", "status_class": "counted", "score": 79, "wake_count": 2,
+      "longest_stretch_minutes": 300, "onset_clock": 455, "onset_at": "2025-03-13 08:35:00" },
+    { "date": "2025-03-14", "status_class": "counted", "score": 88, "asleep_minutes": 640, "wake_count": 1,
+      "longest_stretch_minutes": 400, "onset_clock": 445, "wake_clock": 1120,
+      "onset_at": "2025-03-14 08:25:00", "wake_at": "2025-03-14 19:40:00" },
+    { "date": "2025-03-15", "status_class": "no_data" },
+    { "date": "2025-03-16", "status_class": "counted", "score": 80, "asleep_minutes": 600, "wake_count": 2,
+      "longest_stretch_minutes": 320, "onset_clock": 455, "wake_clock": 1105,
+      "onset_at": "2025-03-16 08:35:00", "wake_at": "2025-03-16 19:25:00" }
   ],
   "summary": {
-    "nights_counted": 6, "nights_in_period": 7,
-    "score": { "value": 80, "n": 6, "ready": true },
-    "asleep_minutes": { "value": 605, "n": 5, "ready": true },
-    "wake_count": { "value": 2, "n": 6, "ready": true },
-    "longest_stretch_minutes": { "value": 320, "n": 6, "ready": true },
+    "nights_counted": 5, "nights_in_period": 7,
+    "score": { "value": 80, "n": 5, "ready": true },
+    "asleep_minutes": { "value": 605, "n": 4, "ready": true },
+    "wake_count": { "value": 2, "n": 5, "ready": true },
+    "longest_stretch_minutes": { "value": 320, "n": 5, "ready": true },
     "settle_minutes": { "value": null, "n": 2, "ready": false },
-    "onset_clock": { "value": 452.5, "n": 6, "ready": true, "spread": 10 },
-    "wake_clock": { "value": 1105, "n": 6, "ready": true, "spread": 20 },
+    "onset_clock": { "value": 455, "n": 5, "ready": true, "spread": 5 },
+    "wake_clock": { "value": 1107.5, "n": 4, "ready": true, "spread": 8.75 },
     "best_night": { "date": "2025-03-14", "score": 88 },
     "worst_night": { "date": "2025-03-12", "score": 71 }
   },
@@ -1121,7 +1133,9 @@ a real date (`2026-02-31` is refused), or a `week_start` outside 1 to 7.
 }
 ```
 
-(The example's times are for an install in UTC+11; the numbers are made up.)
+(The example's times are for an install in UTC+11; the numbers are made up, but they add up: the summary is
+the medians of the nights above. The night of the 13th had no confirmed wake-up, so it has no time asleep and no
+wake time; two nights had a detected put-down, too few for a typical settling time.)
 
 - **`nights`**: the current period only, one entry per date, oldest first. `status_class` is `counted`,
   `no_data`, `low_coverage`, `empty_bed` or `in_progress`. A gap has only `date` and `status_class`. A counted
@@ -1130,14 +1144,17 @@ a real date (`2026-02-31` is refused), or a `week_start` outside 1 to 7.
   moved a time by more than 15 minutes or more than 15 minutes went unwatched, the clock figures need the night's
   stored timezone, and `wake_at` and `wake_clock` need a confirmed wake. `onset_at` and `wake_at` are the
   corrected UTC times (`YYYY-MM-DD HH:MM:SS`), to print in the home timezone. A date after the last finished
-  night is `no_data` when nothing is saved for it: the first `summary.nights_in_period` dates are the finished
-  ones.
+  night is `no_data` when nothing is saved for it: the finished dates are normally the first
+  `summary.nights_in_period` ones.
 - **Clock figures** (`onset_clock`, `wake_clock`) are minutes after 12:00 noon on the local clock, in each
   night's own stored timezone: 450 is 19:30, 1110 is 06:30 the morning after. `spread` is the interquartile
   range in minutes, or `null` when the figure is not ready.
 - **`summary`**: each figure is `{ value, n, ready }`, the median of `n` usable values; `ready` is `n >= 3`
-  and `value` is `null` until then. `nights_counted` is the counted nights; `nights_in_period` the dates up to
-  and including the last finished night (all of them for a finished period). `best_night` and `worst_night` are
+  and `value` is `null` until then. `nights_counted` is the counted nights; `nights_in_period` the finished
+  dates: those up to and including the last finished night by today's sleep window (all of them for a finished
+  period), plus any later date whose saved night counts. That second part matters after the window's end is moved
+  later: a night saved under the old window has ended and counts, while today's window says it is still running.
+  So `nights_in_period` is never below `nights_counted`. `best_night` and `worst_night` are
   `{ date, score }`, or `{ date, asleep_minutes }` when the score is off, or `null` with fewer than 3 nights to
   rank.
 - **`period.complete`** is `false` while the period's last night has not finished: the figures and the

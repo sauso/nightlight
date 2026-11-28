@@ -669,13 +669,15 @@ covering the previous period's first date to the current period's last, `applyCo
 `notes` gets `context_changed` when the counted nights of both periods come from more than one (camera, window). Every
 figure is a `median` (also from the baseline) and is `ready` at `REPORT_CONFIG.min_values` (3) usable values; the
 `steady` floors in `REPORT_CONFIG` are judgement, not measurement. Period bounds are date-part arithmetic in UTC
-(`shiftDate`); the default date is `localDateStr` in `settings.timezone`; `complete` reads `lastCompletedNightDate`. The
+(`shiftDate`); the default date is `localDateStr` in `settings.timezone`; `complete` and `nights_in_period` read `lastCompletedNightDate`
+(today's window), and a date whose saved night counts is finished too (it counted by its OWN saved window), so a window
+end moved later cannot leave `nights_in_period` below `nights_counted`. The
 child's `show_sleep_score` is read inside the module: while it is 0, `attachScore` is not called and no `score` key
 appears anywhere in the answer.
 
 | Route | Gate | Request | Answer |
 |---|---|---|---|
-| `GET /api/children/:id/sleep/report` | signed in (admin or caregiver) | `period=week\|month`, optional `date=YYYY-MM-DD` (default today in the app timezone), optional `week_start=1..7` (ISO, default 1) | `200 { period, earliest_night_date, nights, summary, previous, comparison, notes }`; `404` unknown child; `400` bad `period`, `date` or `week_start` |
+| `GET /api/children/:id/sleep/report` | signed in (admin or caregiver) | `period=week\|month`, optional `date=YYYY-MM-DD` (a real date from 2000 to 2100; default today in the app timezone), optional `week_start=1..7` (ISO, default 1) | `200 { period, earliest_night_date, nights, summary, previous, comparison, notes }`; `404` unknown child; `400` bad `period`, `date` or `week_start` |
 
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the

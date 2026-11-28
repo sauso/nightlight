@@ -10,7 +10,7 @@ import { DriftCard, NightBars } from '../components/ReportCharts.jsx';
 import { bandOfValue, bandWord, minutesText } from '../lib/sleepScoreText.js';
 import { formatDayKey } from '../lib/homeTime.js';
 import {
-  FIGURE_TILES, canGoNext, canGoPrevious, changeText, chartModel, gapSummary, localeWeekStart, nextPeriodDate,
+  FIGURE_TILES, isReportShape, canGoNext, canGoPrevious, changeText, chartModel, gapSummary, localeWeekStart, nextPeriodDate,
   periodTitle, periodWord, previousPeriodDate, readReportParams, reportApiPath, reportQuery, spreadText, typicalText,
 } from '../lib/reportFormat.js';
 
@@ -36,13 +36,6 @@ const TREND_ICON = { up: ArrowUp, down: ArrowDown, steady: ArrowRight, none: Min
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-// A report is only drawn from an answer that has the pieces this page reads; anything else is shown as a failure, not as
-// a half-empty page (a proxy's HTML error page that came back with a 200 parses as null, for one).
-function isReport(r) {
-  return Boolean(r) && typeof r === 'object' && r.period && typeof r.period.from === 'string' && typeof r.period.to === 'string'
-    && r.summary && typeof r.summary === 'object' && Array.isArray(r.nights);
-}
-
 export default function SleepReport() {
   const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -67,7 +60,7 @@ export default function SleepReport() {
     api.get(reportApiPath(id, { kind, date, weekStart }), { signal: controller.signal })
       .then((r) => {
         if (!alive) return;
-        setView(isReport(r) ? { key, report: r } : { key, error: 'The server sent an answer this page could not read.' });
+        setView(isReportShape(r) ? { key, report: r } : { key, error: 'The server sent an answer this page could not read.' });
       })
       .catch((err) => { if (alive) setView({ key, error: err?.message || 'Request failed' }); });
     return () => { alive = false; controller.abort(); };

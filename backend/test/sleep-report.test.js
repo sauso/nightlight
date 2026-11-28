@@ -201,17 +201,17 @@ test('period bounds, month: the 1st to the real last day (28, 29 in a leap year,
   }
 });
 
-test('Melbourne: a week and a month across each clock change skip no date and double none, and clock times stay wall clock', async () => {
-  setTz('Australia/Melbourne');
-  const TZ = 'Australia/Melbourne';
+// A week and a whole month across each of a zone's two clock changes, with the app AND the process in that zone (so
+// any date maths done in LOCAL time, new Date(y, m, d) or a parsed 'YYYY-MM-DD' stepped by 86 400 000 ms, would land
+// on the change). `weeks`: [a date in the week, its Thursday, the night that crosses the change, that night's window
+// in minutes]; every week here starts on Thursday (week_start 4) so the change falls mid-week. `months`: [1st, days].
+async function acrossClockChanges(TZ, weeks, months) {
+  setTz(TZ);
   const savedTz = process.env.TZ;
-  // The process's own zone too, so any date maths done in LOCAL time (new Date(y, m, d), a parsed 'YYYY-MM-DD'
-  // stepped by 86 400 000 ms) would land on the clock change. Restored below.
   process.env.TZ = TZ;
   try {
-    // Thursday 2026-04-02 to Wednesday 2026-04-08: the clocks go back at 03:00 on Sunday the 5th, inside the night of
-    // the 4th. Thursday 2026-10-01 to Wednesday the 7th: forward at 02:00 on Sunday the 4th, inside the night of the 3rd.
-    for (const [date, from, longNight, minutes] of [['2026-04-05', '2026-04-02', '2026-04-04', 780], ['2026-10-04', '2026-10-01', '2026-10-03', 660]]) {
+    for (const [date, from, longNight, minutes] of weeks) {
+      db.prepare('DELETE FROM sleep_nights').run();
       const dates = datesFrom(from, 7);
       dates.forEach((d) => putLocal(d, TZ));
       const row = db.prepare('SELECT coverage_minutes FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(CHILD, longNight);
@@ -226,9 +226,8 @@ test('Melbourne: a week and a month across each clock change skip no date and do
       assert.deepEqual(s.wake_clock, { value: 1110, n: 7, ready: true, spread: 0 }, date);
       assert.deepEqual(r.body.nights.map((n) => n.onset_clock), Array(7).fill(450), date);
     }
-    // The whole months: April 2026 (30 days) and October 2026 (31).
-    db.prepare('DELETE FROM sleep_nights').run();
-    for (const [from, n] of [['2026-04-01', 30], ['2026-10-01', 31]]) {
+    for (const [from, n] of months) {
+      db.prepare('DELETE FROM sleep_nights').run();
       datesFrom(from, n).forEach((d) => putLocal(d, TZ));
       const r = await get(`?period=month&date=${day(from, 10)}`);
       assert.equal(r.status, 200);
@@ -241,6 +240,23 @@ test('Melbourne: a week and a month across each clock change skip no date and do
     if (savedTz === undefined) delete process.env.TZ;
     else process.env.TZ = savedTz;
   }
+}
+
+test('Melbourne: a week and a month across each clock change skip no date and double none, and clock times stay wall clock', async () => {
+  // Thursday 2026-04-02 to Wednesday 2026-04-08: the clocks go back at 03:00 on Sunday the 5th, inside the night of
+  // the 4th. Thursday 2026-10-01 to Wednesday the 7th: forward at 02:00 on Sunday the 4th, inside the night of the 3rd.
+  await acrossClockChanges('Australia/Melbourne',
+    [['2026-04-05', '2026-04-02', '2026-04-04', 780], ['2026-10-04', '2026-10-01', '2026-10-03', 660]],
+    [['2026-04-01', 30], ['2026-10-01', 31]]);
+});
+
+test('New York: a week and a month across each clock change (the northern dates) skip no date and double none', async () => {
+  // Thursday 2025-03-06 to Wednesday 2025-03-12: forward at 02:00 on Sunday the 9th, inside the night of the 8th.
+  // Thursday 2025-10-30 to Wednesday 2025-11-05: back at 02:00 on Sunday 2 November, inside the night of the 1st, and
+  // the week crosses a month end as well.
+  await acrossClockChanges('America/New_York',
+    [['2025-03-09', '2025-03-06', '2025-03-08', 660], ['2025-11-02', '2025-10-30', '2025-11-01', 780]],
+    [['2025-03-01', 31], ['2025-11-01', 30]]);
 });
 
 test('the default date is today in the app timezone, not in UTC (one of the two zones always differs from UTC)', async () => {
@@ -353,6 +369,38 @@ test('the night in progress is a gap and is never counted, even fully watched', 
   assert.equal(r.body.summary.nights_counted, 5);
   assert.deepEqual(r.body.summary.asleep_minutes, { value: 700, n: 5, ready: true });
   assert.equal(r.body.period.complete, false);
+});
+
+test('a window end moved later: a night saved under its old window still counts as finished (nights_in_period >= nights_counted)', async () => {
+  // The case sleepAnalysis.js describes for computeNightForDisplay (rule 5): a 19:00-07:00 night is saved, the window
+  // end then becomes 09:00, and the report is opened at 08:00. The saved row's own window ended at 07:00, so the night
+  // counts; by TODAY's window last night is still running (lastCompletedNightDate is the night before). Codex review of
+  // PR #1239 found the report then said "7 of 6 nights". Run in a fixed-offset zone where it is 08:xx right now, so the
+  // case is real whatever time of day the suite runs at.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    db.prepare('DELETE FROM sleep_nights').run();
+    db.prepare("UPDATE children SET sleep_window_end = '07:00' WHERE id = ?").run(CHILD);
+    const offset = ((((8 - new Date().getUTCHours()) % 24) + 36) % 24) - 12; // whole hours east of UTC that make it 08:xx
+    const tz = offset === 0 ? 'UTC' : `Etc/GMT${offset > 0 ? '-' : '+'}${Math.abs(offset)}`; // Etc/ names flip the sign
+    setTz(tz);
+    const hourNow = () => Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+    const today = localToday(tz);
+    const weekStart = (isoWeekday(today) % 7) + 1; // a week that ends today
+    // Six nights, today-6 to last night, saved under 19:00-07:00: the newest ended at 07:00 today.
+    datesFrom(day(today, -6), 6).forEach((d) => putLocal(d, tz));
+    db.prepare("UPDATE children SET sleep_window_end = '09:00' WHERE id = ?").run(CHILD);
+    const r = await week(today, `&week_start=${weekStart}`);
+    if (hourNow() !== 8 || localToday(tz) !== today) continue; // the hour turned during the request: once more
+    assert.equal(lastCompletedNightDate(CHILD), day(today, -2), 'precondition: by today\'s window, last night is not over');
+    const s = r.body.summary;
+    assert.equal(r.body.nights[5].status_class, 'counted', 'last night counts by its own saved window');
+    assert.equal(s.nights_counted, 6);
+    assert.ok(s.nights_in_period >= s.nights_counted, `${s.nights_counted} of ${s.nights_in_period}`);
+    assert.equal(s.nights_in_period, 6, 'the six finished nights; tonight is not one of them');
+    assert.equal(r.body.period.complete, false);
+    return;
+  }
+  assert.fail('the local hour turned during both attempts');
 });
 
 test('coverage: 576 of 720 minutes watched (80%) counts; 575 is low_coverage with no figures', async () => {
@@ -512,6 +560,27 @@ test('show_sleep_score = 0 removes EVERY score key; best and worst are then by t
   assert.deepEqual(off.notes, on.notes);
 });
 
+test('a score of 0 is a score: it is kept on its night and counted in the median, never dropped as missing', async () => {
+  db.prepare('UPDATE children SET birthday = ? WHERE id = ?').run(BIRTHDAY, CHILD);
+  put('2025-03-10');
+  put('2025-03-11');
+  // A night at the floor of every part the early estimate can judge: a 300-minute span against an age figure of about
+  // 683 (duration 0), a third of it asleep, a 10-minute longest stretch and 25 wake-ups (continuity 0), put down two
+  // hours before falling asleep (settling 0). Restlessness and consistency need a usual, which 2 nights are not.
+  put('2025-03-12', { asleep_minutes: 100, awake_minutes: 200, wake_count: 25, longest_stretch_minutes: 10, in_bed_at: '2025-03-12 17:30:00' });
+  const oracle = datesFrom('2025-03-10', 3).map((d) => {
+    const input = toScoringInput(applyCorrection(CHILD, db.prepare('SELECT * FROM sleep_nights WHERE night_date = ?').get(d)));
+    return scoreNight(input, sleepBaseline(CHILD, input), ageMonthsOn(BIRTHDAY, d)).score;
+  });
+  assert.equal(oracle[2], 0, 'precondition: the scorer really gives this night 0');
+  assert.ok(oracle[0] > 0 && oracle[1] > 0, 'precondition: the other two have ordinary scores');
+
+  const r = (await week('2025-03-10')).body;
+  assert.equal(r.nights[2].score, 0);
+  assert.deepEqual(r.summary.score, { value: median(oracle), n: 3, ready: true });
+  assert.deepEqual(r.summary.worst_night, { date: '2025-03-12', score: 0 });
+});
+
 test('best and worst: by time asleep when the score is off, and a tie goes to the EARLIER night', () => {
   const night = (date, asleep) => ({ date, input: toScoringInput(nightRow(date, { asleep_minutes: asleep })), score: null });
   const counted = [night('2025-03-10', 600), night('2025-03-11', 700), night('2025-03-12', 500), night('2025-03-13', 700), night('2025-03-14', 500)];
@@ -563,7 +632,7 @@ test('unknown child: 404, before the parameters are looked at', async () => {
 
 test('bad parameters are a 400 with a plain message; a real leap day is not', async () => {
   const PERIOD = 'period must be week or month';
-  const DATE = 'date must be a real calendar date, as YYYY-MM-DD';
+  const DATE = 'date must be a real calendar date from 2000 to 2100, as YYYY-MM-DD';
   const WEEK = 'week_start must be a whole number from 1 (Monday) to 7 (Sunday)';
   const cases = [
     ['', PERIOD], ['?period=year', PERIOD], ['?period=Week', PERIOD], ['?period=week&period=month', PERIOD],
@@ -579,6 +648,33 @@ test('bad parameters are a 400 with a plain message; a real leap day is not', as
   const leap = await get('?period=month&date=2028-02-29&week_start=7');
   assert.equal(leap.status, 200);
   assert.deepEqual(leap.body.period, { kind: 'month', from: '2028-02-01', to: '2028-02-29', complete: false });
+});
+
+test('dates outside 2000 to 2100 are a 400; both ends are accepted and give valid periods (Codex review of PR #1239)', async () => {
+  // 9999-12-31 used to pass, and its week ran into year 10000, which toISOString writes as '+010000-01-02'.
+  const DATE = 'date must be a real calendar date from 2000 to 2100, as YYYY-MM-DD';
+  for (const date of ['1999-12-31', '2101-01-01', '9999-12-31']) {
+    for (const period of ['week', 'month']) {
+      const r = await get(`?period=${period}&date=${date}`);
+      assert.deepEqual([r.status, r.body], [400, { error: DATE }], `${period} ${date}`);
+    }
+  }
+  const shape = /^\d{4}-\d{2}-\d{2}$/;
+  const cases = [
+    // 2000-01-01 is a Saturday: its Monday week starts in 1999, and the previous week too (still plain dates).
+    ['week', '2000-01-01', '1999-12-27', '2000-01-02'],
+    ['month', '2000-01-01', '2000-01-01', '2000-01-31'],
+    // 2100-12-31 is a Friday: its Monday week starts on 2100-12-27 and ends in 2101, a valid date, not an overflow.
+    ['week', '2100-12-31', '2100-12-27', '2101-01-02'],
+    ['month', '2100-12-31', '2100-12-01', '2100-12-31'],
+  ];
+  for (const [period, date, from, to] of cases) {
+    const r = await get(`?period=${period}&date=${date}`);
+    assert.equal(r.status, 200, `${period} ${date}`);
+    assert.deepEqual([r.body.period.from, r.body.period.to], [from, to], `${period} ${date}`);
+    assert.ok(r.body.nights.every((n) => shape.test(n.date)), `${period} ${date}: every night date is YYYY-MM-DD`);
+    assert.equal(r.body.nights.at(-1).date, to);
+  }
 });
 
 test('admin and caregiver get the identical answer', async () => {

@@ -9,7 +9,7 @@
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import {
   FIGURE_TILES, UPCOMING_WORDS, canGoNext, canGoPrevious, changeText, chartModel, driftDomain, gapSummary, gapWords,
-  isCalendarDate, localeWeekStart, nextPeriodDate, periodTitle, previousPeriodDate, readReportParams, reportApiPath,
+  isCalendarDate, isReportShape, localeWeekStart, nextPeriodDate, periodTitle, previousPeriodDate, readReportParams, reportApiPath,
   reportQuery, slotLabel, slotName, spreadText, typicalText,
 } from '../src/lib/reportFormat.js';
 
@@ -371,6 +371,36 @@ describe('slot labels and names', () => {
     const f = { score: 90, asleep: null, wakes: null };
     expect(slotName({ date: '2026-11-03', kind: 'bar', band: 'great', figures: f })).toMatch(/score 90, Great$/);
     expect(slotName({ date: '2026-11-03', kind: 'bar', band: 'low', figures: { ...f, score: 40 } })).toMatch(/score 40$/);
+  });
+});
+
+describe('isReportShape: what the page may draw', () => {
+  const ok = () => ({
+    period: { kind: 'week', from: '2026-11-02', to: '2026-11-08', complete: true },
+    summary: {}, comparison: {}, nights: [{ date: '2026-11-02', status_class: 'counted' }],
+  });
+
+  test('accepts a report, with extra keys, extra night fields, no notes or any list of notes', () => {
+    expect(isReportShape(ok())).toBe(true);
+    expect(isReportShape({ ...ok(), brand_new: 1, notes: ['unknown_code', 3] })).toBe(true);
+    expect(isReportShape({ ...ok(), nights: [{ date: '2026-11-02', extra: {} }] })).toBe(true);
+    expect(isReportShape({ ...ok(), nights: [] })).toBe(true);
+  });
+
+  test.each([
+    ['null', null], ['a string', 'x'], ['an array', []],
+    ['nights holding null', { nights: [null] }],
+    ['nights holding a non-object', { nights: ['2026-11-02'] }],
+    ['a night with no date', { nights: [{ status_class: 'counted' }] }],
+    ['a night with a bad date', { nights: [{ date: '2026-02-31' }] }],
+    ['nights not a list', { nights: {} }],
+    ['bounds that are not dates', { period: { from: 'monday', to: '2026-11-08' } }],
+    ['no period', { period: undefined }],
+    ['a summary that is not an object', { summary: 'x' }],
+    ['no comparison', { comparison: undefined }],
+    ['notes that is not a list', { notes: 'context_changed' }],
+  ])('refuses %s', (_name, patch) => {
+    expect(isReportShape(patch === null || typeof patch === 'string' || Array.isArray(patch) ? patch : { ...ok(), ...patch })).toBe(false);
   });
 });
 

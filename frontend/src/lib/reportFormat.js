@@ -309,3 +309,21 @@ export function driftDomain(values, typical) {
   for (let t = lo; t <= hi; t += step) ticks.push(t);
   return { lo, hi, ticks };
 }
+
+// ---- the answer -----------------------------------------------------------------------------------------------------
+
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+// Is this answer one the page can draw? Checked at the door, because everything after it (chartModel, the arrows, the titles)
+// reads these pieces and a TypeError there would crash the whole page instead of showing the failed state: a proxy's page that
+// came back as a 200, or a server answering `nights: [null]`, must read as a failure. What is required is exactly what the page
+// reads: the period's bounds as real calendar dates, `nights` as a list of objects each with a real date, and `summary` and
+// `comparison` as objects. `notes`, when present, is a list. NOTHING ELSE is checked, so it stays forward compatible: an extra key,
+// an extra field on a night and a note code this build does not know are all accepted.
+export function isReportShape(r) {
+  return isObject(r)
+    && isObject(r.period) && isCalendarDate(r.period.from) && isCalendarDate(r.period.to)
+    && isObject(r.summary) && isObject(r.comparison)
+    && Array.isArray(r.nights) && r.nights.every((n) => isObject(n) && isCalendarDate(n.date))
+    && (r.notes === undefined || Array.isArray(r.notes));
+}

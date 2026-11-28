@@ -152,6 +152,24 @@ describe('loading, failed and empty are three different screens', () => {
     expect(screen.queryByText('No nights yet')).toBeNull();
   });
 
+  test('★ a 200 whose `nights` holds a null (valid-looking period and summary) is the failed screen, not a crash', async () => {
+    // The exact shape Codex found: string bounds, an object summary, nights [null]. chartModel used to throw reading n.date.
+    serve(() => ({ period: { kind: 'week', from: '2026-11-02', to: '2026-11-08', complete: true }, summary: {}, comparison: {}, nights: [null] }));
+    const { user } = mount();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t load this report.');
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+    expect(screen.queryByText('A typical night')).toBeNull();
+    expect(screen.queryByText('No nights yet')).toBeNull();
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+  });
+
+  test('★ forward compatible: an extra key on the report and on a night, and an unknown note, still draw', async () => {
+    serve(() => ({ ...report({ notes: ['a_new_code'] }), brand_new_key: { x: 1 }, nights: WEEK_NIGHTS.map((n) => ({ ...n, extra_field: 'x' })) }));
+    mount();
+    expect(await screen.findByText('A typical night')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   test('★ empty: a child with no saved night says reports appear after the first night, with no controls and no error', async () => {
     serve(() => report({ earliest_night_date: null, nights: [], previous: null, summary: { nights_counted: 0, nights_in_period: 0 }, comparison: {} }));
     mount();

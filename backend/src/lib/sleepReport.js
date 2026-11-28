@@ -95,12 +95,20 @@ const NIGHT_FIGURES = ['asleep_minutes', 'wake_count', 'longest_stretch_minutes'
 
 const DATE_PARTS = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-// A real calendar date, not just the shape: '2026-02-31' matches the pattern and is not a day (Date.UTC would quietly
-// roll it over to 3 March). Years before 100 are refused too, because Date.UTC reads them as 19xx.
+// The years a report may be asked for. Nightlight did not exist before 2000, so no saved night can predate it, and
+// the top end keeps every period and its neighbours inside four-digit years: toISOString writes a year past 9999 as
+// '+010000-...', so '9999-12-31' gave a week running into an invalid date string (Codex review of PR #1239). 2100 is
+// a generous bound, not a measured one; widening it is one line, as long as a week after it still ends before 10000.
+const MIN_YEAR = 2000;
+const MAX_YEAR = 2100;
+
+// A real calendar date in MIN_YEAR..MAX_YEAR, not just the shape: '2026-02-31' matches the pattern and is not a day
+// (Date.UTC would quietly roll it over to 3 March).
 export function isCalendarDate(s) {
   const m = typeof s === 'string' ? DATE_PARTS.exec(s) : null;
   if (!m) return false;
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (y < MIN_YEAR || y > MAX_YEAR) return false;
   const t = new Date(Date.UTC(y, mo - 1, d));
   return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
 }
@@ -138,7 +146,7 @@ function datesOf(from, to) {
 // `date` absent means today (buildSleepReport works it out); `week_start` absent means Monday (1).
 export function parseReportQuery({ period, date, week_start: weekStart } = {}) {
   if (period !== 'week' && period !== 'month') return { error: 'period must be week or month' };
-  if (date !== undefined && !isCalendarDate(date)) return { error: 'date must be a real calendar date, as YYYY-MM-DD' };
+  if (date !== undefined && !isCalendarDate(date)) return { error: `date must be a real calendar date from ${MIN_YEAR} to ${MAX_YEAR}, as YYYY-MM-DD` };
   if (weekStart !== undefined && !(typeof weekStart === 'string' && /^[1-7]$/.test(weekStart))) {
     return { error: 'week_start must be a whole number from 1 (Monday) to 7 (Sunday)' };
   }
@@ -243,7 +251,7 @@ function nightEntry(date, e, showScore) {
   if (!e) return { date, status_class: 'no_data' }; // no row at all for that date
   if (e.status_class !== 'counted') return { date, status_class: e.status_class };
   const out = { date, status_class: 'counted' };
-  if (showScore && e.score != null) out.score = e.score;
+  if (showScore && e.score != null) out.score = e.score; // != null, not truthiness: a score of 0 is a score
   for (const key of NIGHT_FIGURES) {
     const m = e.input.metrics[FIGURES[key]];
     if (m.usable) out[key] = m.value;
@@ -292,8 +300,13 @@ export function buildSleepReport(child, { kind, date = null, weekStart = 1, nowM
   const periodOf = (p) => {
     const dates = datesOf(p.from, p.to);
     const counted = dates.map((d) => byDate.get(d)).filter((e) => e?.status_class === 'counted');
-    // Dates up to and including the last finished night: all of them once the period is over, fewer "so far".
-    const nightsInPeriod = dates.filter((d) => d <= lastComplete).length;
+    // Dates up to and including the last finished night: all of them once the period is over, fewer "so far". A date
+    // whose saved night COUNTS is finished too, whatever today's window says: it counted because its OWN saved window
+    // has ended (toScoringInput's in_progress), while lastCompletedNightDate reads TODAY's window. The two disagree
+    // after a window end is moved later (the case sleepAnalysis.js documents for computeNightForDisplay, rule 5: saved
+    // under a 07:00 end, the end becomes 09:00, the report opened at 08:00), and without this the answer said
+    // "7 of 6 nights" (Codex review of PR #1239). nights_in_period can therefore never be below nights_counted.
+    const nightsInPeriod = dates.filter((d) => d <= lastComplete || byDate.get(d)?.status_class === 'counted').length;
     return { dates, counted, summary: summariseNights(counted, { showScore, nightsInPeriod }) };
   };
   const cur = periodOf(current);
