@@ -74,15 +74,27 @@ function usePageVisible() {
 function useScreenWakeLock() {
   useEffect(() => {
     let lock = null;
+    let requesting = false;
     let cancelled = false;
     async function acquire() {
-      if (!('wakeLock' in navigator)) return;
+      // One request at a time and none while a lock is held: a visibility event during the first (still pending) request
+      // would otherwise start a second, and the first result would be overwritten and never released (Codex review of
+      // #1238). The browser drops the lock when the page is hidden and says so with a 'release' event, which is what
+      // makes the next visible event allowed to ask again.
+      if (lock || requesting || !('wakeLock' in navigator)) return;
+      requesting = true;
       try {
         const l = await navigator.wakeLock.request('screen');
-        if (cancelled) l.release().catch(() => {});
-        else lock = l;
+        if (cancelled) {
+          l.release().catch(() => {});
+        } else {
+          lock = l;
+          l.addEventListener?.('release', () => { if (lock === l) lock = null; });
+        }
       } catch {
         // refused: non-fatal
+      } finally {
+        requesting = false;
       }
     }
     acquire();
@@ -322,6 +334,13 @@ export default function TvMonitor() {
   const ids = useMemo(() => new Set(visible.map((cam) => cam.id)), [visible]);
   const listening = listeningId && ids.has(listeningId) ? listeningId : null;
   const full = fullId && ids.has(fullId) ? fullId : null;
+  // ...and it must be FORGOTTEN, not just hidden: if the same camera comes back (a camera switched off and on again,
+  // a flaky list read) its fresh tile would otherwise mount unmuted, or full screen, with no key pressed (Codex review of
+  // #1238). The TV always starts muted; a returning camera is a new tile.
+  useEffect(() => {
+    if (listeningId && !ids.has(listeningId)) setListeningId(null);
+    if (fullId && !ids.has(fullId)) setFullId(null);
+  }, [ids, listeningId, fullId]);
 
   const cols = tvColumns(visible.length);
   const rows = tvRows(visible.length);

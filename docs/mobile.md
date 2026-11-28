@@ -176,7 +176,7 @@ Watch your cameras on a TV with a remote: big live tiles, no menus, one button t
 
 A one-line reminder of the keys sits under the tiles on your first launches. Move down to it and press OK to hide it; it stays hidden on that TV.
 
-**What is not on the TV.** Live cameras only. There are no settings, sleep, history, alerts or recordings, no talking back through a camera, no Picture-in-Picture, no reordering and no zoom. Cameras appear in the order set on your server, and cameras an admin has turned off are not shown. The TV only reads from your server; it never changes anything. To change something, use the app on your phone or the website.
+**What is not on the TV.** Live cameras only. There are no settings, sleep, history, alerts or recordings, no talking back through a camera, no Picture-in-Picture, no reordering and no zoom. Cameras appear in the order set on your server, and cameras an admin has turned off are not shown. The TV never changes your cameras, settings or data: it only watches. (Watching does open a live stream with the server for each tile and closes it again, as the phone does.) To change something, use the app on your phone or the website.
 
 **Sound works differently from the phone app.**
 

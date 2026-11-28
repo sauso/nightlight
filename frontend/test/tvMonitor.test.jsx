@@ -261,6 +261,16 @@ describe('★ OK toggles listening: the listening tile is the ONLY unmuted one',
     expect(document.querySelectorAll('.tv-badge--on')).toHaveLength(0);
   });
 
+  test('★ a camera that disappears and then RETURNS comes back muted: nothing resumes without a key press', () => {
+    const { rerenderWith } = mount();
+    ok(); // c1 listens
+    expect(muted('p1')).toBe('false');
+    rerenderWith({ cameras: CAMS.slice(1) });
+    rerenderWith({ cameras: CAMS });
+    expect(['p1', 'p2', 'p3'].map(muted)).toEqual(['true', 'true', 'true']);
+    expect(document.querySelectorAll('.tv-badge--on')).toHaveLength(0);
+  });
+
   test('clicking a tile (a mouse, in a desktop preview) toggles it the same way', () => {
     mount();
     fireEvent.click(tile('c3'));
@@ -449,6 +459,25 @@ describe('keeping the TV awake', () => {
       await act(async () => {});
       expect(request).toHaveBeenCalledWith('screen');
       expect(release).not.toHaveBeenCalled();
+      view.unmount();
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      delete navigator.wakeLock;
+    }
+  });
+
+  test('★ a visibility event while the first request is still pending does not start a second one that is never released', async () => {
+    const release = vi.fn().mockResolvedValue(undefined);
+    let resolveFirst;
+    const request = vi.fn().mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }));
+    Object.defineProperty(navigator, 'wakeLock', { value: { request }, configurable: true });
+    try {
+      const view = mount();
+      await act(async () => {});
+      document.dispatchEvent(new Event('visibilitychange')); // jsdom: visibilityState is 'visible'
+      await act(async () => {});
+      expect(request).toHaveBeenCalledTimes(1); // still pending: no second request
+      await act(async () => { resolveFirst({ release, addEventListener: () => {} }); });
       view.unmount();
       expect(release).toHaveBeenCalledTimes(1);
     } finally {
