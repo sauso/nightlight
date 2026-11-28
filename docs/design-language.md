@@ -1127,7 +1127,7 @@ A read-only page at `/children/:id/reports`, open to every signed-in user (admin
 - **Tiles** (`<dl>`, two to a row on a phone, `minmax(150px, 1fr)`): the typical value in 22px tabular numbers, then the change against the period
   before as an arrow icon AND words ("up 8 points", "15 minutes later", "steady", "not enough nights to compare"), in the text colour: a
   change is never coloured good or bad. The words come from the server's `direction`; only the size is rounded here. A figure that is
-  not ready reads "Not enough nights yet", never a dash or a zero. The clock tiles add how much the times varied, rounded ("half of nights
+  not ready reads "Not measured on enough of these nights" when nights counted but this figure was usable on fewer of them (older nights have no timezone, so no clock times), and "Not enough nights yet" when every counted night was measured and there are still too few; never a dash or a zero. The clock tiles add how much the times varied, rounded ("half of nights
   within about 20 minutes"). The score tile has a 4px band mark beside the number and the band word after it; with the score switch
   off there is no score tile, no band colour and the word "score" is on no screen and in no accessible name. The labels are "Fell asleep" and
   "Got up", not "bedtime": the figures are the detected sleep and wake times, not the put-down.

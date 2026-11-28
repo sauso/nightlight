@@ -327,3 +327,18 @@ export function isReportShape(r) {
     && Array.isArray(r.nights) && r.nights.every((n) => isObject(n) && isCalendarDate(n.date))
     && (r.notes === undefined || Array.isArray(r.notes));
 }
+
+// What a tile says in place of a figure the server calls not ready. Two different truths, and they must not share words:
+//   - "Not enough nights yet": the period itself has too few nights (every counted night was measured and there are still too few);
+//   - "Not measured on enough of these nights": there ARE counted nights, but this figure was usable on fewer of them than it
+//     needs (a night saved by an older version has no timezone, so no clock times; a night with no confirmed wake has no time
+//     asleep). Saying "not enough nights" there reads as a quiet month and sends a parent to wait for nights that already happened.
+// Told apart from the data, with no number of the server's repeated: the figure's own `n` (the nights it WAS usable on) is
+// fewer than the counted nights. (The page only draws tiles when some other figure is ready, so a period with too few nights for
+// anything gets the "Not enough nights yet" card, not tiles.)
+export function notReadyWords(figure, nightsCounted) {
+  const measured = figure?.n;
+  return Number.isFinite(measured) && Number.isFinite(nightsCounted) && measured < nightsCounted
+    ? 'Not measured on enough of these nights'
+    : 'Not enough nights yet';
+}

@@ -10,7 +10,7 @@ import { DriftCard, NightBars } from '../components/ReportCharts.jsx';
 import { bandOfValue, bandWord, minutesText } from '../lib/sleepScoreText.js';
 import { formatDayKey } from '../lib/homeTime.js';
 import {
-  FIGURE_TILES, isReportShape, canGoNext, canGoPrevious, changeText, chartModel, gapSummary, localeWeekStart, nextPeriodDate,
+  FIGURE_TILES, isReportShape, notReadyWords, canGoNext, canGoPrevious, changeText, chartModel, gapSummary, localeWeekStart, nextPeriodDate,
   periodTitle, periodWord, previousPeriodDate, readReportParams, reportApiPath, reportQuery, spreadText, typicalText,
 } from '../lib/reportFormat.js';
 
@@ -169,7 +169,7 @@ function ReportBody({ report, kind, childId }) {
           <section aria-labelledby="report-typical-h">
             <h2 className="section-title" id="report-typical-h">A typical night</h2>
             <dl className="report-tiles">
-              {tiles.map((t) => <Tile key={t.key} spec={t} figure={summary[t.key]} comparison={comparison?.[t.key]} />)}
+              {tiles.map((t) => <Tile key={t.key} spec={t} figure={summary[t.key]} comparison={comparison?.[t.key]} counted={counted} />)}
             </dl>
             <p className="report-hint">
               {report.previous
@@ -215,14 +215,14 @@ function Insufficient({ counted, inPeriod, word }) {
 }
 
 // One figure: the typical value in tabular numbers, then the change against the previous period as an arrow AND words. A figure
-// the server calls not ready is "Not enough nights yet", never a dash or a zero.
-function Tile({ spec, figure, comparison }) {
+// the server calls not ready says why in words (notReadyWords), never a dash or a zero.
+function Tile({ spec, figure, comparison, counted }) {
   const text = figure?.ready ? typicalText(spec.key, figure.value) : null;
   if (text === null) {
     return (
       <div className="report-tile">
         <dt className="report-tile__label">{spec.label}</dt>
-        <dd className="report-tile__value report-tile__value--none">Not enough nights yet</dd>
+        <dd className="report-tile__value report-tile__value--none">{notReadyWords(figure, counted)}</dd>
       </div>
     );
   }

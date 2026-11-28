@@ -9,7 +9,7 @@
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import {
   FIGURE_TILES, UPCOMING_WORDS, canGoNext, canGoPrevious, changeText, chartModel, driftDomain, gapSummary, gapWords,
-  isCalendarDate, isReportShape, localeWeekStart, nextPeriodDate, periodTitle, previousPeriodDate, readReportParams, reportApiPath,
+  isCalendarDate, isReportShape, localeWeekStart, notReadyWords, nextPeriodDate, periodTitle, previousPeriodDate, readReportParams, reportApiPath,
   reportQuery, slotLabel, slotName, spreadText, typicalText,
 } from '../src/lib/reportFormat.js';
 
@@ -401,6 +401,21 @@ describe('isReportShape: what the page may draw', () => {
     ['notes that is not a list', { notes: 'context_changed' }],
   ])('refuses %s', (_name, patch) => {
     expect(isReportShape(patch === null || typeof patch === 'string' || Array.isArray(patch) ? patch : { ...ok(), ...patch })).toBe(false);
+  });
+});
+
+describe('notReadyWords', () => {
+  test('★ fewer usable nights than counted nights is "not measured"; usable on all of them is "not enough nights"', () => {
+    expect(notReadyWords({ n: 2, ready: false }, 7)).toBe('Not measured on enough of these nights');
+    expect(notReadyWords({ n: 0, ready: false }, 30)).toBe('Not measured on enough of these nights');
+    expect(notReadyWords({ n: 1, ready: false }, 1)).toBe('Not enough nights yet');
+    expect(notReadyWords({ n: 2, ready: false }, 2)).toBe('Not enough nights yet');
+  });
+
+  test('missing numbers fall back to the plain words, never "undefined"', () => {
+    expect(notReadyWords(undefined, 7)).toBe('Not enough nights yet');
+    expect(notReadyWords({ ready: false }, 7)).toBe('Not enough nights yet');
+    expect(notReadyWords({ n: 2 }, undefined)).toBe('Not enough nights yet');
   });
 });
 

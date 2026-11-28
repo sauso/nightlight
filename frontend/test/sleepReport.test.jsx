@@ -452,12 +452,38 @@ describe('the typical night', () => {
     });
   });
 
-  test('★ a figure that is not ready says "Not enough nights yet": no dash, no zero, no NaN', async () => {
+  test('★ a figure not ready on a period with counted nights says "Not measured on enough of these nights", not "not enough nights"', async () => {
+    // 7 nights counted, the settling figure usable on only 2 of them (real data: nights saved without a timezone have no clock times).
+    serve(() => report({ summary: { ...SUMMARY, nights_counted: 7, settle_minutes: notReady(2), onset_clock: { ...notReady(0), spread: null } } }));
+    mount();
+    await screen.findByText('A typical night');
+    expect(within(tile('Settling time')).getByText('Not measured on enough of these nights')).toBeInTheDocument();
+    expect(within(tile('Fell asleep')).getByText('Not measured on enough of these nights')).toBeInTheDocument();
+    expect(screen.queryByText('Not enough nights yet')).toBeNull();
+  });
+
+  test('★ a figure measured on every counted night but still too few keeps "Not enough nights yet"', async () => {
+    serve(() => report({ summary: { ...SUMMARY, nights_counted: 2, settle_minutes: notReady(2) } }));
+    mount();
+    await screen.findByText('A typical night');
+    expect(within(tile('Settling time')).getByText('Not enough nights yet')).toBeInTheDocument();
+    expect(screen.queryByText('Not measured on enough of these nights')).toBeNull();
+  });
+
+  test('with one counted night the whole page says "Not enough nights yet" (the card), never "not measured"', async () => {
+    const thin = Object.fromEntries(['score', 'asleep_minutes', 'wake_count', 'longest_stretch_minutes', 'settle_minutes', 'onset_clock', 'wake_clock'].map((k) => [k, notReady(1)]));
+    serve(() => report({ summary: { nights_counted: 1, nights_in_period: 7, ...thin, best_night: null, worst_night: null }, previous: null, comparison: {} }));
+    mount();
+    expect(await screen.findByRole('heading', { name: 'Not enough nights yet' })).toBeInTheDocument();
+    expect(screen.queryByText('Not measured on enough of these nights')).toBeNull();
+  });
+
+  test('★ a figure that is not ready shows words, no dash, no zero, no NaN', async () => {
     serve();
     mount();
     await screen.findByText('A typical night');
     const settle = tile('Settling time');
-    expect(within(settle).getByText('Not enough nights yet')).toBeInTheDocument();
+    expect(within(settle).getByText('Not measured on enough of these nights')).toBeInTheDocument();
     expect(settle.textContent).not.toMatch(/NaN|null|undefined/);
     expect(settle.textContent).not.toMatch(/\b0m\b|^Settling time0/);
     expect(document.body.textContent).not.toMatch(/NaN|undefined/);

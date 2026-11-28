@@ -985,8 +985,9 @@ see it. The page opens on the current week.
   and a line under the chart says why; tap a bar to open that night. Beneath it, two small charts show the
   clock times they fell asleep and got up, one dot a night, with the typical time and about where half the
   nights fell.
-- A figure with too few nights reads **Not enough nights yet**, never a zero. With too few nights for any
-  figure the page says so and still shows the chart.
+- A figure that was usable on too few of the counted nights reads **Not measured on enough of these nights**,
+  never a zero (see [Known limits of reports](#known-limits-of-reports)). With too few nights for any figure
+  the page says **Not enough nights yet** and still shows the chart.
 - With the child's [Show sleep score](#turning-the-score-off) switch off, the page has no score and no score
   colours; the bars are time asleep, and the extremes are the most and the least sleep.
 - The page only reads. It sends nothing and changes nothing.
@@ -1052,7 +1053,9 @@ A change smaller than this is called about the same:
 | Settling | 5 minutes |
 | Fell asleep, got up | 15 minutes |
 
-These were chosen by judgement, not measured on anyone's nights, and they are not settings.
+These were chosen by judgement, not measured on anyone's nights, and they are not settings. They are amounts,
+not percentages: a settling time of 20 minutes that changes by 4 reads as about the same, and so does one of
+3 minutes that changes by 4.
 
 ### Known limits of reports
 
@@ -1062,8 +1065,19 @@ These were chosen by judgement, not measured on anyone's nights, and they are no
   from more than one camera or window, the report says that comparisons may be affected. It does not correct
   for it. Nights saved before the camera and window were recorded with each night count as unknown settings,
   so beside newer nights they also bring that note.
-- Moving or re-aiming the **same** camera is not noticed. A month across such a move mixes two views of the
-  bed, and the counted wake-ups can change a lot with the view.
+- Moving or re-aiming the **same** camera is not noticed, because the camera keeps its id. A month across
+  such a move mixes two views of the bed, and the counted wake-ups can change a lot with the view. The week
+  after a move can read as a change in wake-ups or sleep that is really the new view. This is the same limit
+  as the score's usual.
+- Nights saved by an older version of Nightlight carry no timezone, so their fell-asleep and got-up times are
+  not worked out. An older week or month can show every night counted and still have no fell-asleep or
+  got-up figure; the tile then reads **Not measured on enough of these nights**. Time asleep and wake-ups
+  are not affected. The same words show when a figure was usable on too few of the counted nights, for
+  example time asleep when most nights had no confirmed wake-up.
+- A night with very little measured sleep still counts like any other night, as it does on the night card.
+  This happens, for example, in the days around moving or reinstalling a camera, when only minutes were
+  watched. Such a night can pull a week's typical fell-asleep or got-up time, and how much those vary, a long
+  way. Correct it in the morning review ("No one was in the bed") and it drops out of the report.
 - Wake-up counts depend heavily on the camera's angle. Compare a child with themselves, not with another child.
 - A sleep window that ends near midday can give a wrong typical clock time, because times are counted from
   noon.
