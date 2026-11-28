@@ -182,7 +182,8 @@ makes the same kind of sign-in.
 extended). The code on the TV works once, for 10 minutes.
 
 **How to end it:** it is in the session lists (Account, and Settings → Users for an admin) like any sign-in; the next
-update marks its row as a TV, with the device that approved it. **Sign out** on its row ends it. Signing out the phone
+update marks its row as a TV, with the device that approved it (as that device's browser described itself: see the
+limits below). **Sign out** on its row ends it. Signing out the phone
 or computer that approved it **from the session list** also ends the TV; signing out on that phone itself does not, so
 signing out your phone does not switch off the living-room TV. Disabling or removing the account ends it, and so does
 changing the password from another device.
@@ -191,14 +192,19 @@ changing the password from another device.
 connect that TV, and they must type it (a QR code only opens the page; nothing fills the code in). The TV's own half of
 the pairing is 256 random bits that only the TV holds and the server stores only as a hash; it is in no log, list or
 link. When the TV collects its sign-in, the approval is checked again: if the sign-in that approved it has ended since,
-or the account was disabled, the TV is refused. An account can have at most 5 TV sign-ins. Each approval and each TV
-that signs in is written to the server log, with the account, the TV's name and device, and the approving device.
+or the account was disabled, the TV is refused. An account can have at most 5 TVs, counting the ones it has approved
+that have not connected yet. Each approval and each TV that signs in is written to the server log, with the account,
+the TV's name and device, and the approving device.
 
 **Known limits:**
 
 - **Only approve a code you can see on your own TV.** Approving a code someone sent you gives them view-only access to
   your cameras until it is signed out. The approval page shows the TV's name in quotes beside its device; the name is
   whatever the TV chose to call itself, so a laptop can call itself "Living room TV".
+- **The device strings are not proof of anything.** The TV's device on the approval page, and the approving device on
+  the TV's row and in the log, are each read from what that device's own browser reports about itself (its User-Agent),
+  so they can be made up, and different devices can look the same: a phone and an Android TV can both read "Chrome on
+  Android". Treat them as a hint, never as a check that it is your TV or your phone.
 - **A phone left unlocked and signed in, or a stolen sign-in, can connect a TV that outlives it.** Everything else that
   sign-in can do ends when it ends; a TV it connected lasts up to 30 days (a sign-in on its 29th day can connect a TV
   that lasts to day 59). Approving asks for no password or code. What ends that TV: signing out its row, signing out the
@@ -210,8 +216,10 @@ that signs in is written to the server log, with the account, the TV's name and 
 - The limits on pairing are kept in memory (a restart empties them), and behind a reverse proxy without `TRUST_PROXY`
   every remote device has the same address. **A TV that is not on your home network needs `TRUST_PROXY` set**
   ([remote access](docs/remote-access.md#trust_proxy--telling-nightlight-your-real-client-addresses)), or one internet
-  client can keep remote pairing busy. Many devices on your network (or many Tailscale accounts) can still hold every
-  waiting slot for ten minutes and delay a pairing; the TV's password sign-in is the fallback.
+  client can keep remote pairing busy. Even with it set, at most 20 pairings wait at once, and when every address holds
+  just one, a new start pushes out the oldest waiting pairing, which can be yours: someone with about 20 internet
+  addresses (easy with IPv6), many devices on your network, or many Tailscale accounts can keep doing that and delay a
+  pairing. The TV's password sign-in is the fallback.
 - If the TV never receives its sign-in after it was approved (a dropped connection), the TV pairs again, and the unused
   TV sign-in stays in the list until it expires. Nobody holds it, so it is harmless; sign it out.
 - A password typed on a TV in the ordinary sign-in page makes an ordinary sign-in; only the pairing and the pairing
@@ -222,8 +230,9 @@ that signs in is written to the server log, with the account, the TV's name and 
 - A clock moved backwards can make a code that has run out work again, until the real time passes its expiry.
 - Restoring a database backup restores its sign-ins and any waiting pairings; a TV you signed out comes back with an old
   backup if the signing secret is restored too. Sign it out again.
-- The TV's name is plain text, at most 40 characters, with line breaks and control and text-direction characters taken
-  out; nothing shows it as markup. Names in other alphabets are shown as typed.
+- The TV's name is plain text, at most 40 characters, with line breaks, control and text-direction characters and
+  characters that draw nothing (zero-width spaces, Hangul fillers and the like) taken out; a name with nothing visible
+  left is no name. Nothing shows it as markup. Names in other alphabets are shown as typed.
 - Not tried yet: a real TV remote with the pairing screen, a phone on mobile data scanning a QR code for a home-network
   address (it will not open; typing the code in Nightlight at your usual address works), a TV behind a reverse proxy.
 

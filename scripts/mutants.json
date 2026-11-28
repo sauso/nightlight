@@ -27143,11 +27143,30 @@
   {
     "label": "#1237 pairing: approve allows a 6th TV session (the cap's boundary)",
     "file": "backend/src/routes/auth.js",
-    "find": "  if (liveTvSessionCount(userId) >= TV_SESSIONS_PER_USER) throw new TvLimitError();",
-    "replace": "  if (liveTvSessionCount(userId) > TV_SESSIONS_PER_USER) throw new TvLimitError();",
+    "find": "  if (held >= TV_SESSIONS_PER_USER) throw new TvLimitError();",
+    "replace": "  if (held > TV_SESSIONS_PER_USER) throw new TvLimitError();",
     "expect": "killed",
     "tests": ["tv-pairing.test.js"],
-    "namePattern": "at 5, approve answers 409"
+    "namePattern": "at 5, approve answers 409|approvals not yet collected count too"
+  },
+  {
+    "label": "#1237 pairing: approve counts TV sessions only (approvals not yet collected are free, so one account can fill every slot)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  const held = liveTvSessionCount(userId) + approvedNotCollected.get(userId, row.id, now).n;",
+    "replace": "  const held = liveTvSessionCount(userId);",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "approvals not yet collected count too",
+    "note": "Review of PR 1b, Opus probe P2."
+  },
+  {
+    "label": "#1237 pairing: approve counts the pairing being approved against its own cap (the 5th approval is refused)",
+    "file": "backend/src/routes/auth.js",
+    "find": "approved_at IS NOT NULL AND id != ? AND ${LIVE_PAIRING}",
+    "replace": "approved_at IS NOT NULL AND (id != ? OR 1) AND ${LIVE_PAIRING}",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "approvals not yet collected count too"
   },
   {
     "label": "#1237 pairing: the claim makes an ORDINARY session (kind user)",
@@ -27287,12 +27306,59 @@
     "namePattern": "rides in the MFA token"
   },
   {
-    "label": "#1237 pairing: a label keeps its bidi controls",
+    "label": "#1237 pairing: a label keeps its format characters (bidi controls, zero-width spaces, tag characters)",
     "file": "backend/src/lib/tvPairing.js",
-    "find": "    .replace(BIDI_CONTROLS, '')",
-    "replace": "    .replace(BIDI_CONTROLS, (bidi) => bidi)",
+    "find": "\\p{Cc}\\p{Cf}\\p{Cs}",
+    "replace": "\\p{Cc}\\p{Cs}",
     "expect": "killed",
     "tests": ["tv-pairing.test.js"],
     "namePattern": "sanitiseLabel"
+  },
+  {
+    "label": "#1237 pairing: a label of nothing but joiners is kept (it shows blank)",
+    "file": "backend/src/lib/tvPairing.js",
+    "find": "  return SOMETHING_VISIBLE.test(clamped) ? clamped : null;",
+    "replace": "  return clamped || null;",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "a label of nothing visible is null"
+  },
+  {
+    "label": "#1237 pairing: a typed code is upper-cased before the ASCII check (the long s and the ligatures pass)",
+    "file": "backend/src/lib/tvPairing.js",
+    "find": "  if (!TYPED_CODE_SHAPE.test(stripped)) return null;",
+    "replace": "  void TYPED_CODE_SHAPE;",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "upper-case INTO the alphabet",
+    "note": "Review of PR 1b, Codex and Opus."
+  },
+  {
+    "label": "#1237 pairing: the per-bucket eviction takes another bucket's pairing",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE client_bucket = ? AND approved_at IS NULL AND ${LIVE_PAIRING}",
+    "replace": "WHERE (client_bucket = ? OR 1) AND approved_at IS NULL AND ${LIVE_PAIRING}",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "fourth start from one bucket",
+    "note": "Survived review of PR 1b until the other bucket's pairing was made the oldest of all."
+  },
+  {
+    "label": "#1237 pairing: a refused claim marks every pairing denied, not only its own",
+    "file": "backend/src/routes/auth.js",
+    "find": "'UPDATE tv_pairings SET denied_at = ? WHERE device_hash = ? AND denied_at IS NULL'",
+    "replace": "'UPDATE tv_pairings SET denied_at = ? WHERE (device_hash = ? OR 1) AND denied_at IS NULL'",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "refused claim answers"
+  },
+  {
+    "label": "#1237 pairing: the global cap is 5, not 20",
+    "file": "backend/src/routes/auth.js",
+    "find": "const PAIRINGS_IN_ALL = 20;",
+    "replace": "const PAIRINGS_IN_ALL = 5;",
+    "expect": "killed",
+    "tests": ["tv-pairing.test.js"],
+    "namePattern": "below 20 live pairings"
   }
 ]

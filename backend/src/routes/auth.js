@@ -1973,7 +1973,8 @@ const POLL_SLOW_DOWN_MS = 2000;
 const PAIRINGS_PER_BUCKET = 3;
 const PAIRINGS_IN_ALL = 20;
 // Design §3 row 14 (d): at most this many live TV sessions per account. A borrowed or stolen session can pair a TV that
-// outlives it (up to SESSION_TTL_DAYS); this bounds how many such footholds one account can collect. A household with
+// outlives it (up to SESSION_TTL_DAYS); this bounds how many such footholds one account can collect, and (counting its
+// approvals not yet collected too, at approve) how many waiting slots one account can hold. A household with
 // more TVs than this on one account signs an old one out first (the session lists), or pairs the rest from another
 // account; SECURITY.md states the number. A judgement, not a measurement.
 const TV_SESSIONS_PER_USER = 5;
@@ -2194,11 +2195,23 @@ class TvLimitError extends Error {}
 // the pairing is still pending and a person who revokes an old TV can approve the same code again. In this order so the
 // UPDATE's guard is the one and only check on the pairing's state (a separate read before it would hide a weakened
 // guard from every test). Answers the approved row, or null when the code named nothing that can be approved.
+//
+// The cap counts the account's live TV sessions AND its other approvals that no TV has collected yet (review of PR 1b,
+// Opus probe P2). Approving costs nothing and an approved row is never evicted (startPairing), so counting TV sessions
+// alone let ONE signed-in account approve pairings until it held every one of the PAIRINGS_IN_ALL slots, for ten
+// minutes at a time, and nobody else could start one. With this, one account holds at most TV_SESSIONS_PER_USER of
+// them. The row just approved is left out: it is the one asking. The claim (claimPairing) still counts TV sessions
+// only, as before: by then the approval it collects is the one being counted.
+const approvedNotCollected = db.prepare(
+  `SELECT COUNT(*) AS n FROM tv_pairings WHERE user_id = ? AND approved_at IS NOT NULL AND id != ? AND ${LIVE_PAIRING}`
+);
 const approvePairing = db.transaction((userCode, userId, sessionId, approvedFrom) => {
   const now = utcText(Date.now());
   if (approvePairingRow.run(userId, sessionId, approvedFrom, now, userCode, now).changes !== 1) return null;
-  if (liveTvSessionCount(userId) >= TV_SESSIONS_PER_USER) throw new TvLimitError();
-  return pairingByCode.get(userCode);
+  const row = pairingByCode.get(userCode);
+  const held = liveTvSessionCount(userId) + approvedNotCollected.get(userId, row.id, now).n;
+  if (held >= TV_SESSIONS_PER_USER) throw new TvLimitError();
+  return row;
 });
 
 // Thrown inside claimPairing for a claim that must not make a session; carries the reason for the log. Never sent.
@@ -2335,7 +2348,8 @@ router.post('/device/pending', requireAuth, pairCodeLimiter, (req, res) => {
 // session (approved_by_session, re-checked at the claim and copied onto the TV session as paired_by_session), and from
 // which device (approved_from, the approving request's browser string; the TV session's paired_from). No password or
 // code is asked for again (design §12.2, the owner's decision; the consequence is stated in SECURITY.md). 409 tv_limit at
-// TV_SESSIONS_PER_USER live TV sessions; the pairing then stays pending.
+// TV_SESSIONS_PER_USER live TV sessions and approvals not yet collected (see approvePairing); the pairing then stays
+// pending.
 router.post('/device/approve', requireAuth, pairCodeLimiter, (req, res) => {
   const code = normaliseUserCode(req.body?.user_code);
   const approvedFrom = describeDevice(req.headers['user-agent']);

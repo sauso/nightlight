@@ -530,16 +530,20 @@ CASCADE`), `approved_by_session` (no foreign key) and `approved_from`. No `claim
 
 **Codes.** `device_code`: 32 random bytes, base64url (43 characters), the TV's secret, sent only in POST bodies.
 `user_code`: 8 symbols of `BCDFGHJKMNPQRSTVWXYZ` (no vowels, digits or `L`) from `crypto.randomInt`, shown `BCDF-GHJK`,
-accepted in any case with or without a dash or spaces; a code another row holds is drawn again. A pairing lives 10
-minutes. The label is plain text: whitespace becomes a space, control characters (C0, DEL, C1), the bidirectional
-controls and lone surrogates are removed, and it is clamped to 40 code points.
+accepted in any case with or without spaces (`\s`) and dash punctuation (`\p{Pd}`), and only when what is left is 8 ASCII
+letters before it is upper-cased (so the long s and the `st`/`ff` ligatures, which upper-case into ASCII letters, are
+refused); a code another row holds is drawn again. A pairing lives 10 minutes. The label is plain text: whitespace
+becomes a space; control characters (`\p{Cc}`), lone surrogates, every format character (`\p{Cf}`: the bidirectional
+controls, zero-width spaces, the word joiner, tag characters) except the zero-width joiner U+200D, and the Hangul
+fillers U+115F, U+1160, U+3164 and U+FFA0 are removed; it is clamped to 40 code points, and a label with nothing visible
+left is null.
 
 | Route | Gate | Request | Answer |
 |---|---|---|---|
 | `POST /api/auth/device/start` | public | `{ label? }` | `{ device_code, user_code, expires_in: 600, interval: 3 }`; `400` for a label that is not text; `429 { "error": "pair_busy" }` when nothing can be evicted |
 | `POST /api/auth/device/poll` | public | `{ device_code }` | always `200`: `{ status: "pending" \| "slow_down" \| "denied" \| "expired" }`, or `{ status: "approved", token, user }` (the `/login` shape, `role: "caregiver"`, `kind: "tv"`); only the limiter answers `429` |
 | `POST /api/auth/device/pending` | signed in | `{ user_code }` | `{ label, device, created_at }` |
-| `POST /api/auth/device/approve` | signed in | `{ user_code }` | `{ ok: true }`; `409 { "error": "tv_limit" }` at 5 live TV sessions (the pairing stays pending) |
+| `POST /api/auth/device/approve` | signed in | `{ user_code }` | `{ ok: true }`; `409 { "error": "tv_limit" }` when the account's live TV sessions plus its other approvals not yet collected reach 5 (the pairing stays pending) |
 | `POST /api/auth/device/deny` | signed in | `{ user_code }` | `{ ok: true }` |
 
 The three signed-in routes answer every code that names nothing they can act on (unknown, malformed, expired, approved,
@@ -563,7 +567,11 @@ fast); an approved pairing is collected at the first poll.
 **Caps** (live = not expired, not denied). Every start first deletes the expired and denied rows (a daily
 `purgeTvPairings` in `index.js` is the backstop), then: a bucket (`clientBucketKey`) at 3 live rows evicts its own oldest
 unapproved row; otherwise a table at 20 live rows evicts the oldest unapproved row of the bucket with the most live rows;
-with nothing unapproved to evict, `429 pair_busy`. An approved row that is not yet collected is never evicted.
+with nothing unapproved to evict, `429 pair_busy`. An approved row that is not yet collected is never evicted, and the
+approve's cap of 5 counts such rows, so one account cannot approve its way into every slot. Known limit: when every
+bucket holds one row, "the fullest bucket" is all of them, so the oldest row goes, which can be the owner's pending TV;
+someone with about 20 buckets (addresses with `TRUST_PROXY` set, IPv6 grouped by /56, LAN devices, tailnet account
+slots) can keep doing that. The TV's password sign-in is the fallback.
 
 **Limits.** Their own `express-rate-limit` instances and `MemoryStore`s, none shared with `/login`: start 30 per 15
 minutes per socket address (`clientKey`, as `inviteLimiter`); poll 600 per 10 minutes per socket address; pending,

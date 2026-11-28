@@ -49,13 +49,21 @@ export function newUserCode(draw = randomInt) {
   return code;
 }
 
-// A typed code as it is looked up and stored: upper case, with every space and dash taken out, so `bcdf ghjk`,
-// `BCDF-GHJK` and `BCDFGHJK` are one code. Any dash: a phone's keyboard can turn `-` into an en dash (\p{Pd} is every
-// dash punctuation character). Null when the result is not exactly 8 symbols of the alphabet, or the input is not text;
-// the routes then look up nothing and answer the uniform 404, after the same work as an unknown code.
+// A typed code as it is looked up and stored, so `bcdf ghjk`, `BCDF-GHJK` and `BCDFGHJK` are one code. Exactly what is
+// taken out first: JavaScript's whitespace (\s: spaces, tabs, line breaks, the no-break and other Unicode space
+// separators, U+FEFF) and dash punctuation (\p{Pd}: the hyphen-minus, and the en dash a phone's keyboard may turn it
+// into). NOT the minus sign U+2212 (a math symbol, not dash punctuation) nor the zero-width space U+200B (a format
+// character, not whitespace): a code holding either is refused. What is left must be exactly 8 ASCII letters BEFORE it
+// is upper-cased (review of PR 1b, Codex and Opus): toUpperCase() maps some non-ASCII letters onto ASCII ones (the long
+// s U+017F becomes S, the ligatures U+FB05 and U+FB00 become ST and FF), so checking only after upper-casing accepted
+// strings that are not the code on the TV. Then it must be 8 symbols of the alphabet. Null otherwise, or when the input
+// is not text; the routes then look up nothing and answer the uniform 404, after the same work as an unknown code.
+const TYPED_CODE_SHAPE = /^[A-Za-z]{8}$/;
 export function normaliseUserCode(input) {
   if (typeof input !== 'string') return null;
-  const code = input.toUpperCase().replace(/[\s\p{Pd}]/gu, '');
+  const stripped = input.replace(/[\s\p{Pd}]/gu, '');
+  if (!TYPED_CODE_SHAPE.test(stripped)) return null;
+  const code = stripped.toUpperCase();
   return USER_CODE_PATTERN.test(code) ? code : null;
 }
 
@@ -69,22 +77,29 @@ export function displayUserCode(code) {
 // takes away is what could make the label LIE about itself on screen or in a log:
 //   * line breaks and other whitespace become a space (a label must be one line: the log line and the session row),
 //     then every other control character goes: C0, DEL and C1 (\p{Cc});
-//   * the bidirectional controls (U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069): with them, "VT moor gniviL"
-//     plus a right-to-left override shows as a different string from the one stored, and can reorder the text around it;
-//   * a lone UTF-16 surrogate (\p{Cs}), which is not text: SQLite would store it as a replacement character.
+//   * a lone UTF-16 surrogate (\p{Cs}), which is not text: SQLite would store it as a replacement character;
+//   * every FORMAT character (\p{Cf}) but one. That is the bidirectional controls (with a right-to-left override,
+//     "VT moor gniviL" shows as a different string from the one stored, and can reorder the text around it), the
+//     zero-width spaces, the word joiner U+2060, the invisible operators, the soft hyphen and the tag characters. None of
+//     them draws anything, so a label made of them shows blank, and with them a label can carry text nobody sees (review
+//     of PR 1b, Codex and Opus). The one kept is U+200D, the zero-width JOINER, which joins emoji into one picture (a
+//     family) and some scripts' letters;
+//   * the Hangul fillers U+115F, U+1160, U+3164 and U+FFA0: letters by category, but they draw nothing, and they are
+//     the usual way to make a name that looks blank.
 // Then runs of spaces (including the ones a removed character leaves side by side) become one, it is trimmed, and
-// clamped to LABEL_MAX_CHARS code points. Letters of every script, emoji and joiners are kept: a non-Latin label is
-// shown as typed (the design's §13). Null when nothing is left (the screens then say "a TV").
+// clamped to LABEL_MAX_CHARS code points. Letters of every script and emoji are kept: a non-Latin label is shown as
+// typed (the design's §13). Null when nothing visible is left (spaces and joiners alone count as nothing; the screens
+// then say "a TV"). Known losses, accepted: a flag built from tag characters (a few regional flags) is cut to its plain
+// black flag, and the zero-width NON-joiner U+200C goes, which some scripts use between letters (the word still reads).
 // Text only: the caller refuses anything that is not a string.
-const BIDI_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu;
-const CONTROLS_AND_LONE_SURROGATES = /[\p{Cc}\p{Cs}]/gu;
+const INVISIBLE = /(?!\u200D)[\p{Cc}\p{Cf}\p{Cs}\u115F\u1160\u3164\uFFA0]/gu;
+const SOMETHING_VISIBLE = /[^ \u200D]/u;
 export function sanitiseLabel(text) {
   const cleaned = text
     .replace(/\s/gu, ' ')
-    .replace(CONTROLS_AND_LONE_SURROGATES, '')
-    .replace(BIDI_CONTROLS, '')
+    .replace(INVISIBLE, '')
     .replace(/ {2,}/g, ' ')
     .trim();
   const clamped = Array.from(cleaned).slice(0, LABEL_MAX_CHARS).join('').trim();
-  return clamped || null;
+  return SOMETHING_VISIBLE.test(clamped) ? clamped : null;
 }

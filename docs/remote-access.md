@@ -180,10 +180,18 @@ is used instead — a typo here will never stop the app starting.
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
 else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
 
-**Except for a TV signed in with a code from outside your home network.** Pairing a TV is limited per source
-address only (the TV has no account yet), so without `TRUST_PROXY` every remote TV shares the proxy's budget
-and waiting slots, and one internet client can keep remote pairing busy. Set it if a TV pairs through your
-proxy ([the limits](mfa.md#signing-in-a-tv-1237)). A TV on your home network is not affected.
+**Pairing a TV with a code is different.** It is limited per source address only (the TV has no account yet),
+and both settings leave something open ([the limits](mfa.md#signing-in-a-tv-1237)):
+
+- **Without `TRUST_PROXY`**, everything that reaches Nightlight through your proxy has the proxy's address: every
+  internet client, and a TV at home too if it uses the proxy's hostname. They all share one budget and one set of
+  waiting slots, so one internet client can keep pairing busy for all of them. A TV at home that uses Nightlight's
+  own home-network address is kept apart from them.
+- **With `TRUST_PROXY` set**, each internet address is counted on its own. But someone with about 20 addresses
+  (easy with IPv6: Nightlight groups IPv6 addresses by /56, so a single /48 gives 256 of them) can fill the 20
+  waiting slots and push out any pairing that is still waiting, a TV at home included, and can keep doing it.
+
+Either way, the TV's own password sign-in still works.
 
 ### While a tunnel daemon is attached
 

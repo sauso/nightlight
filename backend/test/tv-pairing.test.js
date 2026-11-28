@@ -229,6 +229,40 @@ describe('★ #1237 pairing: codes', () => {
     assert.equal(displayUserCode('BCDFGHJK'), 'BCDF-GHJK');
   });
 
+  test('★ normaliseUserCode refuses letters that upper-case INTO the alphabet: the long s, the st and ff ligatures', () => {
+    // Written as code points, so no editor can swap them for look-alikes. (Review of PR 1b, Codex and Opus.)
+    const longS = String.fromCodePoint(0x17f);
+    const st = String.fromCodePoint(0xfb05);
+    const ff = String.fromCodePoint(0xfb00);
+    // The precondition that makes this a test: upper-casing maps each of them onto letters of the alphabet.
+    assert.equal(`BCDF-GHJ${longS}`.toUpperCase(), 'BCDF-GHJS');
+    assert.equal(`BCDF-GH${st}`.toUpperCase(), 'BCDF-GHST');
+    assert.equal(`BCDF-GH${ff}`.toUpperCase(), 'BCDF-GHFF');
+    for (const typed of [`BCDF-GHJ${longS}`, `bcdf-ghj${longS}`, `BCDF-GH${st}`, `BCDF-GH${ff}`, `${longS}sss-ssss`]) {
+      assert.equal(normaliseUserCode(typed), null, `${JSON.stringify(typed)} was taken for a code`);
+    }
+    // Exactly spaces and dash punctuation are taken out: not the minus sign, not a zero-width space.
+    for (const cp of [0x2212, 0x200b]) {
+      assert.equal(normaliseUserCode(`BCDF${String.fromCodePoint(cp)}GHJK`), null, `U+${cp.toString(16)}`);
+    }
+  });
+
+  test('★ sanitiseLabel takes out what draws nothing; an emoji family keeps its joiners; a label of nothing visible is null', () => {
+    // Code points, not literals: these characters are invisible in an editor (review of PR 1b, Codex and Opus).
+    const cp = (...points) => String.fromCodePoint(...points);
+    assert.equal(sanitiseLabel(`Living${cp(0x200b)} room${cp(0x2060)} TV`), 'Living room TV', 'a zero-width space or word joiner survived');
+    assert.equal(sanitiseLabel(`TV${cp(0xe0001, 0xe0068, 0xe0069, 0xe007f)}`), 'TV', 'tag characters (hidden text) survived');
+    assert.equal(sanitiseLabel(`T${cp(0xad)}V`), 'TV', 'a soft hyphen survived');
+    for (const filler of [0x115f, 0x1160, 0x3164, 0xffa0]) {
+      assert.equal(sanitiseLabel(`T${cp(filler)}V`), 'TV', `the Hangul filler U+${filler.toString(16)} survived`);
+    }
+    const family = cp(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467);
+    assert.equal(sanitiseLabel(`${family} TV`), `${family} TV`, 'the joiners of an emoji family were taken out');
+    for (const blank of [cp(0x200b, 0x200b), cp(0x3164), cp(0x2060, 0x200d), `${cp(0xe0020)} ${cp(0x115f)}`, cp(0x200d, 0x200d)]) {
+      assert.equal(sanitiseLabel(blank), null, `an invisible label was kept: ${JSON.stringify(blank)}`);
+    }
+  });
+
   test('a device code is 32 random bytes in base64url, stored as its sha256', () => {
     const a = newDeviceCode();
     assert.match(a, /^[A-Za-z0-9_-]{43}$/);
@@ -355,13 +389,16 @@ describe('★ #1237 pairing: POST /device/start', () => {
 describe('★ #1237 pairing: the caps on live pairings', () => {
   test('★ a fourth start from one bucket evicts that bucket\'s oldest UNAPPROVED pairing, and nothing in another bucket', async () => {
     const t0 = freezeClock();
+    // The other bucket's pairing is the OLDEST unapproved one of all (review of PR 1b): an eviction that forgot the
+    // bucket would take it, so this case can tell "this bucket's oldest" from "anybody's oldest".
+    const elsewhere = await started({ label: 'Elsewhere' }, { ip: '10.97.2.2' });
+    mock.timers.tick(1000);
     const tvs = [];
     for (let i = 0; i < 3; i++) {
       tvs.push(await started({ label: `TV ${i}` }, { ip: '10.97.2.1' }));
       mock.timers.tick(1000);
     }
-    const elsewhere = await started({ label: 'Elsewhere' }, { ip: '10.97.2.2' });
-    await approved(carerPhone, tvs[0]); // the oldest is approved, so it is passed over
+    await approved(carerPhone, tvs[0]); // the bucket's oldest is approved, so it is passed over
     mock.timers.setTime(t0 + 5000);
     const fourth = await started({ label: 'TV 3' }, { ip: '10.97.2.1' });
     assert.ok(pairingOf(tvs[0]), 'an APPROVED pairing was evicted');
@@ -431,6 +468,16 @@ describe('★ #1237 pairing: the caps on live pairings', () => {
     assert.ok(exists(full[0]), 'an approved pairing was evicted');
     assert.ok(exists(lonely) && exists(pair), 'a pairing of a less full bucket was taken');
     assert.equal(full.filter(exists).length, 17);
+    assert.equal(pairingRows().length, 20);
+  });
+
+  test('★ below 20 live pairings a start from a new bucket evicts nothing: 19 waiting, the 20th fits', async () => {
+    // Every bucket is under its own cap of 3, so only the global cap could evict here, and it must not until 20.
+    const held = [];
+    for (let i = 0; i < 19; i++) held.push(plantPairing({ bucket: `under-${i % 10}` }));
+    const fresh = await started(undefined, { ip: '10.97.6.2' });
+    assert.ok(pairingOf(fresh));
+    assert.deepEqual(held.filter((p) => !exists(p)).map((p) => p.id), [], 'a start under the global cap evicted a pairing');
     assert.equal(pairingRows().length, 20);
   });
 
@@ -621,11 +668,17 @@ describe('★ #1237 pairing: the one guarantee at claim', () => {
   test('★ a refused claim answers `denied` at once and stays denied; the next start clears it', async () => {
     const tv = await started();
     await approved(carerPhone, tv);
+    // An unrelated approved pairing, with a device code of its own, by a session that stays live: the refusal must mark
+    // only the pairing it refused (review of PR 1b).
+    const other = await started();
+    await approved(adminPhone, other);
     db.prepare('DELETE FROM sessions WHERE id = ?').run(carerPhone.sid);
     assert.deepEqual((await poll(tv.device_code)).body, DENIED);
+    assert.equal(pairingOf(other).denied_at, null, 'a refused claim marked another pairing denied');
     assert.deepEqual((await poll(tv.device_code)).body, DENIED, 'a refused pairing went back to something else');
     const row = pairingOf(tv);
     assert.notEqual(row.approved_at, null, 'the refused claim was not rolled back');
+    assert.equal((await poll(other.device_code)).body.status, 'approved', 'the unrelated pairing can no longer be collected');
     await started();
     assert.equal(pairingOf(tv), undefined);
     assert.deepEqual((await poll(tv.device_code)).body, EXPIRED);
@@ -701,12 +754,34 @@ describe('★ #1237 pairing: the cap of 5 live TV sessions per account', () => {
     await approved(carerPhone, tv);
   });
 
-  test('★ the claim checks it again: two approvals at 4, the first TV collected, the second denied', async () => {
-    for (let i = 0; i < 4; i++) handMadeTv('u-carer');
+  test('★ approvals not yet collected count too: one account approves 5 pairings, the 6th is 409 tv_limit, no TV session made', async () => {
+    // Review of PR 1b (Opus P2): approving is free and an approved pairing is never evicted, so counting TV sessions
+    // alone let one account approve its way into every waiting slot.
+    const tvs = [];
+    for (let i = 0; i < 6; i++) tvs.push(await started());
+    for (let i = 0; i < 5; i++) await approved(carerPhone, tvs[i]);
+    const sixth = await approve(carerPhone, tvs[5].user_code);
+    assert.equal(sixth.status, 409, JSON.stringify(sixth.body));
+    assert.deepEqual(sixth.body, { error: 'tv_limit' });
+    assert.equal(pairingOf(tvs[5]).approved_at, null, 'the refused approve was written');
+    assert.deepEqual(tvSessionsOf('u-carer'), [], 'a TV session was made');
+    // Collecting one turns an approval into a TV session: the account still holds five.
+    assert.equal((await poll(tvs[0].device_code)).body.status, 'approved');
+    assert.equal((await approve(carerPhone, tvs[5].user_code)).status, 409);
+    // Another account's budget is its own.
+    await approved(adminPhone, tvs[5]);
+  });
+
+  test('★ the claim checks it again: a TV signed in by password after two approvals, the first collected, the second denied', async () => {
+    // Three TVs, then two approvals (3 + 1 already approved = 4 at the second one, under the cap). A fourth TV signs in
+    // by password before either pairing is collected (a password sign-in is never refused by the cap), so by the claims
+    // the account holds 4: the first claim makes the 5th TV session, the second must be refused.
+    for (let i = 0; i < 3; i++) handMadeTv('u-carer');
     const a = await started();
     const b = await started();
     await approved(carerPhone, a);
     await approved(carerPhone, b);
+    handMadeTv('u-carer');
     assert.equal((await poll(a.device_code)).body.status, 'approved');
     assert.deepEqual((await poll(b.device_code)).body, DENIED);
     assert.equal(tvSessionsOf('u-carer').length, 5);
