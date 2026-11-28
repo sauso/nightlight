@@ -179,8 +179,11 @@ cut off), **not `req.baseUrl + req.path`**: on a router-root route Express gives
 path with a doubled slash, a dot segment, an encoded slash, an encoded dot or a backslash, before comparing (Express 5.3 already
 answers 404 to `//` paths; case and trailing-slash variants reach a handler, and an exact compare refuses them, the safe direction).
 Methods are compared exactly (`HEAD` counts as `GET` only for an allowed `GET` path; no method-override header is honoured anywhere).
-Entries are exact strings except **one**: HLS, `/hls/<one segment>-hls/<one file segment>`, matched by a small function with its own
-table-driven test (so "no pattern beyond an exact path" has one named exception).
+Entries are exact strings except the **three media shapes**: the two WHEP shapes, `/live/<camera path>/whep` and
+`/live/<camera path>/whep/<id>` (the same shapes `whepOnlyGuard` allows: the camera path and the session id cannot be exact
+strings), and HLS, `/hls/<one segment>-hls/<one file segment>`, all matched by one small function with its own table-driven
+test (so "no pattern beyond an exact path" has three named exceptions). *Corrected at build time (PR 1a): v3 said "except
+one: HLS", which the allowlist's own `/live` rows contradict.*
 
 No new middleware is mounted and the guard functions stay the same function objects, so `ROUTE_GATES` and `APP_REGISTRATIONS` in
 `route-permissions.test.js` stay valid.

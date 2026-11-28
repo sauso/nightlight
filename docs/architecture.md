@@ -248,6 +248,9 @@ tokens and the talk socket's `verifyToken`), push recipients (`lib/push.js`), th
 middlewares exist: `requireAuth` (Bearer header) and `requireAuthQueryOrHeader` (also accepts
 `?token=`, needed because Safari's native `<video>` fetches HLS segments itself with no way to
 attach headers). Roles are `admin` / `caregiver`; `requireAdmin` gates account/settings management.
+A session also has a **kind** (`sessions.kind`, #1237): `user` for every ordinary sign-in, or `tv` for a TV's
+view-only session, whose effective role is always `caregiver` and which may reach only a short allowlist (see
+"TV sessions" below).
 `cameras.js` and `children.js` gate the whole router with `router.use(requireAuth)`, which covers only
 the routes registered *after* it: cameras.js's four media routes sit above that line on purpose, so
 moving a route across it changes who can reach it.
@@ -292,7 +295,8 @@ guesses. User-facing rules: [mfa.md](mfa.md#confirming-a-set-up-has-limits-of-it
 **Every route's gate is pinned** by `backend/test/route-permissions.test.js` (issue #563). It enumerates
 the real route table (index.js's registrations read from its source, and every mounted router's actual
 `router.stack`), classifies each route as public / optional / media / signed-in / signed-in+admin, and
-compares that with a hand-written table in both directions. It then checks over real HTTP that anonymous
+compares that with a hand-written table (`backend/test/helpers/routeGates.js`, shared with the TV session's route
+walk since #1237) in both directions. It then checks over real HTTP that anonymous
 callers get 401, an admin's media-scoped token gets 401 on every session route, and a caregiver gets 403
 on every admin route. Adding a route, or adding, removing or reordering a `requireAuth`/`requireAdmin`,
 fails that test until the table is edited on purpose, which puts every permission change in a diff a
@@ -451,6 +455,64 @@ that MediaMTX kept across a backend restart has no recorded owner and is not clo
 before the disable (a request already past its auth check) can still finish. Demo mode blocks the route (an unlisted
 mutation). Tests: `account-disable.test.js`, plus the `#1233` cases in `auth-middleware.test.js`, `talk-socket.test.js`,
 `push.test.js` and `push-public-url.test.js`.
+
+### TV sessions (#1237)
+
+A TV (the Android TV screen, `/tv`) is meant to sign in with a **view-only** session: it can watch and listen to the
+cameras and do nothing else. This version has that kind of session, but **nothing creates one yet**: signing a TV in
+with a code from a phone is the next change (design: `planning/tv-pairing-design.md`). User-facing rules arrive with it.
+
+**Data.** `sessions` gains four columns in one guarded `ALTER` group (`db.js`): `kind` (TEXT NOT NULL, default
+`'user'`, so every existing session is an ordinary one), `label` (what the TV called itself), `paired_by_session` (the
+id of the session that approved it; no foreign key, see "Revoking" below) and `paired_from` (the approving device, as
+`describeDevice` text). `createSession(userId, userAgent, { kind, label, pairedBySession, pairedFrom })` refuses any
+kind but `user` and `tv`; every existing caller passes two arguments and gets an ordinary session.
+
+**Effective role.** `sessionWithUser` reads the kind and `CASE WHEN s.kind = 'tv' THEN 'caregiver' ELSE u.role END`, so
+a TV is a caregiver everywhere a session is read (`requireAuth`, `requireAuthQueryOrHeader`, `verifyToken` and with it
+`optionalAuth` and the Tailscale re-checks), whatever its account's role. `req.user.kind` carries the kind.
+`GET /api/auth/me` answers with the session's effective role (the same as before for an ordinary session) and adds
+`kind: 'tv'` for a TV; an ordinary session's answer keeps its exact shape.
+
+**The allowlist** (`tvAllowed`, `middleware/auth.js`). Once the session is found, `requireAuth` and
+`requireAuthQueryOrHeader` answer a TV `403 { "error": "...", "code": "TV_SESSION_RESTRICTED" }` for everything except:
+
+| Method and path | What the TV screen uses it for |
+|---|---|
+| `GET /api/auth/me`, `POST /api/auth/media-token`, `POST /api/auth/logout` | its sign-in, the media token, signing out |
+| `GET /api/about`, `GET /api/settings` | the STUN servers, the app name |
+| `GET /api/cameras` | the tiles and their status |
+| `POST /live/<camera path>/whep`, `DELETE /live/<camera path>/whep/<id>` | WebRTC viewing |
+| `GET /hls/<camera path>-hls/<one file>` (and `HEAD`) | the HLS fallback, with the media token |
+
+The method and the path are compared exactly. The path is the part of `req.originalUrl` before `?`, not
+`req.baseUrl + req.path`, which gives `/api/cameras/` on a router-root route. A path that is not plain is refused before
+any compare: an empty segment (a doubled or trailing slash), a `.` or `..` segment, or any character outside letters,
+digits, `_`, `.` and `-` (so any percent-encoding and any backslash). Express would route `/API/cameras` or
+`/api/cameras/` to the list, and the TV is refused those too. 403, not 401, because the web app treats any 401 as
+"signed out". `optionalAuth` has no allowlist (a TV is a signed-in caregiver there), and public routes read no session.
+
+**Talk-back.** `verifyToken(token, { purpose: 'media' })` returns null for a TV session, so the `/api/talk` handshake
+and its 15-second re-check both refuse a TV's media token. A TV's media token reaches HLS and nothing else: the
+snapshot, clip, timelapse and recording routes sit behind `requireAuthQueryOrHeader` and are not on the list.
+
+**Smaller answers.** For a TV, `GET /api/cameras` returns only `id`, `name`, `mediamtx_path`, `disabled` and `status`
+(`ready`, plus `unknown: true` when MediaMTX did not answer in time), built field by field: the caregiver shape also
+carries the camera's LAN address, bed zone, assigned child, MQTT readings and who muted it. `GET /api/about` returns
+only `stunServers`. `GET /api/settings` returns the caregiver's seven public fields.
+
+**Revoking.** `DELETE /api/auth/sessions/:id` also deletes, in the same transaction, the sessions of the same account
+whose `paired_by_session` is that id (and their push registrations). A plain `POST /logout` does not: signing a phone
+out must not switch the TV off, which is why `paired_by_session` has no `ON DELETE CASCADE`. The other paths that end
+sessions (a password change or reset, disabling or removing the account, redeeming an invite) already end TV sessions
+with the rest and are unchanged. Both session lists add `kind`, `label` and `paired_from` to every row (null for an
+ordinary session); `paired_by_session` is not sent.
+
+**Known limit.** An older version ignores `kind`, so going back to one would turn a TV session into an ordinary
+session with its account's real role. That matters from the release that can create TV sessions. Tests:
+`tv-session.test.js` (every pinned route walked as a TV over the real routers, `tvAllowed` table-driven, the `/live`
+and `/hls` shapes, the projections against hostile values in every other column, the revoke cascade), plus the `#1237`
+cases in `talk-socket.test.js` and `alert-hold-migration.test.js`.
 
 ## Data layer (`backend/src/db.js`)
 

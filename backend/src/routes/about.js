@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, isTvRequest } from '../middleware/auth.js';
 import { parseStunServers } from '../lib/stunServers.js';
 import { getPublicBaseUrl } from '../lib/push.js';
 import { mediaIsolationOn } from '../lib/childEnv.js';
@@ -69,10 +69,18 @@ function isolationDetail() {
 
 const router = Router();
 
+// A TV session (#1237; planning/tv-pairing-design.md §6.4) gets `stunServers` and nothing else: it is all the TV screen
+// reads from here (lib/iceServers.js, for the live player). The rest is for the About page and an admin's phone: the
+// version and build (which help someone match a known vulnerability), the address this server stamps into its alert
+// links, and the media-isolation and data-layout state of the host. (The phone app's server-switch prompt also reads
+// `publicBaseUrl` from here; on a TV it is simply absent, which that code already treats as "no advertised address".)
 router.get('/', requireAuth, (req, res) => {
   // stunServers (#558): the ICE servers the live-view player must use, from the STUN_SERVERS setting. Here
   // (signed-in, and already fetched by the app) rather than baked into the frontend build, so the browser
   // follows the operator's setting. Read per request, not at load, so a test can change the environment.
+  // Parsed once for both answers below, so a TV and a phone cannot be told different lists.
+  const stunServers = parseStunServers(process.env.STUN_SERVERS).urls;
+  if (isTvRequest(req)) return res.json({ stunServers });
   // publicBaseUrl (#559): the address this server stamps into its own alert links (getPublicBaseUrl), or null.
   // The app compares an alert's address with it, so a household that reaches the server by two addresses is
   // not asked to "switch" to the server it is already on. Read per request: an admin's phone can change it.
@@ -87,7 +95,7 @@ router.get('/', requireAuth, (req, res) => {
   res.json({
     version,
     ...build,
-    stunServers: parseStunServers(process.env.STUN_SERVERS).urls,
+    stunServers,
     publicBaseUrl: getPublicBaseUrl(),
     mediaIsolation: mediaIsolationOn() ? 'on' : 'off',
     mediaIsolationReason: isolationReason(),

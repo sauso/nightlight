@@ -9,7 +9,7 @@ import path from 'node:path';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import {
-  requireAuth, requireAdmin, JWT_SECRET, SESSION_TOKEN_TTL_DAYS, sessionAgeCondition, isLiveSessionId,
+  requireAuth, requireAdmin, JWT_SECRET, SESSION_TOKEN_TTL_DAYS, sessionAgeCondition, isLiveSessionId, isTvRequest,
 } from '../middleware/auth.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
 import {
@@ -510,9 +510,20 @@ function describeDevice(userAgent) {
   return `${browser} on ${os}`;
 }
 
-function createSession(userId, userAgent) {
+// The kinds a session can be (#1237): 'user', every sign-in so far, and 'tv', a TV's view-only session (what it may
+// reach: tvAllowed in middleware/auth.js). Checked here, the one place a session is inserted, so an unknown kind (a
+// typo, 'TV') can never be stored: sessionWithUser forces the caregiver role only for exactly 'tv', so a misspelt kind
+// would otherwise be a FULL session with the account's real role.
+const SESSION_KINDS = new Set(['user', 'tv']);
+// Every existing caller passes two arguments and gets an ordinary session, exactly as before. The options are for the
+// TV pairing (the next change); nothing in this version passes them except the tests, which make TV sessions with it.
+// Exported for those tests and for that change.
+export function createSession(userId, userAgent, { kind = 'user', label = null, pairedBySession = null, pairedFrom = null } = {}) {
+  if (!SESSION_KINDS.has(kind)) throw new Error(`createSession: unknown session kind ${JSON.stringify(kind)}`);
   const id = uuid();
-  db.prepare('INSERT INTO sessions (id, user_id, user_agent) VALUES (?, ?, ?)').run(id, userId, userAgent || null);
+  db.prepare(
+    'INSERT INTO sessions (id, user_id, user_agent, kind, label, paired_by_session, paired_from) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, userId, userAgent || null, kind, label, pairedBySession, pairedFrom);
   return id;
 }
 
@@ -550,6 +561,13 @@ function toPublicSession(s, currentSessionId) {
     created_at: s.created_at,
     last_seen_at: s.last_seen_at,
     is_current: s.id === currentSessionId,
+    // #1237, added keys only (an open page ignores them): 'user' or 'tv', and for a TV what it called itself and the
+    // device that approved it (planning/tv-pairing-design.md §8). Both null for an ordinary session. The label is
+    // whatever the TV sent, so a screen shows it as text, never as markup. `paired_by_session` is NOT sent: it is
+    // another session's id, and nothing on screen needs it.
+    kind: s.kind,
+    label: s.label ?? null,
+    paired_from: s.paired_from ?? null,
     ...(s.username ? { username: s.username } : {}),
   };
 }
@@ -849,10 +867,16 @@ router.post('/logout', requireAuth, (req, res) => {
   res.status(204).end();
 });
 
+// The role is the SESSION's effective role (req.user.role, read by sessionWithUser in middleware/auth.js), not the
+// account row's: the same value for an ordinary session, and `caregiver` for a TV session whatever its account is
+// (#1237), so the web app's role gates never show an admin screen on a TV. A TV session also gets `kind: 'tv'`; an
+// ordinary one keeps the exact shape it has always had (account-disable.test.js pins it), and a screen reads a
+// missing `kind` as an ordinary session.
 router.get('/me', requireAuth, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json(toPublicUser(user));
+  const me = { ...toPublicUser(user), role: req.user.role };
+  res.json(isTvRequest(req) ? { ...me, kind: 'tv' } : me);
 });
 
 // Mint a media token for the current session (see signMediaToken). requireAuth guarantees a real
@@ -875,6 +899,29 @@ router.get('/sessions/all', requireAuth, requireAdmin, (req, res) => {
   res.json(sessions.map((s) => toPublicSession(s, req.user.sid)));
 });
 
+// Revoking a session also ends the TV sessions it paired (#1237; planning/tv-pairing-design.md §3 row 14, §8). A TV
+// paired from a phone would otherwise outlive the phone's session: someone holding a stolen or unlocked phone could
+// pair a TV that keeps watching for up to SESSION_TTL_DAYS after "Sign out this device" ended everything else that
+// session could do. ONLY here: a plain sign-out (/logout) does not cascade, so signing a phone out does not switch the
+// living-room TV off. The other paths that end sessions are unchanged and already end TV sessions with the rest: a
+// password change or reset (every session of the account but the one making the change), disabling or removing the
+// account, and an invite being redeemed. A pairing session that simply reaches the end of its lifetime does NOT end its
+// TV, which has a lifetime of its own (the design's §13: a session on day 29 can pair a TV that lasts to day 59).
+// One transaction, so a revoke that fails half-way leaves the TV sessions too. `user_id = ?` (the revoked session's
+// own account): a TV signs in as the person who approved it, so its row always has that account; the condition keeps
+// the cascade from ever reaching another account's session, whatever a row says. Push registrations first, as on
+// every other revocation path (push_tokens has no foreign key to sessions).
+const revokeSession = db.transaction((sessionId, userId) => {
+  db.prepare(
+    'DELETE FROM push_tokens WHERE session_id IN (SELECT id FROM sessions WHERE paired_by_session = ? AND user_id = ?)'
+  ).run(sessionId, userId);
+  db.prepare('DELETE FROM sessions WHERE paired_by_session = ? AND user_id = ?').run(sessionId, userId);
+  // Same reasoning as /logout above - ending a session (here, possibly someone ELSE'S device)
+  // must also stop that device's push registration.
+  db.prepare('DELETE FROM push_tokens WHERE session_id = ?').run(sessionId);
+  db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+});
+
 // Terminate a session - your own, or (admins only) anyone's.
 router.delete('/sessions/:id', requireAuth, (req, res) => {
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id);
@@ -882,10 +929,7 @@ router.delete('/sessions/:id', requireAuth, (req, res) => {
   if (session.user_id !== req.user.id && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Not allowed' });
   }
-  // Same reasoning as /logout above - ending a session (here, possibly someone ELSE'S device)
-  // must also stop that device's push registration.
-  db.prepare('DELETE FROM push_tokens WHERE session_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM sessions WHERE id = ?').run(req.params.id);
+  revokeSession(req.params.id, session.user_id);
   res.status(204).end();
 });
 

@@ -31,6 +31,7 @@ mock.module('../src/lib/twoWayAudio.js', {
 
 const { default: db } = await import('../src/db.js');
 const { handleTalkConnection, TALK_REVALIDATE_MS } = await import('../src/lib/talkSocket.js');
+const { verifyToken } = await import('../src/middleware/auth.js');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const signMedia = (userId, sessionId, opts = {}) =>
@@ -208,6 +209,30 @@ describe('★ talk-back access is re-checked while the socket stays open (GHSA-6
     ws.emit('message', AUDIO, true);
     assert.equal(fakeSession.write.mock.callCount(), 1, 'no audio may be forwarded once the account is disabled');
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE id = ?').get(sid).n, 1, 'the fixture lost its session row');
+  });
+
+  test('★ #1237 a TV session\'s media token never talks: the handshake check refuses it, and an open call closes at the next re-check', async (t) => {
+    // A TV session made by hand (nothing in this version creates one): the row's kind is all that differs from the
+    // baseline above. The handshake in index.js calls exactly verifyToken(token, { purpose: 'media' }); the socket below
+    // stands for a handshake that let it through anyway, which the re-check (the same call) must then close.
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const user = makeUser(db, { id: 'u-8', username: 'admin' });
+    const sid = makeSession(db, user.id, { id: 's-8' });
+    db.prepare("UPDATE sessions SET kind = 'tv' WHERE id = ?").run(sid);
+    const token = signMedia(user.id, sid);
+    assert.equal(verifyToken(token, { purpose: 'media' }), null, 'the talk-back handshake check accepts a TV media token');
+    const phoneSid = makeSession(db, user.id, { id: 's-8-phone' });
+    assert.ok(verifyToken(signMedia(user.id, phoneSid), { purpose: 'media' }), 'control: the same account\'s ordinary media token');
+
+    const ws = fakeWs();
+    handleTalkConnection(ws, camera(), { username: user.username }, token);
+    await Promise.resolve();
+    t.mock.timers.tick(TALK_REVALIDATE_MS);
+    await Promise.resolve();
+
+    assert.equal(ws.close.mock.callCount(), 1, 'an open call on a TV media token must close at the re-check');
+    ws.emit('message', AUDIO, true);
+    assert.equal(fakeSession.write.mock.callCount(), 0, 'no audio may be forwarded on a TV media token');
   });
 
   test('a naturally-expired media token has the same effect, with no revocation action at all', async (t) => {

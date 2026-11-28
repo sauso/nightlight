@@ -3995,8 +3995,8 @@
   {
     "label": "#E2 M11: createSession stores a placeholder string instead of NULL for a missing User-Agent",
     "file": "backend/src/routes/auth.js",
-    "find": "  db.prepare('INSERT INTO sessions (id, user_id, user_agent) VALUES (?, ?, ?)').run(id, userId, userAgent || null);",
-    "replace": "  db.prepare('INSERT INTO sessions (id, user_id, user_agent) VALUES (?, ?, ?)').run(id, userId, userAgent || 'unknown-ua-placeholder');",
+    "find": "  ).run(id, userId, userAgent || null, kind, label, pairedBySession, pairedFrom);",
+    "replace": "  ).run(id, userId, userAgent || 'unknown-ua-placeholder', kind, label, pairedBySession, pairedFrom);",
     "expect": "killed",
     "tests": [
       "auth-routes-branches.test.js"
@@ -19590,8 +19590,8 @@
   {
     "label": "#558 STUN about: /api/about reports the default list whatever STUN_SERVERS says",
     "file": "backend/src/routes/about.js",
-    "find": "stunServers: parseStunServers(process.env.STUN_SERVERS).urls",
-    "replace": "stunServers: ['stun:stun.l.google.com:19302']",
+    "find": "  const stunServers = parseStunServers(process.env.STUN_SERVERS).urls;",
+    "replace": "  const stunServers = ['stun:stun.l.google.com:19302'];",
     "expect": "killed",
     "tests": [
       "stun-servers.test.js"
@@ -26941,5 +26941,91 @@
     "expect": "killed",
     "tests": ["sleep-report.test.js"],
     "namePattern": "steady, up and down at each floor"
+  },
+  {
+    "label": "#1237 TV: the effective role is the account's (an admin's TV is an admin everywhere)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "CASE WHEN s.kind = 'tv' THEN 'caregiver' ELSE u.role END AS role",
+    "replace": "u.role AS role",
+    "expect": "killed",
+    "tests": ["tv-session.test.js"],
+    "namePattern": "EFFECTIVE role caregiver|public seven|as a caregiver of kind tv",
+    "note": "The role is forced in sessionWithUser, so /me, /settings (optionalAuth) and verifyToken all see it; the projection fixture's account is an admin."
+  },
+  {
+    "label": "#1237 TV: requireAuth skips the TV allowlist",
+    "file": "backend/src/middleware/auth.js",
+    "find": "    // #1237: after the session is found, so a dead TV token is the usual 401 and only a live one is told \"not here\".\r\n    if (sess.kind === 'tv' && !tvAllowed(req)) return refuseTv(res);",
+    "replace": "    // #1237: after the session is found, so a dead TV token is the usual 401 and only a live one is told \"not here\".\r\n    if (false) return refuseTv(res);",
+    "expect": "killed",
+    "tests": ["tv-session.test.js"],
+    "namePattern": "everywhere but the allowlist"
+  },
+  {
+    "label": "#1237 TV: requireAuthQueryOrHeader skips the TV allowlist (a TV media token reaches snapshots, clips, recordings)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "    // snapshot, clip, timelapse and recording routes behind this guard are not on the list.\r\n    if (sess.kind === 'tv' && !tvAllowed(req)) return refuseTv(res);",
+    "replace": "    // snapshot, clip, timelapse and recording routes behind this guard are not on the list.\r\n    if (false) return refuseTv(res);",
+    "expect": "killed",
+    "tests": ["tv-session.test.js"],
+    "namePattern": "everywhere but the allowlist",
+    "note": "Killed by the walk's ?token= request on every MEDIA route."
+  },
+  {
+    "label": "#1237 TV: tvAllowed compares baseUrl + path instead of the path part of originalUrl",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  const url = typeof req?.originalUrl === 'string' ? req.originalUrl : '';",
+    "replace": "  const url = `${req?.baseUrl ?? ''}${req?.path ?? ''}`;",
+    "expect": "killed",
+    "tests": ["tv-session.test.js"],
+    "namePattern": "everywhere but the allowlist|accepts each allowlist entry",
+    "note": "On a router-root route Express 5.3 gives baseUrl /api/cameras and path /, so the pair rebuilds /api/cameras/ and the TV loses its camera list (second design review, Opus M3)."
+  },
+  {
+    "label": "#1237 TV: the allowlist's default is allow",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  return TV_PATTERNS.some(([m, pattern]) => m === method && pattern.test(path));",
+    "replace": "  return true;",
+    "expect": "killed",
+    "tests": ["tv-session.test.js"],
+    "namePattern": "everywhere but the allowlist|refuses wrong methods"
+  },
+  {
+    "label": "#1237 TV: a dot segment passes the plain-path check",
+    "file": "backend/src/middleware/auth.js",
+    "find": "  if (path.split('/').some((segment) => segment === '.' || segment === '..')) return false;",
+    "replace": "  if (false) return false;",
+    "expect": "killed",
+    "tests": ["tv-session.test.js"],
+    "namePattern": "refuses wrong methods|every other shape is refused",
+    "note": "The WHEP session id and the HLS file segment both match `..`: DELETE /live/<path>/whep/.. and GET /hls/<path>-hls/.. would be proxied."
+  },
+  {
+    "label": "#1237 TV: verifyToken lets a TV media token open the talk-back socket",
+    "file": "backend/src/middleware/auth.js",
+    "find": "    if (purpose === 'media' && sess.kind === 'tv') return null;",
+    "replace": "    if (false) return null;",
+    "expect": "killed",
+    "tests": ["tv-session.test.js", "talk-socket.test.js"],
+    "namePattern": "for the media purpose|media token never talks"
+  },
+  {
+    "label": "#1237 TV: revoking a session leaves the TV sessions it paired",
+    "file": "backend/src/routes/auth.js",
+    "find": "  db.prepare('DELETE FROM sessions WHERE paired_by_session = ? AND user_id = ?').run(sessionId, userId);",
+    "replace": "  void db;",
+    "expect": "killed",
+    "tests": ["tv-session.test.js"],
+    "namePattern": "ends the TV sessions it paired"
+  },
+  {
+    "label": "#1237 TV: the camera list answers a TV with the caregiver shape",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  if (isTvRequest(req)) return res.json(await Promise.all(cameras.map(tvCamera)));",
+    "replace": "  if (false) return res.json(await Promise.all(cameras.map(tvCamera)));",
+    "expect": "killed",
+    "tests": ["tv-session.test.js"],
+    "namePattern": "only id, name, mediamtx_path",
+    "note": "The caregiver shape carries the camera's LAN address, bed zone, assigned child, MQTT readings and who muted it (the design's §6.4)."
   }
 ]
